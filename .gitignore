@@ -4,4 +4,7 @@ __pycache__/
 *.pyc
 /data/
 graphify-out/
+*.jsonl
+*.README.md
+!README.md
 

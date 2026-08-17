@@ -269,8 +269,48 @@ struct TaskEntry {
 struct ChatRequest {
     model: String,
     messages: Vec<ChatMessage>,
-    temperature: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_completion_tokens: Option<u64>,
+    /// Omniroute/GPT-5 default to SSE unless this is explicit.
+    stream: bool,
+}
+
+/// GPT-5 / o-series / luna reject `temperature` and `max_tokens` (OpenAI sampling rules).
+fn restricted_sampling(model: &str) -> bool {
+    let m = model.to_ascii_lowercase();
+    let name = m.rsplit('/').next().unwrap_or(&m);
+    name.contains("gpt-5")
+        || name.contains("gpt5")
+        || name.contains("luna")
+        || name.starts_with("o1")
+        || name.starts_with("o3")
+        || name.starts_with("o4")
+}
+
+fn chat_request(model: &str, messages: Vec<ChatMessage>, temperature: f64, max_out: u64) -> ChatRequest {
+    if restricted_sampling(model) {
+        ChatRequest {
+            model: model.to_string(),
+            messages,
+            temperature: None,
+            max_tokens: None,
+            max_completion_tokens: Some(max_out),
+            stream: false,
+        }
+    } else {
+        ChatRequest {
+            model: model.to_string(),
+            messages,
+            temperature: Some(temperature),
+            max_tokens: Some(max_out),
+            max_completion_tokens: None,
+            stream: false,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -279,22 +319,150 @@ struct ChatMessage {
     content: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct ChatResponse {
-    usage: Option<Usage>,
-    choices: Vec<Choice>,
+fn truncate_body(s: &str, n: usize) -> String {
+    let s = s.trim();
+    let mut t: String = s.chars().take(n).collect();
+    if t.len() < s.len() {
+        t.push_str(&format!("… ({} bytes)", s.len()));
+    }
+    t.replace('\n', " ")
 }
 
-#[derive(Debug, Deserialize)]
-struct Usage {
-    prompt_tokens: u64,
-    completion_tokens: u64,
-    total_tokens: u64,
+fn json_u64(v: &serde_json::Value, keys: &[&str]) -> u64 {
+    for key in keys {
+        match v.get(*key) {
+            Some(serde_json::Value::Number(n)) => {
+                if let Some(u) = n.as_u64() {
+                    return u;
+                }
+                if let Some(f) = n.as_f64() {
+                    return f.max(0.0) as u64;
+                }
+            }
+            Some(serde_json::Value::String(s)) => {
+                if let Ok(u) = s.parse::<u64>() {
+                    return u;
+                }
+            }
+            _ => {}
+        }
+    }
+    0
 }
 
-#[derive(Debug, Deserialize)]
-struct Choice {
-    message: ChatMessage,
+fn content_from_value(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::String(s) if !s.trim().is_empty() => Some(s.clone()),
+        serde_json::Value::Array(parts) => {
+            let mut out = String::new();
+            for p in parts {
+                if let Some(t) = p.get("text").and_then(|x| x.as_str()) {
+                    out.push_str(t);
+                } else if let Some(s) = p.as_str() {
+                    out.push_str(s);
+                }
+            }
+            let t = out.trim();
+            if t.is_empty() { None } else { Some(t.to_string()) }
+        }
+        _ => None,
+    }
+}
+
+fn append_choice_text(buf: &mut String, v: &serde_json::Value) {
+    let Some(choices) = v.get("choices").and_then(|c| c.as_array()) else { return };
+    let Some(c0) = choices.first() else { return };
+    if let Some(delta) = c0.get("delta") {
+        for key in ["content", "reasoning_content", "reasoning"] {
+            if let Some(s) = delta.get(key).and_then(content_from_value) {
+                buf.push_str(&s);
+            }
+        }
+    }
+    if let Some(msg) = c0.get("message") {
+        for key in ["content", "reasoning_content", "reasoning"] {
+            if let Some(s) = msg.get(key).and_then(content_from_value) {
+                if buf.is_empty() {
+                    buf.push_str(&s);
+                }
+            }
+        }
+    }
+    if buf.is_empty() {
+        if let Some(s) = c0.get("text").and_then(content_from_value) {
+            buf.push_str(&s);
+        }
+    }
+}
+
+fn parse_chat_payload(raw: &str) -> Result<(String, u64, u64)> {
+    let t = raw.trim_start();
+    if t.starts_with("data:") {
+        let mut text = String::new();
+        let mut usage = (0u64, 0u64);
+        for line in t.lines() {
+            let Some(payload) = line.trim().strip_prefix("data:") else { continue };
+            let payload = payload.trim();
+            if payload.is_empty() || payload == "[DONE]" {
+                continue;
+            }
+            let v: serde_json::Value = serde_json::from_str(payload)
+                .with_context(|| format!("bad SSE chunk: {}", truncate_body(payload, 200)))?;
+            if let Some(err) = v.get("error") {
+                if !err.is_null() {
+                    bail!("API error payload: {}", err);
+                }
+            }
+            append_choice_text(&mut text, &v);
+            let u = extract_usage(&v);
+            if u != (0, 0) {
+                usage = u;
+            }
+        }
+        let text = text.trim().to_string();
+        if text.is_empty() {
+            bail!("no completion text in streamed API response");
+        }
+        return Ok((text, usage.0, usage.1));
+    }
+
+    let value: serde_json::Value = serde_json::from_str(raw)?;
+    let mut text = String::new();
+    append_choice_text(&mut text, &value);
+    if text.trim().is_empty() {
+        text = extract_completion(&value)?;
+    }
+    let usage = extract_usage(&value);
+    Ok((text.trim().to_string(), usage.0, usage.1))
+}
+
+fn extract_completion(v: &serde_json::Value) -> Result<String> {
+    if let Some(err) = v.get("error") {
+        if !err.is_null() {
+            bail!("API error payload: {}", err);
+        }
+    }
+    let mut buf = String::new();
+    append_choice_text(&mut buf, v);
+    if !buf.trim().is_empty() {
+        return Ok(buf.trim().to_string());
+    }
+    if let Some(output) = v.get("output").and_then(|o| o.as_array()) {
+        for item in output {
+            if let Some(s) = item.get("content").and_then(content_from_value) {
+                return Ok(s.trim().to_string());
+            }
+        }
+    }
+    bail!("no completion text in API response")
+}
+
+fn extract_usage(v: &serde_json::Value) -> (u64, u64) {
+    let Some(u) = v.get("usage") else { return (0, 0) };
+    (
+        json_u64(u, &["prompt_tokens", "input_tokens"]),
+        json_u64(u, &["completion_tokens", "output_tokens"]),
+    )
 }
 
 const MAX_MODEL_FAILURES: usize = 3;
@@ -572,15 +740,15 @@ async fn fetch_free_models(client: &reqwest::Client, api_key: &str) -> Result<Ve
 }
 
 async fn test_model(client: &reqwest::Client, api_key: &str, model: &str) -> Result<()> {
-    let body = ChatRequest {
-        model: model.to_string(),
-        messages: vec![ChatMessage {
+    let body = chat_request(
+        model,
+        vec![ChatMessage {
             role: "user".into(),
             content: "Say hi.".into(),
         }],
-        temperature: 0.0,
-        max_tokens: Some(5),
-    };
+        0.0,
+        5,
+    );
 
     let url = format!("{}/chat/completions", OPENROUTER_API_BASE);
     let resp = client
@@ -605,11 +773,8 @@ async fn test_model(client: &reqwest::Client, api_key: &str, model: &str) -> Res
         bail!("{}: {}", status, &text[..text.len().min(100)]);
     }
 
-    let chat_resp: ChatResponse = resp.json().await.context("bad response")?;
-    if chat_resp.choices.is_empty() {
-        bail!("no choices returned");
-    }
-
+    let raw = resp.text().await.unwrap_or_default();
+    parse_chat_payload(&raw).context("bad response")?;
     Ok(())
 }
 
@@ -687,6 +852,7 @@ async fn api_request(
         .post(url)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
         .json(body)
         .send()
         .await;
@@ -720,23 +886,13 @@ async fn api_request(
         return Err(ApiError::Other(anyhow::anyhow!("API error {}: {}", status, text)));
     }
 
-    let chat_resp: ChatResponse = resp
-        .json()
+    let raw = resp
+        .text()
         .await
-        .map_err(|e| ApiError::Other(anyhow::anyhow!("failed to parse API response: {}", e)))?;
-    let choice = chat_resp
-        .choices
-        .into_iter()
-        .next()
-        .ok_or_else(|| ApiError::Other(anyhow::anyhow!("no choices in response")))?;
-    let prompt_text = choice.message.content.trim().to_string();
-
-    let (input_tokens, output_tokens) = match chat_resp.usage {
-        Some(u) => (u.prompt_tokens, u.completion_tokens),
-        None => (0, 0),
-    };
-
-    Ok((prompt_text, input_tokens, output_tokens))
+        .map_err(|e| ApiError::Other(anyhow::anyhow!("failed to read API response: {}", e)))?;
+    parse_chat_payload(&raw).map_err(|e| {
+        ApiError::Other(anyhow::anyhow!("{} | body: {}", e, truncate_body(&raw, 500)))
+    })
 }
 
 const MAX_RETRIES: u32 = 5;
@@ -772,15 +928,15 @@ async fn generate_task(
         lang_instruction
     );
 
-    let body = ChatRequest {
-        model: model.to_string(),
-        messages: vec![
+    let body = chat_request(
+        model,
+        vec![
             ChatMessage { role: "system".into(), content: system_prompt.into() },
             ChatMessage { role: "user".into(), content: user_msg },
         ],
         temperature,
-        max_tokens: Some(2048),
-    };
+        2048,
+    );
 
     let url = format!("{}/chat/completions", api_base.trim_end_matches('/'));
 
@@ -1416,10 +1572,63 @@ async fn main() -> Result<()> {
     };
 
     let readme = generate_readme(&args, &stats, &dist, &diff_dist, lang_counts.as_ref());
-    let readme_path = args.output.parent().unwrap_or(std::path::Path::new(".")).join("README.md");
-    let mut rf = File::create(&readme_path).context("failed to create README.md")?;
+    let out_dir = args.output.parent().unwrap_or(std::path::Path::new("."));
+    let stem = args.output.file_stem().unwrap_or_default().to_string_lossy();
+    let readme_path = out_dir.join(format!("{}.README.md", stem));
+    let mut rf = File::create(&readme_path).context("failed to create dataset README")?;
     rf.write_all(readme.as_bytes())?;
-    println!("README.md written to {}", readme_path.display());
+    println!("dataset README written to {}", readme_path.display());
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_openai_string_content() {
+        let v: serde_json::Value = serde_json::from_str(r#"{
+            "choices": [{"message": {"role": "assistant", "content": "hello"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}
+        }"#).unwrap();
+        assert_eq!(extract_completion(&v).unwrap(), "hello");
+        assert_eq!(extract_usage(&v), (1, 2));
+    }
+
+    #[test]
+    fn extracts_content_parts_and_null_usage_fields() {
+        let v: serde_json::Value = serde_json::from_str(r#"{
+            "choices": [{"message": {"content": [{"type": "text", "text": "part a"}, {"type": "text", "text": "part b"}]}}],
+            "usage": {"prompt_tokens": null, "completion_tokens": "7", "input_tokens": 4}
+        }"#).unwrap();
+        assert_eq!(extract_completion(&v).unwrap(), "part apart b");
+        assert_eq!(extract_usage(&v), (4, 7));
+    }
+
+    #[test]
+    fn surfaces_error_payload() {
+        let v: serde_json::Value = serde_json::from_str(r#"{"error": {"message": "max_tokens not supported"}}"#).unwrap();
+        let err = extract_completion(&v).unwrap_err().to_string();
+        assert!(err.contains("max_tokens not supported"), "{err}");
+    }
+
+    #[test]
+    fn unwraps_sse() {
+        let body = "data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\ndata: [DONE]\n";
+        let (text, input, output) = parse_chat_payload(body).unwrap();
+        assert_eq!(text, "hello");
+        assert_eq!((input, output), (3, 2));
+    }
+
+    #[test]
+    fn gpt5_request_omits_temperature_and_max_tokens() {
+        assert!(restricted_sampling("scogoai/gpt-5.6-luna-max"));
+        let req = chat_request("scogoai/gpt-5.6-luna-max", vec![], 0.9, 2048);
+        let v = serde_json::to_value(&req).unwrap();
+        assert!(v.get("temperature").is_none());
+        assert!(v.get("max_tokens").is_none());
+        assert_eq!(v.get("max_completion_tokens").unwrap(), 2048);
+        assert_eq!(v.get("stream").unwrap(), false);
+    }
 }

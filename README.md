@@ -19,7 +19,9 @@ A fast, concurrent SFT (Supervised Fine-Tuning) task generator for distillation 
 - JSONL output with metadata per task, flushed to disk after each write
 - Optional budget cap with per-token cost tracking
 - Append mode to resume interrupted runs
-- Auto-generated dataset README on completion
+- Auto-generated dataset README next to the JSONL (`{stem}.README.md`)
+- GPT-5 / o-series / luna sampling: omit `temperature` and `max_tokens`, send `max_completion_tokens`
+- Always request `stream: false`; if a gateway still returns SSE, assemble `delta.content` across chunks
 
 ## Install
 
@@ -131,6 +133,18 @@ Two-pass dedup:
 - **Timeouts** — retries with backoff; 5 consecutive timeouts trigger graceful shutdown
 - **Graceful Shutdown** — all workers drain, completed tasks are saved, dedup runs if enabled, dataset README is written
 
+### Provider notes (GPT-5 / Omniroute)
+
+Requests always include `"stream": false`. Some gateways (Omniroute included) still return SSE `chat.completion.chunk` events; taskgen concatenates `delta.content` across chunks instead of keeping only the last (often empty) usage event.
+
+For model names matching `gpt-5`, `luna`, `o1`, `o3`, or `o4` (including `scogoai/gpt-5.6-luna-max`):
+
+- `temperature` and `max_tokens` are omitted (those models reject them)
+- `max_completion_tokens` is sent instead of `max_tokens`
+- `--temperature` is still recorded in JSONL metadata; it is not forwarded to the API
+
+Content parts, null usage fields, and `prompt_tokens`/`input_tokens` aliases are accepted. API error payloads are surfaced instead of a generic parse failure.
+
 ## Examples
 
 **Basic — generate 500 tasks with GPT-4o-mini:**
@@ -168,6 +182,16 @@ taskgen \
   -c 2000 -w 20 \
   --input-price 0.20 --output-price 0.20 \
   --budget 1.00
+```
+
+**Omniroute / GPT-5-class (no `temperature` / `max_tokens` on the wire):**
+```bash
+taskgen \
+  --api-base https://omniroute.scogo.ai/v1 \
+  --api-key $OPENAI_API_KEY \
+  -m scogoai/gpt-5.6-luna-max \
+  -c 250 -w 5 \
+  -o data/itops.jsonl
 ```
 
 **With proxies and multiple API keys:**
@@ -212,7 +236,7 @@ Each line in the JSONL file is a self-contained task record:
 
 The `language` field is only present when `--multilingual` is used.
 
-A `README.md` summarising run parameters, token usage, and cost is written alongside the output file on completion.
+A dataset README summarising run parameters, token usage, and cost is written next to the JSONL as `{stem}.README.md` (for `-o data/itops.jsonl` that is `data/itops.README.md`). It does not overwrite the project `README.md`.
 
 ## Domains
 
