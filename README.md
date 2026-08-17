@@ -218,23 +218,23 @@ A `README.md` summarising run parameters, token usage, and cost is written along
 
 Source of truth: `docs/it-ops-taxonomy.yaml`. Regenerate the Rust catalog with `python scripts/codegen_domains.py --write`.
 
-Default `--distribution` is biased toward autonomous infra ops (signal → decision → action → validation), not CRM/HR/ESM: `infra=0.16`, `observe=0.12`, `network=0.12`, `secops=0.10`, `secure_edge=0.08`, `identity=0.08`, `endpoint=0.08`, `delivery=0.07`, `data=0.06`, `itsm=0.05`, `workplace=0.04`, `agentic=0.03`, `enterprise=0.01`.
+Default `--distribution` is biased toward autonomous infra ops (signal → decision → action → validation), not CRM/HR/ESM. Weights sum to 1.0.
 
-| Category | Domains |
-|---|---|
-| `itsm` | Service Desk, Incident Management, Problem Management, Change Enablement, Request Catalog, CMDB Configuration, Knowledge Management, Task Project Management, SLA Measurement |
-| `workplace` | Collaboration Messaging, Email Communication, Calendar Scheduling, Document Management, Content Website, Print Workplace Devices, UCaaS Voice, Digital Experience |
-| `endpoint` | RMM, UEM MDM, VDI DaaS, Endpoint Health |
-| `identity` | Identity Access, Privileged Access, Identity Governance, Directory Services |
-| `secops` | SIEM, SOAR, EDR XDR, Vulnerability Management, Threat Intel NDR, GRC Audit, Forensics IR |
-| `secure_edge` | SASE SSE, CASB, Data Loss Prevention, Email Security, Web Security, WAF DDoS, DSPM, SSPM |
-| `network` | Networking, DNS CDN, Firewall, Load Balancer, Network Management, Routers, SD-WAN, Wireless, NAC |
-| `infra` | Cloud Infrastructure, FinOps, CNAPP, Virtualization, Storage, Backup, BCDR Continuity, DCIM Facilities |
-| `observe` | Monitoring, Observability APM, AIOps, Synthetics DEM, AI Agent Observability |
-| `data` | Database, Analytics, Messaging Streaming, iPaaS API, Data Governance |
-| `delivery` | DevOps, Kubernetes, IaC GitOps, Release Orchestration, AppSec ASPM, Mainframe Midrange |
-| `enterprise` | CRM Sales, HR Payroll, ERP Finance, Supplier Contract |
-| `agentic` | Agent Fabric, SIA Guardrails, Knowledge Graph, Channels Knowledge, Platform Deploy |
+| Category | Weight | Domains |
+|---|---|---|
+| `infra` | 0.16 | Cloud Infrastructure, FinOps, CNAPP, Virtualization, Storage, Backup, BCDR Continuity, DCIM Facilities |
+| `observe` | 0.12 | Monitoring, Observability APM, AIOps, Synthetics DEM, AI Agent Observability |
+| `network` | 0.12 | Networking, DNS CDN, Firewall, Load Balancer, Network Management, Routers, SD-WAN, Wireless, NAC |
+| `secops` | 0.10 | SIEM, SOAR, EDR XDR, Vulnerability Management, Threat Intel NDR, GRC Audit, Forensics IR |
+| `secure_edge` | 0.08 | SASE SSE, CASB, Data Loss Prevention, Email Security, Web Security, WAF DDoS, DSPM, SSPM |
+| `identity` | 0.08 | Identity Access, Privileged Access, Identity Governance, Directory Services |
+| `endpoint` | 0.08 | RMM, UEM MDM, VDI DaaS, Endpoint Health |
+| `delivery` | 0.07 | DevOps, Kubernetes, IaC GitOps, Release Orchestration, AppSec ASPM, Mainframe Midrange |
+| `data` | 0.06 | Database, Analytics, Messaging Streaming, iPaaS API, Data Governance |
+| `itsm` | 0.05 | Service Desk, Incident Management, Problem Management, Change Enablement, Request Catalog, CMDB Configuration, Knowledge Management, Task Project Management, SLA Measurement |
+| `workplace` | 0.04 | Collaboration Messaging, Email Communication, Calendar Scheduling, Document Management, Content Website, Print Workplace Devices, UCaaS Voice, Digital Experience |
+| `agentic` | 0.03 | Agent Fabric, SIA Guardrails, Knowledge Graph, Channels Knowledge, Platform Deploy |
+| `enterprise` | 0.01 | CRM Sales, HR Payroll, ERP Finance, Supplier Contract |
 
 ## Difficulty Scale
 
