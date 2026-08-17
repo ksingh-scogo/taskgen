@@ -1,10 +1,10 @@
 # taskgen
 
-A fast, concurrent SFT (Supervised Fine-Tuning) task generator for distillation datasets. Generates diverse, difficulty-weighted IT Ops / SRE prompts across infra, observability, network, secops, identity, and related domains — via any OpenAI-compatible API.
+A fast, concurrent SFT (Supervised Fine-Tuning) task generator for distillation datasets. Generates diverse, difficulty-weighted IT Ops / SRE prompts across infra, observability, network, secops, identity, OEM/ISV products, and related domains — via any OpenAI-compatible API.
 
 ## Features
 
-- 82 domains, 498 subdomains across 13 IT Ops categories (from `docs/it-ops-taxonomy.yaml`)
+- 129 domains, 884 subdomains across 14 IT Ops categories (from `docs/it-ops-taxonomy.yaml`), including vendor-first `oem`
 - Weighted difficulty sampling (1–10 scale)
 - Configurable category distribution
 - Concurrent generation with lock-free atomic stats and pre-sampled task batches
@@ -208,6 +208,11 @@ taskgen \
 taskgen --api-key $OPENAI_API_KEY --distribution "infra=0.4,observe=0.3,network=0.3" -c 500
 ```
 
+**OEM / ISV only — vendor-product prompts (FortiGate, EKS, Falcon, …):**
+```bash
+taskgen --api-key $OPENAI_API_KEY --distribution "oem=1.0" -c 250 -o data/oem.jsonl
+```
+
 **Custom difficulty — only hard tasks (levels 7–10):**
 ```bash
 taskgen --api-key $OPENAI_API_KEY --difficulty "7=0.25,8=0.25,9=0.25,10=0.25" -c 500
@@ -240,23 +245,24 @@ A dataset README summarising run parameters, token usage, and cost is written ne
 
 ## Domains
 
-Source of truth: `docs/it-ops-taxonomy.yaml`. Regenerate the Rust catalog with `python scripts/codegen_domains.py --write`.
+Source of truth: `docs/it-ops-taxonomy.yaml`. Regenerate the Rust catalog and default weights with `python scripts/codegen_domains.py --write`.
 
-Default `--distribution` is biased toward autonomous infra ops (signal → decision → action → validation), not CRM/HR/ESM. Weights sum to 1.0.
+Default `--distribution` is biased toward autonomous infra ops (signal → decision → action → validation), not CRM/HR/ESM. Weights sum to 1.0. Category `oem` is vendor-first (product lines as subdomains); the other categories stay capability-first (failure modes as subdomains).
 
 | Category | Weight | Domains |
 |---|---|---|
-| `infra` | 0.16 | Cloud Infrastructure, FinOps, CNAPP, Virtualization, Storage, Backup, BCDR Continuity, DCIM Facilities |
-| `observe` | 0.12 | Monitoring, Observability APM, AIOps, Synthetics DEM, AI Agent Observability |
-| `network` | 0.12 | Networking, DNS CDN, Firewall, Load Balancer, Network Management, Routers, SD-WAN, Wireless, NAC |
-| `secops` | 0.10 | SIEM, SOAR, EDR XDR, Vulnerability Management, Threat Intel NDR, GRC Audit, Forensics IR |
-| `secure_edge` | 0.08 | SASE SSE, CASB, Data Loss Prevention, Email Security, Web Security, WAF DDoS, DSPM, SSPM |
-| `identity` | 0.08 | Identity Access, Privileged Access, Identity Governance, Directory Services |
-| `endpoint` | 0.08 | RMM, UEM MDM, VDI DaaS, Endpoint Health |
-| `delivery` | 0.07 | DevOps, Kubernetes, IaC GitOps, Release Orchestration, AppSec ASPM, Mainframe Midrange |
-| `data` | 0.06 | Database, Analytics, Messaging Streaming, iPaaS API, Data Governance |
+| `infra` | 0.15 | Cloud Infrastructure, FinOps, CNAPP, Virtualization, Storage, Backup, BCDR Continuity, DCIM Facilities |
+| `observe` | 0.11 | Monitoring, Observability APM, AIOps, Synthetics DEM, AI Agent Observability |
+| `network` | 0.11 | Networking, DNS CDN, Firewall, Load Balancer, Network Management, Routers, SD-WAN, Wireless, NAC |
+| `oem` | 0.10 | AWS, Azure, Google Cloud, Microsoft, IBM, Oracle, Cisco, Juniper, Fortinet, Versa, Palo Alto, CrowdStrike, CyberArk, VMware, Red Hat, Kubernetes, … + long-tail ISV buckets |
+| `secops` | 0.09 | SIEM, SOAR, EDR XDR, Vulnerability Management, Threat Intel NDR, GRC Audit, Forensics IR |
+| `secure_edge` | 0.07 | SASE SSE, CASB, Data Loss Prevention, Email Security, Web Security, WAF DDoS, DSPM, SSPM |
+| `identity` | 0.07 | Identity Access, Privileged Access, Identity Governance, Directory Services |
+| `endpoint` | 0.07 | RMM, UEM MDM, VDI DaaS, Endpoint Health |
+| `delivery` | 0.06 | DevOps, Kubernetes, IaC GitOps, Release Orchestration, AppSec ASPM, Mainframe Midrange |
+| `data` | 0.05 | Database, Analytics, Messaging Streaming, iPaaS API, Data Governance |
 | `itsm` | 0.05 | Service Desk, Incident Management, Problem Management, Change Enablement, Request Catalog, CMDB Configuration, Knowledge Management, Task Project Management, SLA Measurement |
-| `workplace` | 0.04 | Collaboration Messaging, Email Communication, Calendar Scheduling, Document Management, Content Website, Print Workplace Devices, UCaaS Voice, Digital Experience |
+| `workplace` | 0.03 | Collaboration Messaging, Email Communication, Calendar Scheduling, Document Management, Content Website, Print Workplace Devices, UCaaS Voice, Digital Experience |
 | `agentic` | 0.03 | Agent Fabric, SIA Guardrails, Knowledge Graph, Channels Knowledge, Platform Deploy |
 | `enterprise` | 0.01 | CRM Sales, HR Payroll, ERP Finance, Supplier Contract |
 

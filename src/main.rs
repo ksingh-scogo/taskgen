@@ -27,6 +27,10 @@ For difficulty 6+: Include genuine constraint conflicts—error budget, approval
 Skip boilerplate. Don't include commands, code blocks, or versions unless the operator would realistically paste them. "postgres is lagging" is better than "PostgreSQL 15.4 on Ubuntu 22.04 with Patroni." But "pg 15 replica lag hit 40s after the vacuum, WAL keep is 2GB" is fine if it's real context.
 Keep it short. Say the problem, not the life story. Output only the prompt itself. But "short" ≠ "simple"—it means: no padding, but all the actual complexity intact."#;
 
+const OEM_SYSTEM_ADDENDUM: &str = r#"
+
+When the domain is a vendor, ISV, or platform, the subdomain is a product line — not a generic failure mode. Write as an operator of THAT product. Use real SKU, firmware, CLI, console, TAC, and license language an operator would actually type in Slack. Do not write a generic capability ticket (no "firewall HA" if the product is FortiGate). Kubernetes and Linux distros count as platforms. Product names and versions are in play when an operator would mention them."#;
+
 const LANGUAGES: &[(&str, &str)] = &[
     ("en", "English"),
     ("de", "German"),
@@ -133,24 +137,74 @@ static DOMAINS: &[DomainDef] = &[
     DomainDef { category: "agentic", name: "Knowledge Graph", subdomains: &["cross_system_join", "stale_cmdb", "alert_to_asset", "identity_to_device", "policy_conflict", "context_gap"] },
     DomainDef { category: "agentic", name: "Channels Knowledge", subdomains: &["slack_teams_whatsapp", "sop_curation", "kb_from_ticket", "remote_session_learn", "deflection_accuracy"] },
     DomainDef { category: "agentic", name: "Platform Deploy", subdomains: &["saas_india", "byoc", "on_prem", "airgap", "rmm_agent", "browser_intel"] },
+    DomainDef { category: "oem", name: "AWS", subdomains: &["ec2", "vpc_iam", "s3", "rds", "eks", "lambda", "cloudwatch", "route53", "direct_connect", "elb_alb", "waf_shield", "organizations", "secrets_manager", "backup"] },
+    DomainDef { category: "oem", name: "Azure", subdomains: &["vm", "vnet", "blob", "aks", "azure_sql", "monitor", "expressroute", "firewall", "sentinel", "policy_arc", "lb_appgw", "backup", "files"] },
+    DomainDef { category: "oem", name: "Google Cloud", subdomains: &["gce", "vpc", "gke", "cloud_sql", "bigquery", "gcs", "iam", "cloud_armor", "interconnect", "logging", "pubsub", "cloud_run"] },
+    DomainDef { category: "oem", name: "Other Cloud", subdomains: &["oci", "ibm_cloud", "alibaba", "digitalocean", "akamai_linode", "ovh", "hetzner"] },
+    DomainDef { category: "oem", name: "Microsoft", subdomains: &["windows_server", "active_directory", "m365", "exchange", "sharepoint", "teams", "entra_id", "intune", "defender", "sql_server", "hyper_v", "sccm_mecm", "power_platform", "windows_11"] },
+    DomainDef { category: "oem", name: "IBM", subdomains: &["power_aix", "ibm_i", "zos", "flashsystem", "maximo", "qradar", "instana", "turbonomic", "mq", "db2", "watsonx", "cloud_pak", "websphere", "spectrum_protect"] },
+    DomainDef { category: "oem", name: "Red Hat", subdomains: &["rhel", "openshift", "ansible_aap", "satellite", "idm", "ceph", "openstack", "insights"] },
+    DomainDef { category: "oem", name: "Canonical", subdomains: &["ubuntu_server", "ubuntu_pro", "landscape", "lxd", "maas", "juju"] },
+    DomainDef { category: "oem", name: "Linux Distros", subdomains: &["debian", "rocky", "alma", "oracle_linux", "amazon_linux", "sles", "freebsd"] },
+    DomainDef { category: "oem", name: "Kubernetes", subdomains: &["control_plane", "etcd", "cni", "ingress", "rbac", "storage_class", "operators", "gateway_api", "network_policy", "cluster_upgrade"] },
+    DomainDef { category: "oem", name: "Cisco", subdomains: &["ios_xe", "ios_xr", "nxos", "meraki", "catalyst_center", "ise", "firepower", "umbrella", "duo", "thousandeyes", "viptela", "webex", "appdynamics", "ucs"] },
+    DomainDef { category: "oem", name: "Juniper", subdomains: &["junos", "mist", "srx", "mx", "qfx", "apstra", "contrail", "session_smart"] },
+    DomainDef { category: "oem", name: "Fortinet", subdomains: &["fortigate", "fortimanager", "fortianalyzer", "forticlient", "fortisase", "fortimail", "fortiweb", "fortiedr", "fortiswitch", "fortiap", "fortiauthenticator", "forticnapp"] },
+    DomainDef { category: "oem", name: "Versa", subdomains: &["versa_director", "versa_analytics", "versa_os", "versa_sase", "versa_titan"] },
+    DomainDef { category: "oem", name: "Palo Alto", subdomains: &["panos", "panorama", "prisma_access", "prisma_cloud", "cortex_xdr", "globalprotect", "wildfire", "sdwan"] },
+    DomainDef { category: "oem", name: "HPE Aruba", subdomains: &["aos_cx", "central", "clearpass", "silver_peak", "ssid_rf", "nac"] },
+    DomainDef { category: "oem", name: "Other Network OEM", subdomains: &["arista_eos", "extreme", "ubiquiti", "mikrotik", "f5_bigip", "checkpoint", "nokia_srlinux", "sonicwall", "ruckus", "infoblox"] },
+    DomainDef { category: "oem", name: "Cloudflare", subdomains: &["cdn_cache", "waf", "tunnel", "zero_trust", "workers", "r2", "dns", "bot_mgmt", "magic_wan"] },
+    DomainDef { category: "oem", name: "Zscaler", subdomains: &["zia", "zpa", "zdx", "zcc", "bsp", "deception"] },
+    DomainDef { category: "oem", name: "Other SASE", subdomains: &["netskope", "cato", "forcepoint", "skyhigh", "perimeter81"] },
+    DomainDef { category: "oem", name: "CrowdStrike", subdomains: &["falcon_prevent", "insight", "overwatch", "identity", "cloud", "logscale", "discover", "spotlight"] },
+    DomainDef { category: "oem", name: "CyberArk", subdomains: &["privileged_cloud", "pam", "identity", "endpoint_privilege", "secrets_manager", "conjur", "remote_access"] },
+    DomainDef { category: "oem", name: "Okta", subdomains: &["workforce", "cic", "wga", "privileged_access", "workflows", "fastpass"] },
+    DomainDef { category: "oem", name: "Other Security ISV", subdomains: &["sentinelone", "tenable", "qualys", "rapid7", "proofpoint", "mimecast", "trend_micro", "sophos", "tanium", "darktrace"] },
+    DomainDef { category: "oem", name: "Other Identity ISV", subdomains: &["ping", "sailpoint", "beyondtrust", "delinea", "forgerock", "jumpcloud"] },
+    DomainDef { category: "oem", name: "Dell", subdomains: &["poweredge", "idrac", "powerstore", "powerscale", "vxrail", "avamar", "networker", "openmanage"] },
+    DomainDef { category: "oem", name: "HPE", subdomains: &["proliant", "ilo", "alletra", "synergy", "greenlake", "primera_3par", "storeonce", "oneview"] },
+    DomainDef { category: "oem", name: "NetApp", subdomains: &["ontap", "ontap_select", "storagegrid", "cloud_volumes", "snapmirror", "active_iq"] },
+    DomainDef { category: "oem", name: "Pure Storage", subdomains: &["flasharray", "flashblade", "portworx", "fusion", "cloud_block"] },
+    DomainDef { category: "oem", name: "Other Compute OEM", subdomains: &["lenovo_thinksystem", "supermicro", "hitachi_vantara"] },
+    DomainDef { category: "oem", name: "VMware", subdomains: &["vsphere", "vcenter", "vsan", "nsx", "horizon", "aria", "velocloud", "tanzu", "vcf"] },
+    DomainDef { category: "oem", name: "Nutanix", subdomains: &["ahv", "prism", "files", "flow", "calm", "nkp"] },
+    DomainDef { category: "oem", name: "Other Hypervisor", subdomains: &["proxmox", "citrix_cvad", "kvm_libvirt", "oracle_virtualization"] },
+    DomainDef { category: "oem", name: "Oracle", subdomains: &["database", "rac_dataguard", "exadata", "goldengate", "ebs", "fusion_cloud", "weblogic", "mysql_heatwave"] },
+    DomainDef { category: "oem", name: "Database ISVs", subdomains: &["postgresql", "mysql", "mariadb", "mongodb", "redis", "elasticsearch", "snowflake", "databricks", "cockroach", "cassandra", "neo4j", "clickhouse"] },
+    DomainDef { category: "oem", name: "Datadog", subdomains: &["infra", "apm", "logs", "synthetics", "rum", "security", "k8s", "usm"] },
+    DomainDef { category: "oem", name: "Splunk", subdomains: &["enterprise", "cloud", "otel", "enterprise_security", "it_si", "observability", "forwarder"] },
+    DomainDef { category: "oem", name: "Other Observability", subdomains: &["dynatrace", "new_relic", "grafana", "zabbix", "elastic", "pagerduty", "solarwinds", "manageengine", "prometheus"] },
+    DomainDef { category: "oem", name: "Backup ISVs", subdomains: &["veeam", "rubrik", "cohesity", "commvault", "veritas", "acronis", "datto", "druva"] },
+    DomainDef { category: "oem", name: "ServiceNow", subdomains: &["itsm", "itom", "cmdb", "now_assist", "secops", "hrsd", "csm", "integration_hub"] },
+    DomainDef { category: "oem", name: "Atlassian", subdomains: &["jira", "jira_sm", "confluence", "bitbucket", "opsgenie", "statuspage"] },
+    DomainDef { category: "oem", name: "Google Workspace", subdomains: &["gmail", "drive", "calendar", "meet", "chromeos", "cloud_identity", "vault", "admin"] },
+    DomainDef { category: "oem", name: "Workplace SaaS", subdomains: &["slack", "zoom", "box", "dropbox", "adobe", "freshservice", "zendesk", "bmc_helix"] },
+    DomainDef { category: "oem", name: "RMM UEM ISVs", subdomains: &["jamf", "ninjaone", "connectwise", "kaseya", "datto_rmm", "omnissa", "addigy", "hexnode"] },
+    DomainDef { category: "oem", name: "GitHub", subdomains: &["actions", "packages", "enterprise", "copilot", "advanced_security", "codespaces"] },
+    DomainDef { category: "oem", name: "HashiCorp", subdomains: &["terraform", "vault", "consul", "nomad", "boundary", "packer"] },
+    DomainDef { category: "oem", name: "Other DevOps ISV", subdomains: &["gitlab", "jfrog", "harness", "circleci", "pulumi", "argo", "flux", "jenkins", "azure_devops", "docker"] },
 ];
 // END GENERATED DOMAINS
 
+// BEGIN GENERATED DISTRIBUTION
 const DEFAULT_DISTRIBUTION: &[(&str, f64)] = &[
-    ("infra", 0.16),
-    ("observe", 0.12),
-    ("network", 0.12),
-    ("secops", 0.10),
-    ("secure_edge", 0.08),
-    ("identity", 0.08),
-    ("endpoint", 0.08),
-    ("delivery", 0.07),
-    ("data", 0.06),
+    ("infra", 0.15),
+    ("observe", 0.11),
+    ("network", 0.11),
+    ("oem", 0.10),
+    ("secops", 0.09),
+    ("secure_edge", 0.07),
+    ("identity", 0.07),
+    ("endpoint", 0.07),
+    ("delivery", 0.06),
+    ("data", 0.05),
     ("itsm", 0.05),
-    ("workplace", 0.04),
+    ("workplace", 0.03),
     ("agentic", 0.03),
     ("enterprise", 0.01),
 ];
+// END GENERATED DISTRIBUTION
 
 const DEFAULT_DIFFICULTY: &[(u8, f64)] = &[
     (1, 0.05),
@@ -178,6 +232,40 @@ fn difficulty_label(d: u8) -> &'static str {
         9 => "Expert (unknown-unknown)",
         10 => "Principal (no runbook, synthesis)",
         _ => "Unknown",
+    }
+}
+
+fn language_instruction(language: Option<&str>) -> String {
+    match language {
+        Some(code) if code != "en" => {
+            let lang_name = LANGUAGES.iter().find(|(c, _)| *c == code).map(|(_, n)| *n).unwrap_or("English");
+            format!("\n\nIMPORTANT: Write the entire task/prompt in {}. Do NOT use English.", lang_name)
+        }
+        _ => String::new(),
+    }
+}
+
+fn task_user_message(
+    category: &str,
+    domain_display: &str,
+    subdomain: &str,
+    difficulty: u8,
+    language: Option<&str>,
+) -> String {
+    let lang_instruction = language_instruction(language);
+    if category == "oem" {
+        format!(
+            "Generate a task/prompt for the following:\n\nVendor/platform: {}\nProduct: {}\nDifficulty: {}/10 ({})\n\nThe subdomain is a product line, not a generic failure mode. The incident MUST be about the {} product \"{}\" specifically — use SKU, firmware, CLI, console, TAC, or license language an operator of that product would actually type. Do NOT write a generic capability ticket that could apply to any vendor.\n\nOutput only the task prompt, nothing else.{}",
+            domain_display, subdomain, difficulty, difficulty_label(difficulty),
+            domain_display, subdomain, lang_instruction
+        )
+    } else {
+        format!(
+            "Generate a task/prompt for the following:\n\nDomain: {}\nSubdomain: {}\nDifficulty: {}/10 ({})\n\nThe task MUST be directly and specifically about the subdomain \"{}\" within {}. Do NOT generate a generic {} task — the content must focus on {} specifically.\n\nOutput only the task prompt, nothing else.{}",
+            domain_display, subdomain, difficulty, difficulty_label(difficulty),
+            subdomain, domain_display, domain_display, subdomain,
+            lang_instruction
+        )
     }
 }
 
@@ -903,7 +991,7 @@ async fn generate_task(
     api_key: &str,
     model: &str,
     system_prompt: &str,
-    _category: &str,
+    category: &str,
     domain_display: &str,
     subdomain: &str,
     difficulty: u8,
@@ -913,25 +1001,17 @@ async fn generate_task(
     consecutive_timeouts: &AtomicUsize,
     pb: &ProgressBar,
 ) -> std::result::Result<(String, u64, u64), ApiError> {
-    let lang_instruction = match language {
-        Some(code) if code != "en" => {
-            let lang_name = LANGUAGES.iter().find(|(c, _)| *c == code).map(|(_, n)| *n).unwrap_or("English");
-            format!("\n\nIMPORTANT: Write the entire task/prompt in {}. Do NOT use English.", lang_name)
-        }
-        _ => String::new(),
+    let user_msg = task_user_message(category, domain_display, subdomain, difficulty, language);
+    let system = if category == "oem" {
+        format!("{system_prompt}{OEM_SYSTEM_ADDENDUM}")
+    } else {
+        system_prompt.to_string()
     };
-
-    let user_msg = format!(
-        "Generate a task/prompt for the following:\n\nDomain: {}\nSubdomain: {}\nDifficulty: {}/10 ({})\n\nThe task MUST be directly and specifically about the subdomain \"{}\" within {}. Do NOT generate a generic {} task — the content must focus on {} specifically.\n\nOutput only the task prompt, nothing else.{}",
-        domain_display, subdomain, difficulty, difficulty_label(difficulty),
-        subdomain, domain_display, domain_display, subdomain,
-        lang_instruction
-    );
 
     let body = chat_request(
         model,
         vec![
-            ChatMessage { role: "system".into(), content: system_prompt.into() },
+            ChatMessage { role: "system".into(), content: system },
             ChatMessage { role: "user".into(), content: user_msg },
         ],
         temperature,
@@ -1164,7 +1244,8 @@ async fn main() -> Result<()> {
 
     let pool = build_domain_pool(&dist);
     if pool.is_empty() {
-        bail!("no domains matched the given distribution. Available categories: infra, observe, network, secops, secure_edge, identity, endpoint, delivery, data, itsm, workplace, agentic, enterprise");
+        let cats: Vec<&str> = DEFAULT_DISTRIBUTION.iter().map(|(k, _)| *k).collect();
+        bail!("no domains matched the given distribution. Available categories: {}", cats.join(", "));
     }
 
     let system_prompt = args.system_prompt.as_deref().unwrap_or(DEFAULT_SYSTEM_PROMPT);
@@ -1630,5 +1711,38 @@ mod tests {
         assert!(v.get("max_tokens").is_none());
         assert_eq!(v.get("max_completion_tokens").unwrap(), 2048);
         assert_eq!(v.get("stream").unwrap(), false);
+    }
+
+    #[test]
+    fn default_distribution_sums_to_one() {
+        let sum: f64 = DEFAULT_DISTRIBUTION.iter().map(|(_, w)| *w).sum();
+        assert!((sum - 1.0).abs() < 1e-9, "{sum}");
+        assert!(DEFAULT_DISTRIBUTION.iter().any(|(k, _)| *k == "oem"));
+    }
+
+    #[test]
+    fn oem_catalog_includes_named_vendors_and_product_lines() {
+        let fortinet = DOMAINS.iter().find(|d| d.category == "oem" && d.name == "Fortinet").unwrap();
+        assert!(fortinet.subdomains.contains(&"fortigate"));
+        let linux = DOMAINS.iter().find(|d| d.category == "oem" && d.name == "Linux Distros").unwrap();
+        assert!(linux.subdomains.contains(&"debian"));
+        let oem_domains = DOMAINS.iter().filter(|d| d.category == "oem").count();
+        assert!(oem_domains >= 40, "{oem_domains}");
+    }
+
+    #[test]
+    fn oem_user_message_asks_for_product_voice() {
+        let msg = task_user_message("oem", "oem::Fortinet", "fortigate", 6, None);
+        assert!(msg.contains("Vendor/platform: oem::Fortinet"));
+        assert!(msg.contains("Product: fortigate"));
+        assert!(msg.contains("SKU"));
+        assert!(!msg.contains("generic Fortinet task"));
+    }
+
+    #[test]
+    fn capability_user_message_keeps_failure_mode_wording() {
+        let msg = task_user_message("network", "network::Firewall", "unused_rule", 4, None);
+        assert!(msg.contains("Domain: network::Firewall"));
+        assert!(msg.contains("Subdomain: unused_rule"));
     }
 }

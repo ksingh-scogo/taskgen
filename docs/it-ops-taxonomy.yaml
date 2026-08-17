@@ -2,31 +2,34 @@
 # Built 2026-08-17 from: Scogo connector categories, Scogo use-case catalogue,
 # ITIL 4 (34 practices), NIST CSF 2.0, Gartner ITSM/ITOM/ITAM + Observability,
 # CSOH 2026 security umbrellas (CNAPP/SSE/XDR/ASPM/DSPM/SSPM).
+# OEM/ISV category added 2026-08-17 as a vendor-first sampling axis.
 #
 # category  = taskgen Args --distribution key
 # domain    = DomainDef.name
-# subdomains = DomainDef.subdomains (snake_case operational scenarios)
+# subdomains = DomainDef.subdomains (snake_case operational scenarios,
+#              except oem where they are product lines)
 #
 # origin:
 #   connector  — named in Scogo product integration categories (screenshot)
 #   catalogue  — Scogo use-case catalogue / scogo.ai, no connector bucket
 #   fill       — ITIL / NIST / Gartner / market gap; needed for full-estate SFT
 
-version: 2
+version: 3
 # Autonomous IT infra sampling (matches src/main.rs DEFAULT_DISTRIBUTION).
 # Biased toward signal → decision → action → validation, not CRM/HR/ESM.
 default_distribution:
-  infra: 0.16
-  observe: 0.12
-  network: 0.12
-  secops: 0.10
-  secure_edge: 0.08
-  identity: 0.08
-  endpoint: 0.08
-  delivery: 0.07
-  data: 0.06
+  infra: 0.15
+  observe: 0.11
+  network: 0.11
+  oem: 0.10
+  secops: 0.09
+  secure_edge: 0.07
+  identity: 0.07
+  endpoint: 0.07
+  delivery: 0.06
+  data: 0.05
   itsm: 0.05
-  workplace: 0.04
+  workplace: 0.03
   agentic: 0.03
   enterprise: 0.01
 
@@ -434,3 +437,291 @@ categories:
       - name: Platform Deploy
         origin: catalogue
         subdomains: [saas_india, byoc, on_prem, airgap, rmm_agent, browser_intel]
+
+  - id: oem
+    label: OEM / ISV / Platform
+    pillar: Vendor-first axis — complementary to capability categories
+    blurb: Product the operator is staring at. Named vendors for specialist portfolios; buckets for long-tail brands. Kubernetes and Linux distros count as platforms.
+    domains:
+      - name: AWS
+        origin: fill
+        kind: vendor
+        group: cloud
+        note: Hyperscale IaaS/PaaS
+        subdomains: [ec2, vpc_iam, s3, rds, eks, lambda, cloudwatch, route53, direct_connect, elb_alb, waf_shield, organizations, secrets_manager, backup]
+      - name: Azure
+        origin: fill
+        kind: vendor
+        group: cloud
+        note: Microsoft cloud IaaS/PaaS (not M365)
+        subdomains: [vm, vnet, blob, aks, azure_sql, monitor, expressroute, firewall, sentinel, policy_arc, lb_appgw, backup, files]
+      - name: Google Cloud
+        origin: fill
+        kind: vendor
+        group: cloud
+        note: GCP IaaS/PaaS
+        subdomains: [gce, vpc, gke, cloud_sql, bigquery, gcs, iam, cloud_armor, interconnect, logging, pubsub, cloud_run]
+      - name: Other Cloud
+        origin: fill
+        kind: bucket
+        group: cloud
+        note: Long-tail public cloud
+        subdomains: [oci, ibm_cloud, alibaba, digitalocean, akamai_linode, ovh, hetzner]
+      - name: Microsoft
+        origin: fill
+        kind: vendor
+        group: os
+        note: Windows, AD, M365, Intune, Defender, SQL Server
+        subdomains: [windows_server, active_directory, m365, exchange, sharepoint, teams, entra_id, intune, defender, sql_server, hyper_v, sccm_mecm, power_platform, windows_11]
+      - name: IBM
+        origin: fill
+        kind: vendor
+        group: os
+        note: Power, z, storage, Maximo, QRadar, MQ, watsonx
+        subdomains: [power_aix, ibm_i, zos, flashsystem, maximo, qradar, instana, turbonomic, mq, db2, watsonx, cloud_pak, websphere, spectrum_protect]
+      - name: Red Hat
+        origin: fill
+        kind: vendor
+        group: os
+        note: RHEL, OpenShift, Ansible, Satellite
+        subdomains: [rhel, openshift, ansible_aap, satellite, idm, ceph, openstack, insights]
+      - name: Canonical
+        origin: fill
+        kind: vendor
+        group: os
+        note: Ubuntu and Landscape
+        subdomains: [ubuntu_server, ubuntu_pro, landscape, lxd, maas, juju]
+      - name: Linux Distros
+        origin: fill
+        kind: bucket
+        group: os
+        note: Community and clone distros
+        subdomains: [debian, rocky, alma, oracle_linux, amazon_linux, sles, freebsd]
+      - name: Kubernetes
+        origin: fill
+        kind: vendor
+        group: containers
+        note: CNCF platform — not a company
+        subdomains: [control_plane, etcd, cni, ingress, rbac, storage_class, operators, gateway_api, network_policy, cluster_upgrade]
+      - name: Cisco
+        origin: fill
+        kind: vendor
+        group: network
+        note: IOS, NX-OS, Meraki, ISE, Viptela, UCS
+        subdomains: [ios_xe, ios_xr, nxos, meraki, catalyst_center, ise, firepower, umbrella, duo, thousandeyes, viptela, webex, appdynamics, ucs]
+      - name: Juniper
+        origin: fill
+        kind: vendor
+        group: network
+        note: Junos, Mist, SRX, MX
+        subdomains: [junos, mist, srx, mx, qfx, apstra, contrail, session_smart]
+      - name: Fortinet
+        origin: fill
+        kind: vendor
+        group: network
+        note: FortiGate and Security Fabric
+        subdomains: [fortigate, fortimanager, fortianalyzer, forticlient, fortisase, fortimail, fortiweb, fortiedr, fortiswitch, fortiap, fortiauthenticator, forticnapp]
+      - name: Versa
+        origin: fill
+        kind: vendor
+        group: network
+        note: SD-WAN / SASE
+        subdomains: [versa_director, versa_analytics, versa_os, versa_sase, versa_titan]
+      - name: Palo Alto
+        origin: fill
+        kind: vendor
+        group: network
+        note: PAN-OS, Prisma, Cortex
+        subdomains: [panos, panorama, prisma_access, prisma_cloud, cortex_xdr, globalprotect, wildfire, sdwan]
+      - name: HPE Aruba
+        origin: fill
+        kind: vendor
+        group: network
+        note: AOS-CX, Central, ClearPass, Silver Peak
+        subdomains: [aos_cx, central, clearpass, silver_peak, ssid_rf, nac]
+      - name: Other Network OEM
+        origin: fill
+        kind: bucket
+        group: network
+        note: Arista, F5, Check Point, campus/SMB
+        subdomains: [arista_eos, extreme, ubiquiti, mikrotik, f5_bigip, checkpoint, nokia_srlinux, sonicwall, ruckus, infoblox]
+      - name: Cloudflare
+        origin: fill
+        kind: vendor
+        group: sase
+        note: CDN, WAF, Zero Trust, Workers
+        subdomains: [cdn_cache, waf, tunnel, zero_trust, workers, r2, dns, bot_mgmt, magic_wan]
+      - name: Zscaler
+        origin: fill
+        kind: vendor
+        group: sase
+        note: ZIA / ZPA / ZDX
+        subdomains: [zia, zpa, zdx, zcc, bsp, deception]
+      - name: Other SASE
+        origin: fill
+        kind: bucket
+        group: sase
+        note: Netskope, Cato, Forcepoint
+        subdomains: [netskope, cato, forcepoint, skyhigh, perimeter81]
+      - name: CrowdStrike
+        origin: fill
+        kind: vendor
+        group: security
+        note: Falcon platform
+        subdomains: [falcon_prevent, insight, overwatch, identity, cloud, logscale, discover, spotlight]
+      - name: CyberArk
+        origin: fill
+        kind: vendor
+        group: security
+        note: PAM, secrets, EPM
+        subdomains: [privileged_cloud, pam, identity, endpoint_privilege, secrets_manager, conjur, remote_access]
+      - name: Okta
+        origin: fill
+        kind: vendor
+        group: security
+        note: Workforce IdP
+        subdomains: [workforce, cic, wga, privileged_access, workflows, fastpass]
+      - name: Other Security ISV
+        origin: fill
+        kind: bucket
+        group: security
+        note: EDR, vuln, email security long-tail
+        subdomains: [sentinelone, tenable, qualys, rapid7, proofpoint, mimecast, trend_micro, sophos, tanium, darktrace]
+      - name: Other Identity ISV
+        origin: fill
+        kind: bucket
+        group: security
+        note: IGA / PAM long-tail
+        subdomains: [ping, sailpoint, beyondtrust, delinea, forgerock, jumpcloud]
+      - name: Dell
+        origin: fill
+        kind: vendor
+        group: hardware
+        note: PowerEdge, PowerStore, VxRail
+        subdomains: [poweredge, idrac, powerstore, powerscale, vxrail, avamar, networker, openmanage]
+      - name: HPE
+        origin: fill
+        kind: vendor
+        group: hardware
+        note: ProLiant, Alletra, GreenLake
+        subdomains: [proliant, ilo, alletra, synergy, greenlake, primera_3par, storeonce, oneview]
+      - name: NetApp
+        origin: fill
+        kind: vendor
+        group: hardware
+        note: ONTAP and Cloud Volumes
+        subdomains: [ontap, ontap_select, storagegrid, cloud_volumes, snapmirror, active_iq]
+      - name: Pure Storage
+        origin: fill
+        kind: vendor
+        group: hardware
+        note: FlashArray, FlashBlade, Portworx
+        subdomains: [flasharray, flashblade, portworx, fusion, cloud_block]
+      - name: Other Compute OEM
+        origin: fill
+        kind: bucket
+        group: hardware
+        note: Lenovo, SuperMicro, Hitachi
+        subdomains: [lenovo_thinksystem, supermicro, hitachi_vantara]
+      - name: VMware
+        origin: fill
+        kind: vendor
+        group: virt
+        note: Broadcom VMware Cloud Foundation
+        subdomains: [vsphere, vcenter, vsan, nsx, horizon, aria, velocloud, tanzu, vcf]
+      - name: Nutanix
+        origin: fill
+        kind: vendor
+        group: virt
+        note: AHV and Prism
+        subdomains: [ahv, prism, files, flow, calm, nkp]
+      - name: Other Hypervisor
+        origin: fill
+        kind: bucket
+        group: virt
+        note: Proxmox, Citrix, KVM
+        subdomains: [proxmox, citrix_cvad, kvm_libvirt, oracle_virtualization]
+      - name: Oracle
+        origin: fill
+        kind: vendor
+        group: data
+        note: Database, Exadata, EBS, Fusion — not OCI
+        subdomains: [database, rac_dataguard, exadata, goldengate, ebs, fusion_cloud, weblogic, mysql_heatwave]
+      - name: Database ISVs
+        origin: fill
+        kind: bucket
+        group: data
+        note: Postgres, MySQL, MongoDB, Snowflake, …
+        subdomains: [postgresql, mysql, mariadb, mongodb, redis, elasticsearch, snowflake, databricks, cockroach, cassandra, neo4j, clickhouse]
+      - name: Datadog
+        origin: fill
+        kind: vendor
+        group: observe
+        note: Infra, APM, logs, synthetics
+        subdomains: [infra, apm, logs, synthetics, rum, security, k8s, usm]
+      - name: Splunk
+        origin: fill
+        kind: vendor
+        group: observe
+        note: Enterprise / Cloud / OTel (Cisco-owned)
+        subdomains: [enterprise, cloud, otel, enterprise_security, it_si, observability, forwarder]
+      - name: Other Observability
+        origin: fill
+        kind: bucket
+        group: observe
+        note: Dynatrace, Grafana, Zabbix, PagerDuty, …
+        subdomains: [dynatrace, new_relic, grafana, zabbix, elastic, pagerduty, solarwinds, manageengine, prometheus]
+      - name: Backup ISVs
+        origin: fill
+        kind: bucket
+        group: backup
+        note: Veeam, Rubrik, Cohesity, Commvault, …
+        subdomains: [veeam, rubrik, cohesity, commvault, veritas, acronis, datto, druva]
+      - name: ServiceNow
+        origin: fill
+        kind: vendor
+        group: itsm
+        note: ITSM / ITOM / CMDB
+        subdomains: [itsm, itom, cmdb, now_assist, secops, hrsd, csm, integration_hub]
+      - name: Atlassian
+        origin: fill
+        kind: vendor
+        group: itsm
+        note: Jira, Confluence, Opsgenie
+        subdomains: [jira, jira_sm, confluence, bitbucket, opsgenie, statuspage]
+      - name: Google Workspace
+        origin: fill
+        kind: vendor
+        group: itsm
+        note: Gmail, Drive, Meet, ChromeOS
+        subdomains: [gmail, drive, calendar, meet, chromeos, cloud_identity, vault, admin]
+      - name: Workplace SaaS
+        origin: fill
+        kind: bucket
+        group: itsm
+        note: Slack, Zoom, Box, Freshservice, …
+        subdomains: [slack, zoom, box, dropbox, adobe, freshservice, zendesk, bmc_helix]
+      - name: RMM UEM ISVs
+        origin: fill
+        kind: bucket
+        group: endpoint
+        note: Jamf, NinjaOne, ConnectWise, Kaseya, …
+        subdomains: [jamf, ninjaone, connectwise, kaseya, datto_rmm, omnissa, addigy, hexnode]
+      - name: GitHub
+        origin: fill
+        kind: vendor
+        group: devops
+        note: Actions, Packages, Enterprise
+        subdomains: [actions, packages, enterprise, copilot, advanced_security, codespaces]
+      - name: HashiCorp
+        origin: fill
+        kind: vendor
+        group: devops
+        note: Terraform, Vault, Consul, Nomad
+        subdomains: [terraform, vault, consul, nomad, boundary, packer]
+      - name: Other DevOps ISV
+        origin: fill
+        kind: bucket
+        group: devops
+        note: GitLab, JFrog, Argo, Jenkins, Docker, …
+        subdomains: [gitlab, jfrog, harness, circleci, pulumi, argo, flux, jenkins, azure_devops, docker]
