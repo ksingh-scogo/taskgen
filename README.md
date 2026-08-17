@@ -1,10 +1,10 @@
 # taskgen
 
-A fast, concurrent SFT (Supervised Fine-Tuning) task generator for distillation datasets. Generates diverse, difficulty-weighted prompts across math, coding, science, computer science, creative writing, and conversational domains — via any OpenAI-compatible API.
+A fast, concurrent SFT (Supervised Fine-Tuning) task generator for distillation datasets. Generates diverse, difficulty-weighted IT Ops / SRE prompts across infra, observability, network, secops, identity, and related domains — via any OpenAI-compatible API.
 
 ## Features
 
-- 45+ domains, 200+ subdomains across 6 categories
+- 82 domains, 498 subdomains across 13 IT Ops categories (from `docs/it-ops-taxonomy.yaml`)
 - Weighted difficulty sampling (1–10 scale)
 - Configurable category distribution
 - Concurrent generation with lock-free atomic stats and pre-sampled task batches
@@ -179,9 +179,9 @@ taskgen \
   -c 5000 -w 20
 ```
 
-**Custom distribution — 50% coding, 30% math, 20% science:**
+**Custom distribution — 40% infra, 30% observe, 30% network:**
 ```bash
-taskgen --api-key $OPENAI_API_KEY --distribution "coding=0.5,math=0.3,science=0.2" -c 500
+taskgen --api-key $OPENAI_API_KEY --distribution "infra=0.4,observe=0.3,network=0.3" -c 500
 ```
 
 **Custom difficulty — only hard tasks (levels 7–10):**
@@ -200,9 +200,9 @@ Each line in the JSONL file is a self-contained task record:
 
 ```json
 {
-  "prompt": "Prove that the sum of two odd integers is always even.",
-  "domain": "math::Number Theory",
-  "subdomain": "primes",
+  "prompt": "zabbix is paging every 30s on the same host, I already restarted the agent, still flapping—mute or real disk?",
+  "domain": "infra::Storage",
+  "subdomain": "raid_degrade",
   "difficulty": 4,
   "language": "en",
   "taskgen_model": "gpt-4o-mini",
@@ -216,38 +216,37 @@ A `README.md` summarising run parameters, token usage, and cost is written along
 
 ## Domains
 
+Source of truth: `docs/it-ops-taxonomy.yaml`. Regenerate the Rust catalog with `python scripts/codegen_domains.py --write`.
+
+Default `--distribution` is biased toward autonomous infra ops (signal → decision → action → validation), not CRM/HR/ESM: `infra=0.16`, `observe=0.12`, `network=0.12`, `secops=0.10`, `secure_edge=0.08`, `identity=0.08`, `endpoint=0.08`, `delivery=0.07`, `data=0.06`, `itsm=0.05`, `workplace=0.04`, `agentic=0.03`, `enterprise=0.01`.
+
 | Category | Domains |
 |---|---|
-| `math` | Algebra, Calculus, Probability, Statistics, Geometry, Number Theory, Discrete Math, Linear Algebra |
-| `coding` | Python, Rust, Go, JavaScript, C, C++, C#, Java, Ruby, Lua, SQL, Web Development |
-| `science` | Physics, Chemistry, Biology, Earth Science, Astronomy |
-| `cs` | Algorithms, Data Structures, OS, Networking, Databases, Compilers, Distributed Systems, ML, Cybersecurity, Software Engineering |
-| `creative` | Fiction, Poetry, Screenwriting, Journalism, Songwriting, Game Narrative, Copywriting, Blogging |
-| `conversation` | Debate, Advice, Interview, Teaching, Roleplay |
+| `itsm` | Service Desk, Incident Management, Problem Management, Change Enablement, Request Catalog, CMDB Configuration, Knowledge Management, Task Project Management, SLA Measurement |
+| `workplace` | Collaboration Messaging, Email Communication, Calendar Scheduling, Document Management, Content Website, Print Workplace Devices, UCaaS Voice, Digital Experience |
+| `endpoint` | RMM, UEM MDM, VDI DaaS, Endpoint Health |
+| `identity` | Identity Access, Privileged Access, Identity Governance, Directory Services |
+| `secops` | SIEM, SOAR, EDR XDR, Vulnerability Management, Threat Intel NDR, GRC Audit, Forensics IR |
+| `secure_edge` | SASE SSE, CASB, Data Loss Prevention, Email Security, Web Security, WAF DDoS, DSPM, SSPM |
+| `network` | Networking, DNS CDN, Firewall, Load Balancer, Network Management, Routers, SD-WAN, Wireless, NAC |
+| `infra` | Cloud Infrastructure, FinOps, CNAPP, Virtualization, Storage, Backup, BCDR Continuity, DCIM Facilities |
+| `observe` | Monitoring, Observability APM, AIOps, Synthetics DEM, AI Agent Observability |
+| `data` | Database, Analytics, Messaging Streaming, iPaaS API, Data Governance |
+| `delivery` | DevOps, Kubernetes, IaC GitOps, Release Orchestration, AppSec ASPM, Mainframe Midrange |
+| `enterprise` | CRM Sales, HR Payroll, ERP Finance, Supplier Contract |
+| `agentic` | Agent Fabric, SIA Guardrails, Knowledge Graph, Channels Knowledge, Platform Deploy |
 
 ## Difficulty Scale
 
 | Level | Label |
 |---|---|
-| 1 | Very Easy (child-level) |
-| 2 | Easy (elementary) |
-| 3 | Basic (middle school) |
-| 4 | Intermediate (high school) |
-| 5 | Standard (undergraduate intro) |
-| 6 | Skilled (undergraduate advanced) |
-| 7 | Proficient (graduate level) |
-| 8 | Advanced (professional / researcher) |
-| 9 | Expert (top specialist) |
-| 10 | Polymath (1-in-a-million genius) |
-
-## Support
-
-If this tool has been useful, consider supporting the project:
-
-- **BTC**: `bc1qx6zepu6sfkvshgdmc4ewu6pk6rpadvpgffpp7v`
-- **LTC**: `ltc1qv2mefzps2vtjcpwfx8xxdrpplrcvltswm68r7x`
-- **XMR**: `42Dbm5xg5Nq26fdyzfEU7KBnAJfhi7Cvz5J2ex5CzHXkfKuNEJzYCcmJ1GTbgjFZ5MBx72sdG1G9239Cd6rsZfv4QeDkYJY`
-
----
-
-*by [empero-ai](https://github.com/empero-org)*
+| 1 | Very Easy (junior on-call) |
+| 2 | Easy (runbook exists) |
+| 3 | Basic (one failing check) |
+| 4 | Intermediate (mid SRE) |
+| 5 | Standard (incomplete metrics) |
+| 6 | Skilled (senior, SLO tradeoffs) |
+| 7 | Proficient (blast-radius / freeze) |
+| 8 | Advanced (principal, multi-system) |
+| 9 | Expert (unknown-unknown) |
+| 10 | Principal (no runbook, synthesis) |

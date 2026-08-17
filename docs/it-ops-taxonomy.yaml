@@ -1,0 +1,436 @@
+# IT Ops SFT taxonomy — source of truth for taskgen DomainDef generation
+# Built 2026-08-17 from: Scogo connector categories, Scogo use-case catalogue,
+# ITIL 4 (34 practices), NIST CSF 2.0, Gartner ITSM/ITOM/ITAM + Observability,
+# CSOH 2026 security umbrellas (CNAPP/SSE/XDR/ASPM/DSPM/SSPM).
+#
+# category  = taskgen Args --distribution key
+# domain    = DomainDef.name
+# subdomains = DomainDef.subdomains (snake_case operational scenarios)
+#
+# origin:
+#   connector  — named in Scogo product integration categories (screenshot)
+#   catalogue  — Scogo use-case catalogue / scogo.ai, no connector bucket
+#   fill       — ITIL / NIST / Gartner / market gap; needed for full-estate SFT
+
+version: 2
+# Autonomous IT infra sampling (matches src/main.rs DEFAULT_DISTRIBUTION).
+# Biased toward signal → decision → action → validation, not CRM/HR/ESM.
+default_distribution:
+  infra: 0.16
+  observe: 0.12
+  network: 0.12
+  secops: 0.10
+  secure_edge: 0.08
+  identity: 0.08
+  endpoint: 0.08
+  delivery: 0.07
+  data: 0.06
+  itsm: 0.05
+  workplace: 0.04
+  agentic: 0.03
+  enterprise: 0.01
+
+categories:
+  - id: itsm
+    label: ITSM & Service Management
+    pillar: Gartner ITSM · ITIL service practices
+    blurb: System of record for request, incident, problem, change, knowledge, CMDB, SLA.
+    domains:
+      - name: Service Desk
+        origin: connector
+        connectors: 15
+        frameworks: [ITIL Service Desk, ITIL Request]
+        subdomains: [auto_deflection, classification_routing, l0_l1_autoresolve, ticket_enrichment, sla_breach, major_incident, approval_workflows, reassignment_churn, conversational_status, knowledge_deflection]
+      - name: Incident Management
+        origin: fill
+        frameworks: [ITIL Incident, NIST RS]
+        subdomains: [sev_classify, war_room, customer_comms, timeline, page_storm, commander_role, handoff, major_incident_bridge]
+      - name: Problem Management
+        origin: fill
+        frameworks: [ITIL Problem]
+        subdomains: [rca, known_error, workaround, problem_trend, ke_article, recurring_incident]
+      - name: Change Enablement
+        origin: fill
+        frameworks: [ITIL Change, Gartner ARO]
+        subdomains: [cab_risk, emergency_change, backout_plan, collision_window, standard_change, post_impl_verify, freeze_calendar]
+      - name: Request Catalog
+        origin: fill
+        frameworks: [ITIL Request, ITIL Catalog]
+        subdomains: [catalog_item, fulfillment_path, entitlement, approval_chain, service_offering, request_sla]
+      - name: CMDB Configuration
+        origin: fill
+        frameworks: [ITIL Configuration, ServiceNow CSDM]
+        subdomains: [ci_reconciliation, relationship_map, stale_ci, discovery_gap, service_mapping, orphan_ci]
+      - name: Knowledge Management
+        origin: connector
+        connectors: 13
+        note: Scogo bucket is Productivity & Knowledge
+        frameworks: [ITIL Knowledge]
+        subdomains: [kb_gap, article_decay, sop_from_ticket, search_miss, deflection_quality, conflicting_sop]
+      - name: Task Project Management
+        origin: connector
+        connectors: 5
+        frameworks: [ITIL Project]
+        subdomains: [sprint_block, it_project_risk, dependency, resource_conflict, change_project, milestone_slip]
+      - name: SLA Measurement
+        origin: fill
+        frameworks: [ITIL SLM, ITIL Measurement]
+        subdomains: [sla_clock, ola_breach, kpi_drift, report_pack, under_reporting]
+
+  - id: workplace
+    label: Digital Workplace
+    pillar: Employee-facing collab, email, content, voice, DEX
+    blurb: How work happens in browser/SaaS. Highest L1 volume after the desk.
+    domains:
+      - name: Collaboration Messaging
+        origin: connector
+        connectors: 3
+        subdomains: [teams_outage, slack_guest, channel_perm, message_retention, webhook_fail, federation]
+      - name: Email Communication
+        origin: connector
+        connectors: 3
+        subdomains: [mailbox_full, mail_flow, shared_mailbox, alias, journaling, transport_rule]
+      - name: Calendar Scheduling
+        origin: connector
+        connectors: 3
+        subdomains: [room_conflict, booking_delegate, timezone, resource_mailbox, calendar_perm]
+      - name: Document Management
+        origin: connector
+        connectors: 5
+        subdomains: [share_perm, version_conflict, retention_label, sync_fail, external_share, checkout_lock]
+      - name: Content Website
+        origin: connector
+        connectors: 2
+        subdomains: [cms_outage, publish_fail, cert_on_site, wcm_perm, plugin_break]
+      - name: Print Workplace Devices
+        origin: fill
+        subdomains: [print_queue, driver_mapping, scan_workflow, meeting_room_av, badge_access, thin_client]
+      - name: UCaaS Voice
+        origin: fill
+        frameworks: [ITIL Service Continuity]
+        subdomains: [call_quality, sbc, did_port, contact_center_queue, voicemail, recording_compliance]
+      - name: Digital Experience
+        origin: fill
+        frameworks: [Gartner DEM / DEX]
+        subdomains: [login_slowness, saas_apdex, rum_error, last_mile, crash_free]
+
+  - id: endpoint
+    label: Endpoint & Device
+    pillar: RMM · UEM/MDM · VDI · fleet health
+    blurb: Device as the control plane. Scogo RMM is 1 connector; UEM/VDI still generate most of the work.
+    domains:
+      - name: RMM
+        origin: connector
+        connectors: 1
+        subdomains: [agent_offline, self_heal, script_fail, patch_job, remote_session, policy_drift]
+      - name: UEM MDM
+        origin: fill
+        frameworks: [NIST PR.PS]
+        subdomains: [enrollment, compliance_policy, wipe, app_push, byod_privacy, autopilot]
+      - name: VDI DaaS
+        origin: fill
+        subdomains: [pool_exhaust, profile_corrupt, protocol_quality, golden_image, gpu_contention, broker]
+      - name: Endpoint Health
+        origin: catalogue
+        frameworks: [Scogo D3]
+        subdomains: [health_score, disk_pressure, encryption_bitlocker, edr_presence, baseline_drift, service_failures]
+
+  - id: identity
+    label: Identity & Access
+    pillar: IAM · PAM · IGA · directory
+    blurb: Identity is the new perimeter. Screenshot has IAM only; PAM/IGA are distinct failure modes.
+    domains:
+      - name: Identity Access
+        origin: connector
+        connectors: 15
+        frameworks: [NIST PR.AA]
+        subdomains: [joiner, mover, leaver, sso_break, mfa_enrollment, conditional_access, scim_sync, guest_stale, entra_ad_sync]
+      - name: Privileged Access
+        origin: fill
+        frameworks: [NIST PR.AA]
+        subdomains: [vault_checkout, jit_elevation, session_record, standing_admin, password_rotation, break_glass]
+      - name: Identity Governance
+        origin: fill
+        subdomains: [access_certification, sod_conflict, orphan_account, entitlement_creep, role_mining, joiner_lag]
+      - name: Directory Services
+        origin: fill
+        subdomains: [ad_replication, fsmo, gpo_drift, aad_connect, ldap_bind, dns_srv]
+
+  - id: secops
+    label: Security Operations
+    pillar: NIST Detect/Respond · SIEM SOAR EDR
+    blurb: Split the screenshot's three SecOps buckets; add vuln, intel, GRC, forensics.
+    domains:
+      - name: SIEM
+        origin: connector
+        connectors: 8
+        frameworks: [NIST DE]
+        subdomains: [use_case_tune, parser_break, ingestion_lag, correlation_miss, ueba_alert, retention_cost, data_lake]
+      - name: SOAR
+        origin: connector
+        connectors: 6
+        frameworks: [NIST RS]
+        subdomains: [playbook_fail, enrichment_gap, ticket_loop, containment_action, approval_gate, stale_playbook]
+      - name: EDR XDR
+        origin: connector
+        connectors: 7
+        frameworks: [NIST DE, CSOH XDR]
+        subdomains: [isolate_host, false_positive, ransomware_roll, sensor_health, threat_hunt, identity_signal]
+      - name: Vulnerability Management
+        origin: fill
+        frameworks: [NIST ID.RA, Scogo D7]
+        subdomains: [scan_coverage, risk_score, exception_waiver, exploit_available, agentless_gap, patch_advisory]
+      - name: Threat Intel NDR
+        origin: fill
+        subdomains: [ioc_match, dns_tunnel, lateral_movement, beacon, feed_stale, east_west]
+      - name: GRC Audit
+        origin: fill
+        frameworks: [NIST GV, ITIL Risk]
+        subdomains: [control_evidence, iso27001, soc2, policy_exception, vendor_risk, dpdp]
+      - name: Forensics IR
+        origin: fill
+        frameworks: [NIST RS]
+        subdomains: [disk_image, chain_of_custody, timeline, malware_sandbox, legal_hold, memory_capture]
+
+  - id: secure_edge
+    label: Secure Access & Data
+    pillar: SASE/SSE · CASB · DLP · email/web/WAF
+    blurb: CSOH SSE = SWG+CASB+ZTNA+FWaaS+DLP. SASE = SSE+SD-WAN. Keep screenshot names.
+    domains:
+      - name: SASE SSE
+        origin: connector
+        connectors: 9
+        frameworks: [CSOH SSE]
+        subdomains: [ztna_app, swg_block, fwaas, private_access, policy_conflict, user_steering]
+      - name: CASB
+        origin: connector
+        connectors: 3
+        subdomains: [unsanctioned_saas, session_control, api_mode, shadow_it, dlp_saas]
+      - name: Data Loss Prevention
+        origin: connector
+        connectors: 3
+        frameworks: [NIST PR.DS]
+        subdomains: [exfil_alert, false_positive, endpoint_dlp, email_dlp, classification]
+      - name: Email Security
+        origin: connector
+        connectors: 4
+        subdomains: [phish, bec, spoof_dmarc, quarantine, impersonation, time_of_click]
+      - name: Web Security
+        origin: connector
+        connectors: 4
+        subdomains: [url_filter, malicious_site, ssl_inspect, category_miss, swg_bypass]
+      - name: WAF DDoS
+        origin: fill
+        subdomains: [l7_flood, bot, owasp, api_abuse, tls_policy, origin_shield]
+      - name: DSPM
+        origin: fill
+        frameworks: [CSOH DSPM]
+        subdomains: [public_bucket_data, shadow_db, classification_gap, overshare, lineage]
+      - name: SSPM
+        origin: fill
+        frameworks: [CSOH SSPM]
+        subdomains: [saas_posture, third_party_app, oauth_grant, m365_hardening, salesforce_perm]
+
+  - id: network
+    label: Network
+    pillar: Screenshot Networking* split kept as domains
+    blurb: Do not collapse firewall/SD-WAN/wireless — connector counts prove they are operated separately.
+    domains:
+      - name: Networking
+        origin: connector
+        connectors: 6
+        subdomains: [l2_loop, dhcp_exhaust, spanning_tree, vlan_misconfig, mtu, ipam]
+      - name: DNS CDN
+        origin: connector
+        connectors: 4
+        subdomains: [dns_outage, cache_poison, cdn_purge, ttl, split_horizon, dnssec]
+      - name: Firewall
+        origin: connector
+        connectors: 7
+        subdomains: [unused_rule, any_any, hit_count, nat, change_window, app_id]
+      - name: Load Balancer
+        origin: connector
+        connectors: 4
+        subdomains: [pool_down, ssl_offload, persistence, health_check, cert_expiry]
+      - name: Network Management
+        origin: connector
+        connectors: 6
+        subdomains: [snmp_poll, config_backup, config_drift, inventory, capacity, syslog]
+      - name: Routers
+        origin: connector
+        connectors: 3
+        subdomains: [bgp_flap, ospf_neighbor, route_leak, acl, wan_brownout]
+      - name: SD-WAN
+        origin: connector
+        connectors: 8
+        subdomains: [sla_class, underlay_fail, app_steering, overlay_flap, qos, site_brownout]
+      - name: Wireless
+        origin: connector
+        connectors: 4
+        subdomains: [ap_down, roam, rf_interference, captive_portal, controller]
+      - name: NAC
+        origin: fill
+        subdomains: [dot1x, posture, quarantine_vlan, guest_ssid, eap_cert]
+
+  - id: infra
+    label: Infra Cloud Storage
+    pillar: Gartner ITOM infrastructure · Scogo Pillar C
+    blurb: Storage (29) and Virtualization (28) are the densest connector buckets — keep first-class.
+    domains:
+      - name: Cloud Infrastructure
+        origin: connector
+        connectors: 12
+        frameworks: [Scogo D9]
+        subdomains: [landing_zone, iam_role, sg_open, quota, region_failover, orphan_resource, public_bucket]
+      - name: FinOps
+        origin: catalogue
+        frameworks: [Scogo D9]
+        subdomains: [cost_anomaly, ri_coverage, idle_orphans, tag_gap, commitment, unit_econ]
+      - name: CNAPP
+        origin: fill
+        frameworks: [CSOH CNAPP]
+        subdomains: [cspm_finding, cwpp_runtime, kspm, ciem_perm, secret_in_image, toxic_combo]
+      - name: Virtualization
+        origin: connector
+        connectors: 28
+        frameworks: [Scogo D10]
+        subdomains: [vm_health, snapshot_age, cpu_ready, datastore, ha_failover, template_golden, capacity_forecast]
+      - name: Storage
+        origin: connector
+        connectors: 29
+        frameworks: [Scogo D11]
+        subdomains: [volume_full, latency, raid_degrade, lun_map, replication, thin_provision, array_health]
+      - name: Backup
+        origin: connector
+        connectors: 17
+        frameworks: [NIST RC, Scogo D11]
+        subdomains: [job_fail, rpo_miss, restore_test, immutable, catalog_corrupt, ransomware_recovery]
+      - name: BCDR Continuity
+        origin: fill
+        frameworks: [ITIL Continuity, NIST RC]
+        subdomains: [dr_drill, rto_miss, runbook, site_failover, chaos, comms_tree]
+      - name: DCIM Facilities
+        origin: fill
+        subdomains: [pdu, cooling, rack, generator, environmental, colo]
+
+  - id: observe
+    label: Monitoring & Observability
+    pillar: Gartner Observability Platforms 2026 · Scogo D13
+    blurb: Screenshot Monitoring (28) is infra/NOC. APM/AIOps/DEM are different jobs — do not merge.
+    domains:
+      - name: Monitoring
+        origin: connector
+        connectors: 28
+        frameworks: [ITIL Monitoring, Scogo D13]
+        subdomains: [alert_storm, threshold, snmp, agent_down, auto_close, noise, runbook_restart, webhook_enrich]
+      - name: Observability APM
+        origin: fill
+        frameworks: [Gartner Observability 2026]
+        subdomains: [trace_break, golden_signals, otel, service_map, error_budget, slow_span]
+      - name: AIOps
+        origin: fill
+        frameworks: [Gartner ITOM]
+        subdomains: [correlate, suppress, probable_cause, forecast, anomaly, ticket_reduce]
+      - name: Synthetics DEM
+        origin: fill
+        frameworks: [Gartner DEM]
+        subdomains: [synthetic_fail, rum, apdex, last_mile, mobile_crash, journey]
+      - name: AI Agent Observability
+        origin: fill
+        frameworks: [Gartner Observability 2026]
+        subdomains: [tool_fail, hallucination, token_cost, loop, policy_break, eval_regress]
+
+  - id: data
+    label: Data Platform
+    pillar: Database · analytics · streaming · iPaaS
+    blurb: Screenshot Database (21) and Analytics (24) are huge; streaming/iPaaS were missing.
+    domains:
+      - name: Database
+        origin: connector
+        connectors: 21
+        subdomains: [replication_lag, failover, bloat_vacuum, connection_exhaustion, slow_query, backup_restore, blocking_locks, storage_growth]
+      - name: Analytics
+        origin: connector
+        connectors: 24
+        subdomains: [pipeline_sla, warehouse_spend, refresh_fail, semantic_layer, access, cube_stale]
+      - name: Messaging Streaming
+        origin: fill
+        subdomains: [kafka_lag, consumer_rebalance, redis_eviction, rabbit_poison, dlq_replay, schema]
+      - name: iPaaS API
+        origin: fill
+        subdomains: [connector_fail, rate_limit, mapping_break, webhook, contract_test, dead_letter]
+      - name: Data Governance
+        origin: fill
+        subdomains: [catalog_stale, lineage, quality_rule, pii_tag, retention, mdq]
+
+  - id: delivery
+    label: Delivery & Platform Eng
+    pillar: Gartner ARO · DevOps (23) · k8s · IaC · ASPM
+    blurb: Screenshot has DevOps as one bucket; split runtime (k8s) and supply-chain (ASPM).
+    domains:
+      - name: DevOps
+        origin: connector
+        connectors: 23
+        frameworks: [ITIL Deployment, ITIL Software]
+        subdomains: [pipeline_red, flaky_tests, secret_in_ci, runner_capacity, artifact, env_drift]
+      - name: Kubernetes
+        origin: fill
+        subdomains: [crashloopbackoff, oomkill, hpa_thrash, pdb_block, ingress_tls, etcd_health, pending_pods, image_cve]
+      - name: IaC GitOps
+        origin: fill
+        subdomains: [terraform_drift, state_lock, helm_rollback, argo_out_of_sync, opa_deny, module_blast_radius]
+      - name: Release Orchestration
+        origin: fill
+        frameworks: [Gartner ARO, ITIL Release]
+        subdomains: [canary_abort, rollback, feature_flag, change_freeze, artifact_promote, smoke]
+      - name: AppSec ASPM
+        origin: fill
+        frameworks: [CSOH ASPM]
+        subdomains: [sast, sca, dast, iac_scan, secret_scan, container_scan]
+      - name: Mainframe Midrange
+        origin: fill
+        frameworks: [Gartner ITOM mainframe]
+        subdomains: [batch_abend, racf, cics, capacity, tape, lpar]
+
+  - id: enterprise
+    label: Enterprise Systems IT Operates
+    pillar: CRM · HR · ERP · supplier — IT owns the integration, not the process
+    blurb: Screenshot already has CRM (9) and HR (5). ERP/supplier are the usual next tickets.
+    domains:
+      - name: CRM Sales
+        origin: connector
+        connectors: 9
+        subdomains: [sync_fail, sandbox, api_limit, sharing_rule, integration_user, duplicate]
+      - name: HR Payroll
+        origin: connector
+        connectors: 5
+        frameworks: [ITIL Workforce]
+        subdomains: [joiner_feed, payroll_file, pii, access, offboard_hris, org_chart]
+      - name: ERP Finance
+        origin: fill
+        subdomains: [sap_rfc, transport, job_fail, tcode, idoc, interface_queue]
+      - name: Supplier Contract
+        origin: fill
+        frameworks: [ITIL Supplier]
+        subdomains: [vendor_sla, license_trueup, sow, offboarding_vendor, saas_renewal]
+
+  - id: agentic
+    label: Agentic Platform
+    pillar: Scogo-specific — unique distillation signal
+    blurb: How SIA actually acts. Not in the connector list; required so the model learns guardrails not just tools.
+    domains:
+      - name: Agent Fabric
+        origin: catalogue
+        subdomains: [connector_outage, oauth_scope, mcp_tool_fail, oem_version_skew, least_privilege_app_reg, integration_auth_rot]
+      - name: SIA Guardrails
+        origin: catalogue
+        subdomains: [approval_gate, dry_run_preview, rollback, audit_export, hallucination_refuse, destructive_cmd_block, human_in_loop]
+      - name: Knowledge Graph
+        origin: catalogue
+        subdomains: [cross_system_join, stale_cmdb, alert_to_asset, identity_to_device, policy_conflict, context_gap]
+      - name: Channels Knowledge
+        origin: catalogue
+        subdomains: [slack_teams_whatsapp, sop_curation, kb_from_ticket, remote_session_learn, deflection_accuracy]
+      - name: Platform Deploy
+        origin: catalogue
+        subdomains: [saas_india, byoc, on_prem, airgap, rmm_agent, browser_intel]

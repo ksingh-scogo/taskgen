@@ -14,17 +14,17 @@ use rand::distributions::WeightedIndex;
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 
-const DEFAULT_SYSTEM_PROMPT: &str = r#"Write prompts as if a normal person asked a question on a forum or Stack Overflow. They might be tired or frustrated, but they're competent. They state the problem directly without excessive explanation. Don't be a child. Don't be a robot. Be a human who forgot to be formal. 
-Good casual: "how do I invert a matrix in numpy?", "got an off-by-one in my quicksort, code attached", "why does my async fetch return undefined"
-Bad casual: "wtf my code broken help omg ffs" (too stupid)
+const DEFAULT_SYSTEM_PROMPT: &str = r#"Write prompts as if a competent on-call asked a question at 2am — Slack, PagerDuty, a war-room thread, or an SSH session. They might be tired or frustrated, but they're competent. They state symptoms, what they already checked, and what they're afraid of. Don't be a child. Don't be a robot. Don't write a formal runbook. Be a human who forgot to be formal.
+Good casual: "zabbix is paging every 30s on the same host, I already restarted the agent, still flapping—mute or real disk?", "canary's eating error budget and CAB's frozen till Monday, rollback or ride it?", "BGP to DR flapped twice, underlay looks fine, overlay SLA class is red"
+Bad casual: "omg servers down pls help wtf" (too stupid)
 CRITICAL: Difficulty affects both phrasing AND problem complexity/scope:
-- Difficulty 1-3: Basic questions, genuine confusion, simple phrasing. Problem has a clear answer. "how do I find the distance between two points?" "what's the difference between food chains and food webs?"
-- Difficulty 4-5: Competent person with a real technical problem. State it directly. Problem has some ambiguity or competing approaches. "I'm fitting logistic regression but val/train gap is huge—what's the cleanest way to regularize without manual tuning?" Include what you've tried.
-- Difficulty 6-7: Expert-level, use terminology naturally. The problem itself has inherent tensions, trade-offs, or design choices. State them frankly. "I'm building a schema for petabyte-scale OLAP—denormalize rollups per tenant or go with hypertables/Citus? Tradeoffs for query perf vs storage?" Don't hide the complexity; phrase it casually but completely.
-- Difficulty 8-10: Cutting-edge or polymath-level. The problem has multiple valid framings, uncertain outcomes, or requires synthesis across domains. State what's hard, what's uncertain, what you're trying to balance. Use casual language but preserve the full intellectual weight. Example: "proving snapshot isolation achieves strict serializability—serialization graph blows up on cross-partition phantoms during recoveries. Any reduction techniques or counterexample generators that handle WAL redo effects?" This is expert-to-expert: you assume they know the domain, you're honest about where you're stuck.
-Write how you'd actually text a friend who's good at this stuff. Use normal punctuation. The core task must be correct.
-For difficulty 6+: Include genuine constraint conflicts, design trade-offs, or open questions—but phrase them as a competent person would, not as formal prose. Don't manufacture fake complexity. Do preserve real complexity users would actually articulate.
-Skip boilerplate. Don't include commands, code blocks, or versions unless the user would realistically paste them. "my c program wont compile" is better than "trying to build with gcc 12.2 on Ubuntu 22.04." But "gcc 12.2 keeps flagging this as an error, probably a stdlib thing" is fine if it's real context.
+- Difficulty 1-3: Junior on-call, runbook exists, one failing check, clear answer. Simple phrasing. "host is down in monitoring, ping fails, what do I check first?" "backup job failed with exit 1, logs say disk full—free space and rerun?"
+- Difficulty 4-5: Mid SRE with a real incident. Competing hypotheses, incomplete metrics, what they already tried. "latency spiked on the LB but origin p99 is fine and synthetics are green—health checks look ok, persistence or TLS offload?"
+- Difficulty 6-7: Senior. SLO vs velocity, blast-radius, change-freeze tradeoffs. State them frankly. "error budget's blown, freeze is on, but the vuln is exploitable in the wild—emergency-change the WAF or wait for CAB?" Don't hide the complexity; phrase it casually but completely.
+- Difficulty 8-10: Principal. Multi-system, unknown-unknown, no runbook, synthesis. State what's hard, what's uncertain, what you're trying to balance. Use casual language but preserve the full operational weight. Example: "packet loss only east-west between the k8s overlay and the storage VLAN during backup windows, no single dashboard shows both, and rolling the CNI would take down tenant traffic—MTU vs CRC vs noisy neighbor before we touch prod?" This is expert-to-expert: you assume they know the domain, you're honest about where you're stuck.
+Write how you'd actually text a teammate who's good at this stuff. Use normal punctuation. The core task must be correct.
+For difficulty 6+: Include genuine constraint conflicts—error budget, approval gate, blast radius, customer impact, change freeze—but phrase them as a competent person would, not as formal prose. Don't manufacture fake complexity. Do preserve real complexity operators would actually articulate.
+Skip boilerplate. Don't include commands, code blocks, or versions unless the operator would realistically paste them. "postgres is lagging" is better than "PostgreSQL 15.4 on Ubuntu 22.04 with Patroni." But "pg 15 replica lag hit 40s after the vacuum, WAL keep is 2GB" is fine if it's real context.
 Keep it short. Say the problem, not the life story. Output only the prompt itself. But "short" ≠ "simple"—it means: no padding, but all the actual complexity intact."#;
 
 const LANGUAGES: &[(&str, &str)] = &[
@@ -49,64 +49,107 @@ struct DomainDef {
     subdomains: &'static [&'static str],
 }
 
+// BEGIN GENERATED DOMAINS
 static DOMAINS: &[DomainDef] = &[
-    DomainDef { category: "math", name: "Algebra", subdomains: &["linear_equations", "polynomials", "inequalities", "matrices", "abstract_algebra"] },
-    DomainDef { category: "math", name: "Calculus", subdomains: &["derivatives", "integrals", "limits", "series", "multivariable"] },
-    DomainDef { category: "math", name: "Probability", subdomains: &["bayesian", "distributions", "combinatorics", "stochastic_processes", "markov_chains"] },
-    DomainDef { category: "math", name: "Statistics", subdomains: &["hypothesis_testing", "regression", "anova", "descriptive", "bayesian_stats"] },
-    DomainDef { category: "math", name: "Geometry", subdomains: &["euclidean", "analytic", "differential", "topology", "trigonometry"] },
-    DomainDef { category: "math", name: "Number Theory", subdomains: &["primes", "modular_arithmetic", "diophantine", "cryptographic", "algebraic_nt"] },
-    DomainDef { category: "math", name: "Discrete Math", subdomains: &["graph_theory", "combinatorics", "logic", "set_theory", "recurrence"] },
-    DomainDef { category: "math", name: "Linear Algebra", subdomains: &["vector_spaces", "eigenvalues", "transformations", "inner_product", "decompositions"] },
-    DomainDef { category: "coding", name: "Web Development", subdomains: &["html_css", "javascript", "react", "nodejs", "rest_apis", "databases", "authentication", "websockets"] },
-    DomainDef { category: "coding", name: "C++", subdomains: &["templates", "stl", "memory_management", "concurrency", "meta_programming", "algorithms"] },
-    DomainDef { category: "coding", name: "Java", subdomains: &["spring", "concurrency", "jvm", "design_patterns", "streams", "generics"] },
-    DomainDef { category: "coding", name: "JavaScript", subdomains: &["async_await", "closures", "prototypes", "modules", "typescript", "dom", "node"] },
-    DomainDef { category: "coding", name: "C", subdomains: &["pointers", "memory", "systems_programming", "ffi", "embedded", "algorithms"] },
-    DomainDef { category: "coding", name: "Ruby", subdomains: &["metaprogramming", "rails", "blocks_procs", "concurrency", "gems", "dsls"] },
-    DomainDef { category: "coding", name: "Lua", subdomains: &["coroutines", "metatable", "game_scripting", "embedded", "neovim", "love2d"] },
-    DomainDef { category: "coding", name: "Rust", subdomains: &["ownership", "lifetimes", "traits", "async", "unsafe", "macros", "cargo"] },
-    DomainDef { category: "coding", name: "C#", subdomains: &["linq", "async", "unity", "dotnet", "generics", "reflection", "entity_framework"] },
-    DomainDef { category: "coding", name: "Python", subdomains: &["data_science", "ml", "web_frameworks", "scripting", "asyncio", "decorators"] },
-    DomainDef { category: "coding", name: "Go", subdomains: &["goroutines", "channels", "interfaces", "modules", "networking", "microservices"] },
-    DomainDef { category: "coding", name: "SQL", subdomains: &["queries", "optimization", "schema_design", "transactions", "window_functions", "nosql_comparison"] },
-    DomainDef { category: "science", name: "Physics", subdomains: &["mechanics", "thermodynamics", "electromagnetism", "quantum", "relativity", "optics", "fluid_dynamics"] },
-    DomainDef { category: "science", name: "Chemistry", subdomains: &["organic", "inorganic", "physical", "analytical", "biochemistry", "electrochemistry"] },
-    DomainDef { category: "science", name: "Biology", subdomains: &["genetics", "ecology", "cell_biology", "evolution", "microbiology", "neuroscience", "immunology"] },
-    DomainDef { category: "science", name: "Earth Science", subdomains: &["geology", "meteorology", "oceanography", "climate", "mineralogy", "volcanology"] },
-    DomainDef { category: "science", name: "Astronomy", subdomains: &["stellar", "planetary", "cosmology", "astrophysics", "observational", "astrobiology"] },
-    DomainDef { category: "cs", name: "Algorithms", subdomains: &["sorting", "searching", "dynamic_programming", "greedy", "divide_conquer", "graph_algorithms"] },
-    DomainDef { category: "cs", name: "Data Structures", subdomains: &["trees", "graphs", "hash_tables", "heaps", "tries", "bloom_filters"] },
-    DomainDef { category: "cs", name: "Operating Systems", subdomains: &["processes", "memory_management", "filesystems", "scheduling", "virtualization", "concurrency"] },
-    DomainDef { category: "cs", name: "Networking", subdomains: &["tcp_ip", "dns", "http", "routing", "security", "wireless", "load_balancing"] },
-    DomainDef { category: "cs", name: "Databases", subdomains: &["relational", "nosql", "indexing", "transactions", "distributed", "query_optimization"] },
-    DomainDef { category: "cs", name: "Compilers", subdomains: &["lexing", "parsing", "ast", "code_gen", "optimization", "type_checking"] },
-    DomainDef { category: "cs", name: "Distributed Systems", subdomains: &["consensus", "replication", "partitioning", "cap_theorem", "mapreduce", "eventual_consistency"] },
-    DomainDef { category: "cs", name: "Machine Learning", subdomains: &["supervised", "unsupervised", "reinforcement", "neural_networks", "transformers", "evaluation"] },
-    DomainDef { category: "cs", name: "Cybersecurity", subdomains: &["cryptography", "network_security", "web_security", "reverse_engineering", "forensics", "malware_analysis"] },
-    DomainDef { category: "cs", name: "Software Engineering", subdomains: &["testing", "ci_cd", "design_patterns", "agile", "refactoring", "documentation"] },
-    DomainDef { category: "creative", name: "Fiction", subdomains: &["short_story", "flash_fiction", "dialogue", "worldbuilding", "character_dev", "plot_twist"] },
-    DomainDef { category: "creative", name: "Poetry", subdomains: &["sonnet", "free_verse", "haiku", "narrative", "spoken_word", "lyric"] },
-    DomainDef { category: "creative", name: "Screenwriting", subdomains: &["dialogue", "scene", "monologue", "plot_structure", "character_arc", "formatting"] },
-    DomainDef { category: "creative", name: "Journalism", subdomains: &["investigative", "feature", "opinion", "reporting", "interview", "editorial"] },
-    DomainDef { category: "creative", name: "Songwriting", subdomains: &["lyrics", "melody_description", "concept", "hook", "verse_chorus", "story_song"] },
-    DomainDef { category: "creative", name: "Game Narrative", subdomains: &["quest_design", "dialogue_trees", "lore", "cutscene", "branching_narrative", "environmental_storytelling"] },
-    DomainDef { category: "creative", name: "Copywriting", subdomains: &["ad_copy", "slogans", "product_descriptions", "email_marketing", "social_media", "brand_voice"] },
-    DomainDef { category: "creative", name: "Blogging", subdomains: &["how_to", "listicle", "opinion", "tutorial", "review", "personal_essay"] },
-    DomainDef { category: "conversation", name: "Debate", subdomains: &["formal", "casual", "philosophical", "scientific", "political", "ethical"] },
-    DomainDef { category: "conversation", name: "Advice", subdomains: &["career", "relationship", "academic", "financial", "health", "technical"] },
-    DomainDef { category: "conversation", name: "Interview", subdomains: &["job", "podcast", "journalistic", "research", "behavioral", "technical_interview"] },
-    DomainDef { category: "conversation", name: "Teaching", subdomains: &["socratic", "mentoring", "tutoring", "lecture_qa", "feedback", "study_guidance"] },
-    DomainDef { category: "conversation", name: "Roleplay", subdomains: &["historical_figure", "professional", "customer_service", "therapy", "negotiation", "collaborative"] },
+    DomainDef { category: "itsm", name: "Service Desk", subdomains: &["auto_deflection", "classification_routing", "l0_l1_autoresolve", "ticket_enrichment", "sla_breach", "major_incident", "approval_workflows", "reassignment_churn", "conversational_status", "knowledge_deflection"] },
+    DomainDef { category: "itsm", name: "Incident Management", subdomains: &["sev_classify", "war_room", "customer_comms", "timeline", "page_storm", "commander_role", "handoff", "major_incident_bridge"] },
+    DomainDef { category: "itsm", name: "Problem Management", subdomains: &["rca", "known_error", "workaround", "problem_trend", "ke_article", "recurring_incident"] },
+    DomainDef { category: "itsm", name: "Change Enablement", subdomains: &["cab_risk", "emergency_change", "backout_plan", "collision_window", "standard_change", "post_impl_verify", "freeze_calendar"] },
+    DomainDef { category: "itsm", name: "Request Catalog", subdomains: &["catalog_item", "fulfillment_path", "entitlement", "approval_chain", "service_offering", "request_sla"] },
+    DomainDef { category: "itsm", name: "CMDB Configuration", subdomains: &["ci_reconciliation", "relationship_map", "stale_ci", "discovery_gap", "service_mapping", "orphan_ci"] },
+    DomainDef { category: "itsm", name: "Knowledge Management", subdomains: &["kb_gap", "article_decay", "sop_from_ticket", "search_miss", "deflection_quality", "conflicting_sop"] },
+    DomainDef { category: "itsm", name: "Task Project Management", subdomains: &["sprint_block", "it_project_risk", "dependency", "resource_conflict", "change_project", "milestone_slip"] },
+    DomainDef { category: "itsm", name: "SLA Measurement", subdomains: &["sla_clock", "ola_breach", "kpi_drift", "report_pack", "under_reporting"] },
+    DomainDef { category: "workplace", name: "Collaboration Messaging", subdomains: &["teams_outage", "slack_guest", "channel_perm", "message_retention", "webhook_fail", "federation"] },
+    DomainDef { category: "workplace", name: "Email Communication", subdomains: &["mailbox_full", "mail_flow", "shared_mailbox", "alias", "journaling", "transport_rule"] },
+    DomainDef { category: "workplace", name: "Calendar Scheduling", subdomains: &["room_conflict", "booking_delegate", "timezone", "resource_mailbox", "calendar_perm"] },
+    DomainDef { category: "workplace", name: "Document Management", subdomains: &["share_perm", "version_conflict", "retention_label", "sync_fail", "external_share", "checkout_lock"] },
+    DomainDef { category: "workplace", name: "Content Website", subdomains: &["cms_outage", "publish_fail", "cert_on_site", "wcm_perm", "plugin_break"] },
+    DomainDef { category: "workplace", name: "Print Workplace Devices", subdomains: &["print_queue", "driver_mapping", "scan_workflow", "meeting_room_av", "badge_access", "thin_client"] },
+    DomainDef { category: "workplace", name: "UCaaS Voice", subdomains: &["call_quality", "sbc", "did_port", "contact_center_queue", "voicemail", "recording_compliance"] },
+    DomainDef { category: "workplace", name: "Digital Experience", subdomains: &["login_slowness", "saas_apdex", "rum_error", "last_mile", "crash_free"] },
+    DomainDef { category: "endpoint", name: "RMM", subdomains: &["agent_offline", "self_heal", "script_fail", "patch_job", "remote_session", "policy_drift"] },
+    DomainDef { category: "endpoint", name: "UEM MDM", subdomains: &["enrollment", "compliance_policy", "wipe", "app_push", "byod_privacy", "autopilot"] },
+    DomainDef { category: "endpoint", name: "VDI DaaS", subdomains: &["pool_exhaust", "profile_corrupt", "protocol_quality", "golden_image", "gpu_contention", "broker"] },
+    DomainDef { category: "endpoint", name: "Endpoint Health", subdomains: &["health_score", "disk_pressure", "encryption_bitlocker", "edr_presence", "baseline_drift", "service_failures"] },
+    DomainDef { category: "identity", name: "Identity Access", subdomains: &["joiner", "mover", "leaver", "sso_break", "mfa_enrollment", "conditional_access", "scim_sync", "guest_stale", "entra_ad_sync"] },
+    DomainDef { category: "identity", name: "Privileged Access", subdomains: &["vault_checkout", "jit_elevation", "session_record", "standing_admin", "password_rotation", "break_glass"] },
+    DomainDef { category: "identity", name: "Identity Governance", subdomains: &["access_certification", "sod_conflict", "orphan_account", "entitlement_creep", "role_mining", "joiner_lag"] },
+    DomainDef { category: "identity", name: "Directory Services", subdomains: &["ad_replication", "fsmo", "gpo_drift", "aad_connect", "ldap_bind", "dns_srv"] },
+    DomainDef { category: "secops", name: "SIEM", subdomains: &["use_case_tune", "parser_break", "ingestion_lag", "correlation_miss", "ueba_alert", "retention_cost", "data_lake"] },
+    DomainDef { category: "secops", name: "SOAR", subdomains: &["playbook_fail", "enrichment_gap", "ticket_loop", "containment_action", "approval_gate", "stale_playbook"] },
+    DomainDef { category: "secops", name: "EDR XDR", subdomains: &["isolate_host", "false_positive", "ransomware_roll", "sensor_health", "threat_hunt", "identity_signal"] },
+    DomainDef { category: "secops", name: "Vulnerability Management", subdomains: &["scan_coverage", "risk_score", "exception_waiver", "exploit_available", "agentless_gap", "patch_advisory"] },
+    DomainDef { category: "secops", name: "Threat Intel NDR", subdomains: &["ioc_match", "dns_tunnel", "lateral_movement", "beacon", "feed_stale", "east_west"] },
+    DomainDef { category: "secops", name: "GRC Audit", subdomains: &["control_evidence", "iso27001", "soc2", "policy_exception", "vendor_risk", "dpdp"] },
+    DomainDef { category: "secops", name: "Forensics IR", subdomains: &["disk_image", "chain_of_custody", "timeline", "malware_sandbox", "legal_hold", "memory_capture"] },
+    DomainDef { category: "secure_edge", name: "SASE SSE", subdomains: &["ztna_app", "swg_block", "fwaas", "private_access", "policy_conflict", "user_steering"] },
+    DomainDef { category: "secure_edge", name: "CASB", subdomains: &["unsanctioned_saas", "session_control", "api_mode", "shadow_it", "dlp_saas"] },
+    DomainDef { category: "secure_edge", name: "Data Loss Prevention", subdomains: &["exfil_alert", "false_positive", "endpoint_dlp", "email_dlp", "classification"] },
+    DomainDef { category: "secure_edge", name: "Email Security", subdomains: &["phish", "bec", "spoof_dmarc", "quarantine", "impersonation", "time_of_click"] },
+    DomainDef { category: "secure_edge", name: "Web Security", subdomains: &["url_filter", "malicious_site", "ssl_inspect", "category_miss", "swg_bypass"] },
+    DomainDef { category: "secure_edge", name: "WAF DDoS", subdomains: &["l7_flood", "bot", "owasp", "api_abuse", "tls_policy", "origin_shield"] },
+    DomainDef { category: "secure_edge", name: "DSPM", subdomains: &["public_bucket_data", "shadow_db", "classification_gap", "overshare", "lineage"] },
+    DomainDef { category: "secure_edge", name: "SSPM", subdomains: &["saas_posture", "third_party_app", "oauth_grant", "m365_hardening", "salesforce_perm"] },
+    DomainDef { category: "network", name: "Networking", subdomains: &["l2_loop", "dhcp_exhaust", "spanning_tree", "vlan_misconfig", "mtu", "ipam"] },
+    DomainDef { category: "network", name: "DNS CDN", subdomains: &["dns_outage", "cache_poison", "cdn_purge", "ttl", "split_horizon", "dnssec"] },
+    DomainDef { category: "network", name: "Firewall", subdomains: &["unused_rule", "any_any", "hit_count", "nat", "change_window", "app_id"] },
+    DomainDef { category: "network", name: "Load Balancer", subdomains: &["pool_down", "ssl_offload", "persistence", "health_check", "cert_expiry"] },
+    DomainDef { category: "network", name: "Network Management", subdomains: &["snmp_poll", "config_backup", "config_drift", "inventory", "capacity", "syslog"] },
+    DomainDef { category: "network", name: "Routers", subdomains: &["bgp_flap", "ospf_neighbor", "route_leak", "acl", "wan_brownout"] },
+    DomainDef { category: "network", name: "SD-WAN", subdomains: &["sla_class", "underlay_fail", "app_steering", "overlay_flap", "qos", "site_brownout"] },
+    DomainDef { category: "network", name: "Wireless", subdomains: &["ap_down", "roam", "rf_interference", "captive_portal", "controller"] },
+    DomainDef { category: "network", name: "NAC", subdomains: &["dot1x", "posture", "quarantine_vlan", "guest_ssid", "eap_cert"] },
+    DomainDef { category: "infra", name: "Cloud Infrastructure", subdomains: &["landing_zone", "iam_role", "sg_open", "quota", "region_failover", "orphan_resource", "public_bucket"] },
+    DomainDef { category: "infra", name: "FinOps", subdomains: &["cost_anomaly", "ri_coverage", "idle_orphans", "tag_gap", "commitment", "unit_econ"] },
+    DomainDef { category: "infra", name: "CNAPP", subdomains: &["cspm_finding", "cwpp_runtime", "kspm", "ciem_perm", "secret_in_image", "toxic_combo"] },
+    DomainDef { category: "infra", name: "Virtualization", subdomains: &["vm_health", "snapshot_age", "cpu_ready", "datastore", "ha_failover", "template_golden", "capacity_forecast"] },
+    DomainDef { category: "infra", name: "Storage", subdomains: &["volume_full", "latency", "raid_degrade", "lun_map", "replication", "thin_provision", "array_health"] },
+    DomainDef { category: "infra", name: "Backup", subdomains: &["job_fail", "rpo_miss", "restore_test", "immutable", "catalog_corrupt", "ransomware_recovery"] },
+    DomainDef { category: "infra", name: "BCDR Continuity", subdomains: &["dr_drill", "rto_miss", "runbook", "site_failover", "chaos", "comms_tree"] },
+    DomainDef { category: "infra", name: "DCIM Facilities", subdomains: &["pdu", "cooling", "rack", "generator", "environmental", "colo"] },
+    DomainDef { category: "observe", name: "Monitoring", subdomains: &["alert_storm", "threshold", "snmp", "agent_down", "auto_close", "noise", "runbook_restart", "webhook_enrich"] },
+    DomainDef { category: "observe", name: "Observability APM", subdomains: &["trace_break", "golden_signals", "otel", "service_map", "error_budget", "slow_span"] },
+    DomainDef { category: "observe", name: "AIOps", subdomains: &["correlate", "suppress", "probable_cause", "forecast", "anomaly", "ticket_reduce"] },
+    DomainDef { category: "observe", name: "Synthetics DEM", subdomains: &["synthetic_fail", "rum", "apdex", "last_mile", "mobile_crash", "journey"] },
+    DomainDef { category: "observe", name: "AI Agent Observability", subdomains: &["tool_fail", "hallucination", "token_cost", "loop", "policy_break", "eval_regress"] },
+    DomainDef { category: "data", name: "Database", subdomains: &["replication_lag", "failover", "bloat_vacuum", "connection_exhaustion", "slow_query", "backup_restore", "blocking_locks", "storage_growth"] },
+    DomainDef { category: "data", name: "Analytics", subdomains: &["pipeline_sla", "warehouse_spend", "refresh_fail", "semantic_layer", "access", "cube_stale"] },
+    DomainDef { category: "data", name: "Messaging Streaming", subdomains: &["kafka_lag", "consumer_rebalance", "redis_eviction", "rabbit_poison", "dlq_replay", "schema"] },
+    DomainDef { category: "data", name: "iPaaS API", subdomains: &["connector_fail", "rate_limit", "mapping_break", "webhook", "contract_test", "dead_letter"] },
+    DomainDef { category: "data", name: "Data Governance", subdomains: &["catalog_stale", "lineage", "quality_rule", "pii_tag", "retention", "mdq"] },
+    DomainDef { category: "delivery", name: "DevOps", subdomains: &["pipeline_red", "flaky_tests", "secret_in_ci", "runner_capacity", "artifact", "env_drift"] },
+    DomainDef { category: "delivery", name: "Kubernetes", subdomains: &["crashloopbackoff", "oomkill", "hpa_thrash", "pdb_block", "ingress_tls", "etcd_health", "pending_pods", "image_cve"] },
+    DomainDef { category: "delivery", name: "IaC GitOps", subdomains: &["terraform_drift", "state_lock", "helm_rollback", "argo_out_of_sync", "opa_deny", "module_blast_radius"] },
+    DomainDef { category: "delivery", name: "Release Orchestration", subdomains: &["canary_abort", "rollback", "feature_flag", "change_freeze", "artifact_promote", "smoke"] },
+    DomainDef { category: "delivery", name: "AppSec ASPM", subdomains: &["sast", "sca", "dast", "iac_scan", "secret_scan", "container_scan"] },
+    DomainDef { category: "delivery", name: "Mainframe Midrange", subdomains: &["batch_abend", "racf", "cics", "capacity", "tape", "lpar"] },
+    DomainDef { category: "enterprise", name: "CRM Sales", subdomains: &["sync_fail", "sandbox", "api_limit", "sharing_rule", "integration_user", "duplicate"] },
+    DomainDef { category: "enterprise", name: "HR Payroll", subdomains: &["joiner_feed", "payroll_file", "pii", "access", "offboard_hris", "org_chart"] },
+    DomainDef { category: "enterprise", name: "ERP Finance", subdomains: &["sap_rfc", "transport", "job_fail", "tcode", "idoc", "interface_queue"] },
+    DomainDef { category: "enterprise", name: "Supplier Contract", subdomains: &["vendor_sla", "license_trueup", "sow", "offboarding_vendor", "saas_renewal"] },
+    DomainDef { category: "agentic", name: "Agent Fabric", subdomains: &["connector_outage", "oauth_scope", "mcp_tool_fail", "oem_version_skew", "least_privilege_app_reg", "integration_auth_rot"] },
+    DomainDef { category: "agentic", name: "SIA Guardrails", subdomains: &["approval_gate", "dry_run_preview", "rollback", "audit_export", "hallucination_refuse", "destructive_cmd_block", "human_in_loop"] },
+    DomainDef { category: "agentic", name: "Knowledge Graph", subdomains: &["cross_system_join", "stale_cmdb", "alert_to_asset", "identity_to_device", "policy_conflict", "context_gap"] },
+    DomainDef { category: "agentic", name: "Channels Knowledge", subdomains: &["slack_teams_whatsapp", "sop_curation", "kb_from_ticket", "remote_session_learn", "deflection_accuracy"] },
+    DomainDef { category: "agentic", name: "Platform Deploy", subdomains: &["saas_india", "byoc", "on_prem", "airgap", "rmm_agent", "browser_intel"] },
 ];
+// END GENERATED DOMAINS
 
 const DEFAULT_DISTRIBUTION: &[(&str, f64)] = &[
-    ("math", 0.25),
-    ("coding", 0.25),
-    ("science", 0.15),
-    ("cs", 0.15),
-    ("creative", 0.10),
-    ("conversation", 0.10),
+    ("infra", 0.16),
+    ("observe", 0.12),
+    ("network", 0.12),
+    ("secops", 0.10),
+    ("secure_edge", 0.08),
+    ("identity", 0.08),
+    ("endpoint", 0.08),
+    ("delivery", 0.07),
+    ("data", 0.06),
+    ("itsm", 0.05),
+    ("workplace", 0.04),
+    ("agentic", 0.03),
+    ("enterprise", 0.01),
 ];
 
 const DEFAULT_DIFFICULTY: &[(u8, f64)] = &[
@@ -124,16 +167,16 @@ const DEFAULT_DIFFICULTY: &[(u8, f64)] = &[
 
 fn difficulty_label(d: u8) -> &'static str {
     match d {
-        1 => "Very Easy (child-level)",
-        2 => "Easy (elementary)",
-        3 => "Basic (middle school)",
-        4 => "Intermediate (high school)",
-        5 => "Standard (undergraduate intro)",
-        6 => "Skilled (undergraduate advanced)",
-        7 => "Proficient (graduate level)",
-        8 => "Advanced (professional/researcher)",
-        9 => "Expert (top specialist)",
-        10 => "Polymath (1-in-a-million genius)",
+        1 => "Very Easy (junior on-call)",
+        2 => "Easy (runbook exists)",
+        3 => "Basic (one failing check)",
+        4 => "Intermediate (mid SRE)",
+        5 => "Standard (incomplete metrics)",
+        6 => "Skilled (senior, SLO tradeoffs)",
+        7 => "Proficient (blast-radius / freeze)",
+        8 => "Advanced (principal, multi-system)",
+        9 => "Expert (unknown-unknown)",
+        10 => "Principal (no runbook, synthesis)",
         _ => "Unknown",
     }
 }
@@ -895,8 +938,8 @@ fn generate_readme(
     md.push_str("```json\n");
     md.push_str("{\n");
     md.push_str("  \"prompt\": \"...\",\n");
-    md.push_str("  \"domain\": \"math::Algebra\",\n");
-    md.push_str("  \"subdomain\": \"polynomials\",\n");
+    md.push_str("  \"domain\": \"infra::Storage\",\n");
+    md.push_str("  \"subdomain\": \"raid_degrade\",\n");
     md.push_str("  \"difficulty\": 5,\n");
     if args.multilingual {
         md.push_str("  \"language\": \"en\",\n");
@@ -965,7 +1008,7 @@ async fn main() -> Result<()> {
 
     let pool = build_domain_pool(&dist);
     if pool.is_empty() {
-        bail!("no domains matched the given distribution. Available categories: math, coding, science, cs, creative, conversation");
+        bail!("no domains matched the given distribution. Available categories: infra, observe, network, secops, secure_edge, identity, endpoint, delivery, data, itsm, workplace, agentic, enterprise");
     }
 
     let system_prompt = args.system_prompt.as_deref().unwrap_or(DEFAULT_SYSTEM_PROMPT);
