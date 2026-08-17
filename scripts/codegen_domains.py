@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Codegen Rust DOMAINS from docs/it-ops-taxonomy.yaml.
+"""Codegen Rust DOMAINS and DEFAULT_DISTRIBUTION from docs/it-ops-taxonomy.yaml.
 
-Prints the static DOMAINS array. With --write, splices it into src/main.rs
-between BEGIN/END GENERATED DOMAINS markers.
+Prints the generated blocks. With --write, splices them into src/main.rs
+between BEGIN/END GENERATED DOMAINS and BEGIN/END GENERATED DISTRIBUTION.
 
     python scripts/codegen_domains.py
     python scripts/codegen_domains.py --write
@@ -24,6 +24,8 @@ YAML_PATH = REPO / "docs" / "it-ops-taxonomy.yaml"
 MAIN_RS = REPO / "src" / "main.rs"
 BEGIN = "// BEGIN GENERATED DOMAINS"
 END = "// END GENERATED DOMAINS"
+BEGIN_DIST = "// BEGIN GENERATED DISTRIBUTION"
+END_DIST = "// END GENERATED DISTRIBUTION"
 
 
 def rust_str(s: str) -> str:
@@ -59,15 +61,28 @@ def stats(tax: dict) -> tuple[int, int, list[str]]:
     return n_dom, n_sub, ids
 
 
-def splice(block: str) -> None:
+def rust_distribution(tax: dict) -> str:
+    lines = ["const DEFAULT_DISTRIBUTION: &[(&str, f64)] = &["]
+    for key, weight in tax["default_distribution"].items():
+        lines.append(f'    ({rust_str(str(key))}, {float(weight):.2f}),')
+    lines.append("];")
+    return "\n".join(lines)
+
+
+def splice_marked(text: str, begin: str, end: str, block: str) -> str:
+    start = text.find(begin)
+    stop = text.find(end)
+    if start < 0 or stop < 0 or stop <= start:
+        sys.exit(f"missing {begin} / {end} markers in {MAIN_RS}")
+    stop += len(end)
+    return text[:start] + f"{begin}\n{block}\n{end}" + text[stop:]
+
+
+def splice(domains: str, distribution: str) -> None:
     text = MAIN_RS.read_text(encoding="utf-8")
-    start = text.find(BEGIN)
-    end = text.find(END)
-    if start < 0 or end < 0 or end <= start:
-        sys.exit(f"missing {BEGIN} / {END} markers in {MAIN_RS}")
-    end += len(END)
-    replacement = f"{BEGIN}\n{block}\n{END}"
-    MAIN_RS.write_text(text[:start] + replacement + text[end:], encoding="utf-8")
+    text = splice_marked(text, BEGIN, END, domains)
+    text = splice_marked(text, BEGIN_DIST, END_DIST, distribution)
+    MAIN_RS.write_text(text, encoding="utf-8")
 
 
 def main() -> None:
@@ -77,15 +92,18 @@ def main() -> None:
 
     tax = load_taxonomy()
     n_dom, n_sub, ids = stats(tax)
-    block = rust_domains(tax)
+    domains = rust_domains(tax)
+    distribution = rust_distribution(tax)
     print(f"{len(ids)} categories, {n_dom} domains, {n_sub} subdomains", file=sys.stderr)
     print("categories: " + ", ".join(ids), file=sys.stderr)
 
     if args.write:
-        splice(block)
-        print(f"wrote DOMAINS into {MAIN_RS}", file=sys.stderr)
+        splice(domains, distribution)
+        print(f"wrote DOMAINS + DEFAULT_DISTRIBUTION into {MAIN_RS}", file=sys.stderr)
     else:
-        print(block)
+        print(domains)
+        print()
+        print(distribution)
 
 
 if __name__ == "__main__":

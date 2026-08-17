@@ -1,10 +1,11 @@
 # taskgen
 
-A fast, concurrent SFT (Supervised Fine-Tuning) task generator for distillation datasets. Generates diverse, difficulty-weighted IT Ops / SRE prompts across infra, observability, network, secops, identity, and related domains — via any OpenAI-compatible API.
+A fast, concurrent SFT (Supervised Fine-Tuning) task generator for distillation datasets. Generates diverse, difficulty-weighted IT Ops / SRE prompts across infra, observability, network, secops, identity, OEM/ISV products, and related domains — via any OpenAI-compatible API.
 
 ## Features
 
-- 82 domains, 498 subdomains across 13 IT Ops categories (from `docs/it-ops-taxonomy.yaml`)
+- 129 domains, 884 subdomains across 14 IT Ops categories (from `docs/it-ops-taxonomy.yaml`)
+- Vendor-first `oem` category: product lines as subdomains, SKU/firmware/CLI/TAC prompt voice
 - Weighted difficulty sampling (1–10 scale)
 - Configurable category distribution
 - Concurrent generation with lock-free atomic stats and pre-sampled task batches
@@ -56,10 +57,10 @@ taskgen [OPTIONS]
 | `-o, --output <FILE>` | `output.jsonl` | Output file path |
 | `-t, --temperature <F>` | `0.9` | Sampling temperature |
 | `--append` | — | Append to existing output file |
-| `--distribution <STR>` | balanced | Category weights (see below) |
+| `--distribution <STR>` | see Domains | Category weights (`cat=w,cat=w`, must sum to ~1.0) |
 | `--difficulty <STR>` | bell curve | Difficulty weights (see below) |
 | `--multilingual` | — | Generate tasks in 8 languages and split output by language |
-| `--system-prompt <STR>` | built-in | Override the system prompt |
+| `--system-prompt <STR>` | built-in | Override the system prompt. `oem` tasks still get the product-voice addendum |
 | `--input-price <F>` | — | Input token price per 1M tokens (for cost tracking) |
 | `--output-price <F>` | — | Output token price per 1M tokens |
 | `--budget <F>` | — | Hard cost cap in USD (requires price flags) |
@@ -208,6 +209,11 @@ taskgen \
 taskgen --api-key $OPENAI_API_KEY --distribution "infra=0.4,observe=0.3,network=0.3" -c 500
 ```
 
+**OEM / ISV only — vendor-product prompts (FortiGate, EKS, Falcon, …):**
+```bash
+taskgen --api-key $OPENAI_API_KEY --distribution "oem=1.0" -c 250 -o data/oem.jsonl
+```
+
 **Custom difficulty — only hard tasks (levels 7–10):**
 ```bash
 taskgen --api-key $OPENAI_API_KEY --difficulty "7=0.25,8=0.25,9=0.25,10=0.25" -c 500
@@ -234,31 +240,84 @@ Each line in the JSONL file is a self-contained task record:
 }
 ```
 
+Capability categories use failure-mode subdomains (`raid_degrade`). `oem` uses product lines:
+
+```json
+{
+  "prompt": "FortiGate 200F HA split-brain after 7.4.5, FGSP config sync stuck, TAC wants diagnose debug flow before we fail over—cut or wait?",
+  "domain": "oem::Fortinet",
+  "subdomain": "fortigate",
+  "difficulty": 6,
+  "taskgen_model": "scogoai/gpt-5.6-luna-max",
+  "temperature": 0.9
+}
+```
+
 The `language` field is only present when `--multilingual` is used.
 
 A dataset README summarising run parameters, token usage, and cost is written next to the JSONL as `{stem}.README.md` (for `-o data/itops.jsonl` that is `data/itops.README.md`). It does not overwrite the project `README.md`.
 
 ## Domains
 
-Source of truth: `docs/it-ops-taxonomy.yaml`. Regenerate the Rust catalog with `python scripts/codegen_domains.py --write`.
+Source of truth: `docs/it-ops-taxonomy.yaml`. Regenerates both the Rust `DOMAINS` catalog and `DEFAULT_DISTRIBUTION`:
+
+```bash
+pip install pyyaml   # or use the project venv
+python scripts/codegen_domains.py --write
+```
 
 Default `--distribution` is biased toward autonomous infra ops (signal → decision → action → validation), not CRM/HR/ESM. Weights sum to 1.0.
 
+Two sampling axes share the same 3-level schema (`category` → `domain` → `subdomain`):
+
+| Axis | Categories | Subdomain meaning | Example |
+|---|---|---|---|
+| Capability | everything except `oem` | failure mode | `network::Firewall` / `unused_rule` |
+| Vendor / platform | `oem` | product line | `oem::Fortinet` / `fortigate` |
+
+Overlap is intentional. A generic firewall ticket and a FortiGate TAC ticket train different muscle. Do not dedup across categories.
+
 | Category | Weight | Domains |
 |---|---|---|
-| `infra` | 0.16 | Cloud Infrastructure, FinOps, CNAPP, Virtualization, Storage, Backup, BCDR Continuity, DCIM Facilities |
-| `observe` | 0.12 | Monitoring, Observability APM, AIOps, Synthetics DEM, AI Agent Observability |
-| `network` | 0.12 | Networking, DNS CDN, Firewall, Load Balancer, Network Management, Routers, SD-WAN, Wireless, NAC |
-| `secops` | 0.10 | SIEM, SOAR, EDR XDR, Vulnerability Management, Threat Intel NDR, GRC Audit, Forensics IR |
-| `secure_edge` | 0.08 | SASE SSE, CASB, Data Loss Prevention, Email Security, Web Security, WAF DDoS, DSPM, SSPM |
-| `identity` | 0.08 | Identity Access, Privileged Access, Identity Governance, Directory Services |
-| `endpoint` | 0.08 | RMM, UEM MDM, VDI DaaS, Endpoint Health |
-| `delivery` | 0.07 | DevOps, Kubernetes, IaC GitOps, Release Orchestration, AppSec ASPM, Mainframe Midrange |
-| `data` | 0.06 | Database, Analytics, Messaging Streaming, iPaaS API, Data Governance |
+| `infra` | 0.15 | Cloud Infrastructure, FinOps, CNAPP, Virtualization, Storage, Backup, BCDR Continuity, DCIM Facilities |
+| `observe` | 0.11 | Monitoring, Observability APM, AIOps, Synthetics DEM, AI Agent Observability |
+| `network` | 0.11 | Networking, DNS CDN, Firewall, Load Balancer, Network Management, Routers, SD-WAN, Wireless, NAC |
+| `oem` | 0.10 | 33 named vendors + 14 long-tail buckets (see below) |
+| `secops` | 0.09 | SIEM, SOAR, EDR XDR, Vulnerability Management, Threat Intel NDR, GRC Audit, Forensics IR |
+| `secure_edge` | 0.07 | SASE SSE, CASB, Data Loss Prevention, Email Security, Web Security, WAF DDoS, DSPM, SSPM |
+| `identity` | 0.07 | Identity Access, Privileged Access, Identity Governance, Directory Services |
+| `endpoint` | 0.07 | RMM, UEM MDM, VDI DaaS, Endpoint Health |
+| `delivery` | 0.06 | DevOps, Kubernetes, IaC GitOps, Release Orchestration, AppSec ASPM, Mainframe Midrange |
+| `data` | 0.05 | Database, Analytics, Messaging Streaming, iPaaS API, Data Governance |
 | `itsm` | 0.05 | Service Desk, Incident Management, Problem Management, Change Enablement, Request Catalog, CMDB Configuration, Knowledge Management, Task Project Management, SLA Measurement |
-| `workplace` | 0.04 | Collaboration Messaging, Email Communication, Calendar Scheduling, Document Management, Content Website, Print Workplace Devices, UCaaS Voice, Digital Experience |
+| `workplace` | 0.03 | Collaboration Messaging, Email Communication, Calendar Scheduling, Document Management, Content Website, Print Workplace Devices, UCaaS Voice, Digital Experience |
 | `agentic` | 0.03 | Agent Fabric, SIA Guardrails, Knowledge Graph, Channels Knowledge, Platform Deploy |
 | `enterprise` | 0.01 | CRM Sales, HR Payroll, ERP Finance, Supplier Contract |
+
+### OEM / ISV / Platform
+
+47 domains, 386 product-line subdomains. Named vendors are specialist portfolios (Cisco, AWS, CrowdStrike). Buckets hold long-tail brands (Veeam, Grafana, Jamf). Kubernetes and Linux distros count as platforms even though they are not companies.
+
+`oem` generation appends a product-voice addendum to the system prompt (even if `--system-prompt` is set) and asks for SKU / firmware / CLI / console / TAC / license language. It must not emit a generic capability ticket.
+
+| Group | Named vendors | Long-tail buckets |
+|---|---|---|
+| Hyperscale cloud | AWS, Azure, Google Cloud | Other Cloud (`oci`, `ibm_cloud`, `alibaba`, `digitalocean`, `akamai_linode`, `ovh`, `hetzner`) |
+| OS & distros | Microsoft, IBM, Red Hat, Canonical | Linux Distros (`debian`, `rocky`, `alma`, `oracle_linux`, `amazon_linux`, `sles`, `freebsd`) |
+| Containers | Kubernetes | — |
+| Network OEM | Cisco, Juniper, Fortinet, Versa, Palo Alto, HPE Aruba | Other Network OEM (`arista_eos`, `extreme`, `ubiquiti`, `mikrotik`, `f5_bigip`, `checkpoint`, `nokia_srlinux`, `sonicwall`, `ruckus`, `infoblox`) |
+| Secure edge | Cloudflare, Zscaler | Other SASE (`netskope`, `cato`, `forcepoint`, `skyhigh`, `perimeter81`) |
+| Security & identity | CrowdStrike, CyberArk, Okta | Other Security ISV (`sentinelone`, `tenable`, `qualys`, `rapid7`, `proofpoint`, `mimecast`, `trend_micro`, `sophos`, `tanium`, `darktrace`); Other Identity ISV (`ping`, `sailpoint`, `beyondtrust`, `delinea`, `forgerock`, `jumpcloud`) |
+| Compute & storage | Dell, HPE, NetApp, Pure Storage | Other Compute OEM (`lenovo_thinksystem`, `supermicro`, `hitachi_vantara`) |
+| Virtualization | VMware, Nutanix | Other Hypervisor (`proxmox`, `citrix_cvad`, `kvm_libvirt`, `oracle_virtualization`) |
+| Data & databases | Oracle | Database ISVs (`postgresql`, `mysql`, `mariadb`, `mongodb`, `redis`, `elasticsearch`, `snowflake`, `databricks`, `cockroach`, `cassandra`, `neo4j`, `clickhouse`) |
+| Observability | Datadog, Splunk | Other Observability (`dynatrace`, `new_relic`, `grafana`, `zabbix`, `elastic`, `pagerduty`, `solarwinds`, `manageengine`, `prometheus`) |
+| Backup & DR | — | Backup ISVs (`veeam`, `rubrik`, `cohesity`, `commvault`, `veritas`, `acronis`, `datto`, `druva`) |
+| ITSM & workplace SaaS | ServiceNow, Atlassian, Google Workspace | Workplace SaaS (`slack`, `zoom`, `box`, `dropbox`, `adobe`, `freshservice`, `zendesk`, `bmc_helix`) |
+| Endpoint / RMM / UEM | — | RMM UEM ISVs (`jamf`, `ninjaone`, `connectwise`, `kaseya`, `datto_rmm`, `omnissa`, `addigy`, `hexnode`) |
+| DevOps & IaC | GitHub, HashiCorp | Other DevOps ISV (`gitlab`, `jfrog`, `harness`, `circleci`, `pulumi`, `argo`, `flux`, `jenkins`, `azure_devops`, `docker`) |
+
+Product lines live on each domain in the YAML (e.g. Fortinet → `fortigate`, `fortimanager`, `fortisase`; AWS → `ec2`, `eks`, `rds`). Edit the YAML, then re-run codegen.
 
 ## Difficulty Scale
 
