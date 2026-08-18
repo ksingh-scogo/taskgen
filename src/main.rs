@@ -42,10 +42,6 @@ const LANGUAGES: &[(&str, &str)] = &[
     ("ru", "Russian"),
 ];
 
-const DONATION_BTC: &str = "bc1qx6zepu6sfkvshgdmc4ewu6pk6rpadvpgffpp7v";
-const DONATION_LTC: &str = "ltc1qv2mefzps2vtjcpwfx8xxdrpplrcvltswm68r7x";
-const DONATION_XMR: &str = "42Dbm5xg5Nq26fdyzfEU7KBnAJfhi7Cvz5J2ex5CzHXkfKuNEJzYCcmJ1GTbgjFZ5MBx72sdG1G9239Cd6rsZfv4QeDkYJY";
-
 #[derive(Debug, Clone)]
 struct DomainDef {
     category: &'static str,
@@ -608,6 +604,46 @@ struct RunStats {
     errors: usize,
 }
 
+#[derive(Debug, Default)]
+struct DatasetCounts {
+    categories: HashMap<String, usize>,
+    domains: HashMap<String, usize>,
+    subdomains: HashMap<(String, String), usize>,
+    difficulties: HashMap<u8, usize>,
+    n: usize,
+}
+
+impl DatasetCounts {
+    fn add(&mut self, domain: &str, subdomain: &str, difficulty: u8) {
+        let cat = domain.split_once("::").map(|(c, _)| c).unwrap_or(domain);
+        *self.categories.entry(cat.to_string()).or_insert(0) += 1;
+        *self.domains.entry(domain.to_string()).or_insert(0) += 1;
+        *self.subdomains.entry((domain.to_string(), subdomain.to_string())).or_insert(0) += 1;
+        *self.difficulties.entry(difficulty).or_insert(0) += 1;
+        self.n += 1;
+    }
+}
+
+fn tally_jsonl(path: &std::path::Path) -> DatasetCounts {
+    let mut counts = DatasetCounts::default();
+    let Ok(file) = File::open(path) else {
+        return counts;
+    };
+    for line in BufReader::new(file).lines().flatten() {
+        let Ok(entry) = serde_json::from_str::<TaskEntry>(&line) else {
+            continue;
+        };
+        counts.add(&entry.domain, &entry.subdomain, entry.difficulty);
+    }
+    counts
+}
+
+fn sorted_count_rows(map: &HashMap<String, usize>) -> Vec<(&String, usize)> {
+    let mut rows: Vec<_> = map.iter().map(|(k, v)| (k, *v)).collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    rows
+}
+
 fn parse_distribution(input: &str) -> Result<HashMap<String, f64>> {
     let mut map = HashMap::new();
     for pair in input.split(',') {
@@ -759,7 +795,6 @@ struct ModelPricing {
 #[derive(Debug, Deserialize)]
 struct ModelProvider {
     context_length: Option<u64>,
-    max_completion_tokens: Option<u64>,
 }
 
 async fn fetch_free_models(client: &reqwest::Client, api_key: &str) -> Result<Vec<String>> {
@@ -1084,12 +1119,21 @@ fn count_existing_tasks(path: &PathBuf) -> usize {
     }
 }
 
+fn share(count: usize, total: usize) -> f64 {
+    if total == 0 {
+        0.0
+    } else {
+        count as f64 * 100.0 / total as f64
+    }
+}
+
 fn generate_readme(
     args: &Args,
     stats: &RunStats,
     dist: &HashMap<String, f64>,
     diff_dist: &HashMap<u8, f64>,
     lang_counts: Option<&HashMap<String, usize>>,
+    observed: &DatasetCounts,
 ) -> String {
     let input_cost = args.input_price.map(|p| p * stats.total_input_tokens as f64 / 1_000_000.0);
     let output_cost = args.output_price.map(|p| p * stats.total_output_tokens as f64 / 1_000_000.0);
@@ -1098,16 +1142,20 @@ fn generate_readme(
         _ => None,
     };
 
+    let n = observed.n.max(stats.total_tasks);
+
     let mut md = String::new();
 
     md.push_str("# TaskGen Dataset\n\n");
-    md.push_str("> Generated with **taskgen** by [empero-org](https://github.com/empero-org)\n\n");
+    md.push_str("> Generated with **taskgen**\n\n");
 
     md.push_str("## Run Parameters\n\n");
     md.push_str("| Parameter | Value |\n|---|---|\n");
     md.push_str(&format!("| Model | `{}` |\n", args.model));
     md.push_str(&format!("| Temperature | `{}` |\n", args.temperature));
-    md.push_str(&format!("| Total Tasks | {} |\n", stats.total_tasks));
+    md.push_str(&format!("| Total Tasks | {} |\n", n));
+    md.push_str(&format!("| Unique Domains | {} |\n", observed.domains.len()));
+    md.push_str(&format!("| Unique Subdomains | {} |\n", observed.subdomains.len()));
     md.push_str(&format!("| Concurrency | {} workers |\n", args.workers));
     md.push_str(&format!("| API Base | `{}` |\n", args.api_base));
     md.push_str(&format!("| Generated | {} |\n", Local::now().format("%Y-%m-%d %H:%M:%S")));
@@ -1131,21 +1179,69 @@ fn generate_readme(
         md.push('\n');
     }
 
-    md.push_str("## Domain Distribution\n\n");
-    md.push_str("| Domain | Weight |\n|---|---|\n");
+    md.push_str("## Category Distribution\n\n");
+    md.push_str("Target sampling weights vs counts in this JSONL.\n\n");
+    md.push_str("| Category | Tasks | Share | Target |\n|---|---:|---:|---:|\n");
     let mut sorted_cats: Vec<_> = dist.iter().collect();
-    sorted_cats.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+    sorted_cats.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap().then_with(|| a.0.cmp(b.0)));
     for (cat, w) in &sorted_cats {
-        md.push_str(&format!("| {} | {:.1}% |\n", cat, **w * 100.0));
+        let count = observed.categories.get(*cat).copied().unwrap_or(0);
+        md.push_str(&format!(
+            "| {} | {} | {:.1}% | {:.1}% |\n",
+            cat, count, share(count, n), **w * 100.0
+        ));
+    }
+    for (cat, count) in sorted_count_rows(&observed.categories) {
+        if !dist.contains_key(cat) {
+            md.push_str(&format!(
+                "| {} | {} | {:.1}% | — |\n",
+                cat, count, share(count, n)
+            ));
+        }
+    }
+    md.push('\n');
+
+    md.push_str("## Domain Distribution\n\n");
+    md.push_str("Actual `category::domain` values in this JSONL.\n\n");
+    md.push_str("| Domain | Tasks | Share |\n|---|---:|---:|\n");
+    if observed.domains.is_empty() {
+        md.push_str("| — | 0 | 0.0% |\n");
+    } else {
+        for (domain, count) in sorted_count_rows(&observed.domains) {
+            md.push_str(&format!("| `{}` | {} | {:.1}% |\n", domain, count, share(count, n)));
+        }
+    }
+    md.push('\n');
+
+    md.push_str("## Subdomain Distribution\n\n");
+    md.push_str("Actual product lines / failure modes in this JSONL.\n\n");
+    md.push_str("| Domain | Subdomain | Tasks | Share |\n|---|---|---:|---:|\n");
+    if observed.subdomains.is_empty() {
+        md.push_str("| — | — | 0 | 0.0% |\n");
+    } else {
+        let mut subs: Vec<_> = observed.subdomains.iter().map(|((d, s), c)| (d, s, *c)).collect();
+        subs.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(b.0)).then_with(|| a.1.cmp(b.1)));
+        for (domain, subdomain, count) in subs {
+            md.push_str(&format!(
+                "| `{}` | `{}` | {} | {:.1}% |\n",
+                domain, subdomain, count, share(count, n)
+            ));
+        }
     }
     md.push('\n');
 
     md.push_str("## Difficulty Distribution\n\n");
-    md.push_str("| Level | Label | Weight |\n|---|---|---|\n");
+    md.push_str("| Level | Label | Tasks | Share | Target |\n|---|---|---:|---:|---:|\n");
     for d in 1..=10u8 {
-        if let Some(w) = diff_dist.get(&d) {
-            md.push_str(&format!("| {} | {} | {:.1}% |\n", d, difficulty_label(d), w * 100.0));
+        let count = observed.difficulties.get(&d).copied().unwrap_or(0);
+        let target = diff_dist.get(&d).copied().unwrap_or(0.0) * 100.0;
+        if count == 0 && target == 0.0 {
+            continue;
         }
+        md.push_str(&format!(
+            "| {} | {} | {} | {:.1}% | {:.1}% |\n",
+            d, difficulty_label(d), count, share(count, n), target
+        ));
     }
     md.push('\n');
 
@@ -1174,8 +1270,8 @@ fn generate_readme(
     md.push_str("```json\n");
     md.push_str("{\n");
     md.push_str("  \"prompt\": \"...\",\n");
-    md.push_str("  \"domain\": \"infra::Storage\",\n");
-    md.push_str("  \"subdomain\": \"raid_degrade\",\n");
+    md.push_str("  \"domain\": \"oem::Fortinet\",\n");
+    md.push_str("  \"subdomain\": \"fortigate\",\n");
     md.push_str("  \"difficulty\": 5,\n");
     if args.multilingual {
         md.push_str("  \"language\": \"en\",\n");
@@ -1183,16 +1279,7 @@ fn generate_readme(
     md.push_str("  \"taskgen_model\": \"gpt-4o-mini\",\n");
     md.push_str("  \"temperature\": 0.9\n");
     md.push_str("}\n");
-    md.push_str("```\n\n");
-
-    md.push_str("## Support / Donate\n\n");
-    md.push_str("If this tool helped you, consider supporting the project:\n\n");
-    md.push_str(&format!("- **BTC**: `{}`\n", DONATION_BTC));
-    md.push_str(&format!("- **LTC**: `{}`\n", DONATION_LTC));
-    md.push_str(&format!("- **XMR**: `{}`\n\n", DONATION_XMR));
-
-    md.push_str("---\n\n");
-    md.push_str("*Built with [taskgen](https://github.com/empero-org/taskgen) by empero-org*\n");
+    md.push_str("```\n");
 
     md
 }
@@ -1652,7 +1739,12 @@ async fn main() -> Result<()> {
         None
     };
 
-    let readme = generate_readme(&args, &stats, &dist, &diff_dist, lang_counts.as_ref());
+    let observed = if args.output.exists() {
+        tally_jsonl(&args.output)
+    } else {
+        DatasetCounts::default()
+    };
+    let readme = generate_readme(&args, &stats, &dist, &diff_dist, lang_counts.as_ref(), &observed);
     let out_dir = args.output.parent().unwrap_or(std::path::Path::new("."));
     let stem = args.output.file_stem().unwrap_or_default().to_string_lossy();
     let readme_path = out_dir.join(format!("{}.README.md", stem));
@@ -1744,5 +1836,31 @@ mod tests {
         let msg = task_user_message("network", "network::Firewall", "unused_rule", 4, None);
         assert!(msg.contains("Domain: network::Firewall"));
         assert!(msg.contains("Subdomain: unused_rule"));
+    }
+
+    #[test]
+    fn dataset_readme_lists_subdomains_and_omits_donate() {
+        let args = Args::parse_from(["taskgen", "--api-key", "x"]);
+        let stats = RunStats {
+            total_input_tokens: 10,
+            total_output_tokens: 20,
+            total_tasks: 3,
+            errors: 0,
+        };
+        let dist = HashMap::from([("oem".to_string(), 1.0)]);
+        let diff = HashMap::from([(6u8, 1.0)]);
+        let mut observed = DatasetCounts::default();
+        observed.add("oem::Fortinet", "fortigate", 6);
+        observed.add("oem::Fortinet", "fortigate", 6);
+        observed.add("oem::AWS", "eks", 6);
+        let md = generate_readme(&args, &stats, &dist, &diff, None, &observed);
+        assert!(!md.contains("Support / Donate"), "{md}");
+        assert!(!md.contains("bc1q"), "{md}");
+        assert!(md.contains("## Subdomain Distribution"), "{md}");
+        assert!(md.contains("`oem::Fortinet`"), "{md}");
+        assert!(md.contains("`fortigate`"), "{md}");
+        assert!(md.contains("`eks`"), "{md}");
+        assert!(md.contains("| Unique Domains | 2 |"), "{md}");
+        assert!(md.contains("| Unique Subdomains | 2 |"), "{md}");
     }
 }
