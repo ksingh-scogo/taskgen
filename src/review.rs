@@ -94,11 +94,19 @@ pub struct ReviewClient {
 }
 
 impl ReviewClient {
-    pub fn new(provider: ProviderConfig, client: reqwest::Client, max_output_tokens: u64) -> Result<Self> {
+    pub fn new(
+        provider: ProviderConfig,
+        client: reqwest::Client,
+        max_output_tokens: u64,
+    ) -> Result<Self> {
         if max_output_tokens == 0 {
             bail!("review max output tokens must be positive");
         }
-        Ok(Self { provider, client, max_output_tokens })
+        Ok(Self {
+            provider,
+            client,
+            max_output_tokens,
+        })
     }
 
     async fn request_once(&self, request: &ReviewRequest) -> Result<ReviewResult> {
@@ -113,15 +121,27 @@ impl ReviewClient {
         } else {
             user_content
         };
-        let body = json!({
+        let system_content = if self.provider.model.to_ascii_lowercase().contains("qwen") {
+            format!("{}\n/no_think", request.system_prompt)
+        } else {
+            request.system_prompt.clone()
+        };
+        let mut body = json!({
             "model": self.provider.model,
             "messages": [
-                {"role": "system", "content": request.system_prompt},
+                {"role": "system", "content": system_content},
                 {"role": "user", "content": user_content}
             ],
-            "temperature": 0.0,
             "max_completion_tokens": self.max_output_tokens
         });
+        if !restricted_sampling(&self.provider.model) {
+            body["temperature"] = json!(0.0);
+        }
+        if self.provider.model.to_ascii_lowercase().contains("qwen") {
+            body["enable_thinking"] = json!(false);
+            body["thinking_budget"] = json!(0);
+            body["reasoning_effort"] = json!("low");
+        }
         let url = format!(
             "{}/chat/completions",
             self.provider.api_base.as_str().trim_end_matches('/')
@@ -136,7 +156,10 @@ impl ReviewClient {
             .await
             .context("review request failed")?;
         let status = response.status();
-        let raw = response.text().await.context("failed to read review response")?;
+        let raw = response
+            .text()
+            .await
+            .context("failed to read review response")?;
         if !status.is_success() {
             bail!("review API returned HTTP {status}: {}", truncate(&raw, 500));
         }
@@ -208,6 +231,17 @@ fn truncate(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
 }
 
+fn restricted_sampling(model: &str) -> bool {
+    let model = model.to_ascii_lowercase();
+    let name = model.rsplit('/').next().unwrap_or(&model);
+    name.contains("gpt-5")
+        || name.contains("gpt5")
+        || name.contains("luna")
+        || name.starts_with("o1")
+        || name.starts_with("o3")
+        || name.starts_with("o4")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,5 +280,12 @@ mod tests {
             ReviewDecision::parse_and_validate(raw).unwrap().verdict,
             ReviewVerdict::Accept
         );
+    }
+
+    #[test]
+    fn restricted_review_models_are_detected_without_provider_prefix() {
+        assert!(restricted_sampling("openai/gpt-5.4"));
+        assert!(restricted_sampling("scogoai/gpt-5.6-luna-max"));
+        assert!(!restricted_sampling("qwen/qwen3.8-max-free"));
     }
 }

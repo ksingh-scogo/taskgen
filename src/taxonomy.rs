@@ -31,7 +31,7 @@ pub struct TaskCoordinates {
     pub presentation: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SampledTask {
     pub taxonomy_id: String,
     pub category_id: String,
@@ -209,9 +209,7 @@ impl TaxonomyCatalog {
             .and_then(serde_yaml_ng::Value::as_str)
             .unwrap_or("<missing>");
         if schema_version != SCHEMA_VERSION {
-            bail!(
-                "unsupported taxonomy schema '{schema_version}'; expected {SCHEMA_VERSION}"
-            );
+            bail!("unsupported taxonomy schema '{schema_version}'; expected {SCHEMA_VERSION}");
         }
         let raw: RawTaxonomy = serde_yaml_ng::from_str(source).context("invalid taxonomy YAML")?;
         let kind = match raw.kind.as_str() {
@@ -338,7 +336,10 @@ impl TaxonomyCatalog {
             bail!("category '{}' label must not be empty", category.id);
         }
         if category.domains.is_empty() {
-            bail!("category '{}' must contain at least one domain", category.id);
+            bail!(
+                "category '{}' must contain at least one domain",
+                category.id
+            );
         }
         validate_unique_ids(
             &format!("domain in category '{}'", category.id),
@@ -380,7 +381,11 @@ impl TaxonomyCatalog {
         category: &RawCategory,
         domain: &RawDomain,
     ) -> Result<ResolvedEligibility> {
-        let axes = self.raw.axes.as_ref().context("missing compositional axes")?;
+        let axes = self
+            .raw
+            .axes
+            .as_ref()
+            .context("missing compositional axes")?;
         let platform_groups: Vec<String> = self
             .raw
             .platform_groups
@@ -509,7 +514,10 @@ impl TaxonomyCatalog {
             self.source_path
                 .as_deref()
                 .and_then(Path::parent)
-                .map_or_else(|| configured.to_path_buf(), |parent| parent.join(configured)),
+                .map_or_else(
+                    || configured.to_path_buf(),
+                    |parent| parent.join(configured),
+                ),
         )
     }
 
@@ -556,15 +564,15 @@ impl TaxonomyCatalog {
         subdomain_id: &str,
     ) -> bool {
         self.raw.categories.iter().any(|category| {
-                category.id == category_id
-                    && category.domains.iter().any(|domain| {
-                        (domain.id == domain_name || domain.label == domain_name)
-                            && domain
-                                .subdomains
-                                .iter()
-                                .any(|subdomain| subdomain.id() == subdomain_id)
-                    })
-            })
+            category.id == category_id
+                && category.domains.iter().any(|domain| {
+                    (domain.id == domain_name || domain.label == domain_name)
+                        && domain
+                            .subdomains
+                            .iter()
+                            .any(|subdomain| subdomain.id() == subdomain_id)
+                })
+        })
     }
 
     pub fn hierarchical_domain_count(&self, category_id: &str) -> usize {
@@ -652,11 +660,8 @@ impl TaxonomyCatalog {
             .iter()
             .map(|item| distribution[&item.id])
             .collect();
-        let category = &self.raw.categories[sample_index(
-            rng,
-            &category_weights,
-            "category distribution",
-        )?];
+        let category =
+            &self.raw.categories[sample_index(rng, &category_weights, "category distribution")?];
         let domain_weights: Vec<f64> = if category.domains[0].weight.is_some() {
             category
                 .domains
@@ -666,11 +671,7 @@ impl TaxonomyCatalog {
         } else {
             vec![1.0; category.domains.len()]
         };
-        let domain = &category.domains[sample_index(
-            rng,
-            &domain_weights,
-            "domain distribution",
-        )?];
+        let domain = &category.domains[sample_index(rng, &domain_weights, "domain distribution")?];
         let sub_weights: Vec<f64> = domain.subdomains.iter().map(RawSubdomain::weight).collect();
         let subdomain =
             &domain.subdomains[sample_index(rng, &sub_weights, "subdomain distribution")?];
@@ -729,10 +730,27 @@ impl TaxonomyCatalog {
             max,
             &task_family.difficulty_multiplier,
         )?;
+        let presentation_eligibility: Vec<String> = if platform_scope.id == "platform_neutral" {
+            eligibility
+                .presentations
+                .iter()
+                .filter(|presentation| presentation.as_str() != "cli_ssh_session")
+                .cloned()
+                .collect()
+        } else {
+            eligibility.presentations.clone()
+        };
+        if presentation_eligibility.is_empty() {
+            bail!(
+                "platform-neutral sampling requires at least one non-CLI presentation for category '{}' domain '{}'",
+                category.id,
+                domain.id
+            );
+        }
         let presentation = sample_option(
             rng,
             &axes.presentations,
-            Some(&eligibility.presentations),
+            Some(&presentation_eligibility),
             "presentation",
         )?;
 
@@ -778,9 +796,7 @@ impl TaxonomyCatalog {
                 continue;
             }
             for platform in &group.platforms {
-                if let Some(existing) = platforms
-                    .iter()
-                    .position(|id: &String| id == &platform.id)
+                if let Some(existing) = platforms.iter().position(|id: &String| id == &platform.id)
                 {
                     weights[existing] += group.weight * platform.weight;
                 } else {
@@ -950,10 +966,9 @@ fn resolve_axis(
     category: Option<&Vec<String>>,
     all_enabled: &[String],
 ) -> Result<Vec<String>> {
-    let selected = domain.or(category).map_or_else(
-        || all_enabled.to_vec(),
-        |configured| configured.to_vec(),
-    );
+    let selected = domain
+        .or(category)
+        .map_or_else(|| all_enabled.to_vec(), |configured| configured.to_vec());
     if selected.is_empty() {
         bail!("resolved eligibility for '{name}' must not be empty");
     }
@@ -1260,5 +1275,27 @@ categories:
             netops.default_review_system_prompt_path().unwrap(),
             PathBuf::from("docs/../prompts/netops-prompt-review-system-v2.txt")
         );
+    }
+
+    #[test]
+    fn platform_neutral_coordinates_never_request_device_cli_capture() {
+        for catalog in [
+            TaxonomyCatalog::embedded_itops().unwrap(),
+            TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml")).unwrap(),
+        ] {
+            let mut rng = StdRng::seed_from_u64(20260820);
+            for _ in 0..1000 {
+                let sample = catalog.sample_defaults(&mut rng).unwrap();
+                let coordinates = sample.coordinates.unwrap();
+                assert!(
+                    coordinates.platform_scope != "platform_neutral"
+                        || coordinates.presentation != "cli_ssh_session",
+                    "{} sampled platform-neutral CLI capture in {}/{}",
+                    catalog.id(),
+                    sample.domain_id,
+                    sample.subdomain_id
+                );
+            }
+        }
     }
 }

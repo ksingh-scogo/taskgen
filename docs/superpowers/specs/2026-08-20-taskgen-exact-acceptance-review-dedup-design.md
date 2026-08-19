@@ -2,7 +2,7 @@
 
 Date: 2026-08-20
 
-Status: approved in chat with reviewer-provider and native-dedup refinements; written-spec review pending
+Status: implemented and live-canary verified on 2026-08-20
 
 Branch: `codex/netops-taxonomy-atif` from `origin/master`
 
@@ -108,7 +108,7 @@ Generation credential precedence remains:
 1. `--keyfile`;
 2. `--api-key` or `OPENAI_API_KEY`.
 
-Specifying both the key-file and single-key form for the same provider is a CLI conflict. Credentials are never written to task records, review manifests, reports, logs, or errors.
+The key-file form takes precedence over a single CLI or ambient key for the same provider. This permits an explicit keyfile even when `OPENAI_API_KEY` or `TASKGEN_REVIEW_API_KEY` exists in the shell. Credentials are never written to task records, review manifests, reports, logs, CLI help, or errors.
 
 ### 3.3 Dedup is native Rust and occurs before acceptance
 
@@ -224,7 +224,8 @@ New and changed generation flags:
 | `--review-keyfile <FILE>` | none | Reviewer credentials, one per line, round-robin |
 | `--review-system-prompt <TEXT>` | taxonomy/built-in | Complete inline reviewer prompt |
 | `--review-system-prompt-file <FILE>` | taxonomy/built-in | Complete UTF-8 reviewer prompt file |
-| `--review-max-output-tokens <N>` | `1024` | Positive reviewer completion-token limit |
+| `--review-max-output-tokens <N>` | `1024`; `4096` for Qwen | Positive reviewer completion-token limit |
+| `--request-timeout-seconds <N>` | `120` | Positive per-generation/review HTTP request timeout |
 | `--max-attempts-per-slot <N>` | `20` | Positive candidate-attempt ceiling per coordinate slot |
 | `--dedup-mode <MODE>` | `semantic` | `semantic` or `lexical`; dedup cannot be disabled |
 | `--jaccard-threshold <F>` | `0.80` | Inclusive lexical duplicate threshold in `[0,1]` |

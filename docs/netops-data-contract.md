@@ -1,15 +1,16 @@
 # Scogo Sovereign Enterprise NetOps data contract
 
-Version: 1
+Version: 2
 
 This document defines the boundary between prompt-seed generation, teacher behavior, deterministic tool execution, verification, canonical audit storage, trainable SFT projection, and ATIF-v1.7 interchange.
 
 ## Pipeline boundary
 
 ```text
-Taskgen prompt seed
-  -> independent NetOps prompt-quality review
-  -> accepted prompt seed
+Taskgen candidate prompt
+  -> schema validation and mandatory local deduplication
+  -> separate NetOps prompt-quality model call
+  -> Taskgen accepted prompt seed and audit sidecars
   -> teacher candidate messages and tool-call requests
   -> harness executes tools and captures returned state
   -> policy gate supplies approval decisions
@@ -19,18 +20,20 @@ Taskgen prompt seed
   -> canonical audit records may be exported as ATIF-v1.7
 ```
 
-Taskgen produces only a prompt and sampled coordinates. A teacher produces candidate assistant messages and tool-call requests. Neither component owns live tool results, approval, ground truth, state hashes, verification results, safety grades, rewards, or acceptance.
+Taskgen produces a prompt and sampled coordinates, then owns the configured prompt-level validation, deduplication, and model-review gate. A teacher produces candidate assistant messages and tool-call requests. Neither component owns live tool results, approval, ground truth, state hashes, verification results, safety grades, rewards, or trajectory acceptance.
 
-A schema-valid Taskgen record is still only a candidate prompt seed. Before teacher submission, an independent NetOps prompt-quality review must check vendor and protocol authenticity, causal and numerical consistency, coordinate realization, solvability under the declared evidence condition, and safety posture. Taskgen cannot self-award semantic acceptance, and this review decision belongs in a separate manifest rather than the prompt-seed record.
+A schema-valid candidate is not automatically publishable. Taskgen invokes a separate quality-review request that checks platform and protocol authenticity, causal and numerical consistency, coordinate realization, solvability under the declared evidence condition, and safety posture. The reviewer may default to the generation model, but it always receives a distinct system prompt and returns a strict decision object. Accepted decisions live in `<stem>.reviews.jsonl`; rejected candidates and retry guidance live in `<stem>.rejected.jsonl`. This prompt gate does not make a teacher trajectory correct, verified, or trainable.
 
 ## Normative files
 
 | Artifact | Source of truth |
 |---|---|
-| Prompt-seed schema | `schemas/netops-task-v1.schema.json` |
+| Prompt-seed schema | `schemas/task-v2.schema.json` |
+| Prompt-review schema | `schemas/prompt-review-v1.schema.json` |
 | Canonical audit schema | `schemas/netops-teacher-trajectory-audit-v1.schema.json` |
 | Accepted SFT schema | `schemas/netops-teacher-trajectory-sft-v1.schema.json` |
-| Taskgen system prompt | `prompts/netops-taskgen-system-v1.txt` |
+| Taskgen system prompt | `prompts/netops-taskgen-system-v2.txt` |
+| Taskgen review prompt | `prompts/netops-prompt-review-system-v2.txt` |
 | Teacher system prompt | `prompts/netops-teacher-system-v1.txt` |
 | NetOps sampling taxonomy | `docs/netops-taxonomy.yaml` |
 | Complete prompt fixture | `tests/fixtures/canonical/valid-task.json` |
@@ -44,7 +47,7 @@ The JSON files above form one fictional BGP route-leak walkthrough and are inten
 
 | Owner | Fields and decisions |
 |---|---|
-| Taskgen | prompt text, taxonomy coordinates, sampled difficulty, generator model metadata |
+| Taskgen | prompt text, taxonomy coordinates, sampled difficulty, generator metadata, local dedup result, configured prompt-review acceptance and sidecars |
 | Teacher | assistant-authored visible rationale, hypotheses, evidence requests, tool-call requests, remediation proposal |
 | Harness | tool results, environment identity, state hashes, reset result, raw artifact references |
 | Policy gate | whether approval is required, the decision, scope, source, and time |
@@ -62,17 +65,19 @@ The example task is generated from a fixed compositional coordinate:
 
 ```json
 {
-  "schema_version": "scogo.netops.task.v1",
+  "schema_version": "scogo.taskgen.task.v2",
   "prompt": "Investigate a suspected BGP route leak using read-only evidence before proposing a bounded repair.",
-  "domain": "enterprise_netops::layer3_routing",
+  "category": "enterprise_netops",
+  "domain": "layer3_routing",
   "subdomain": "bgp_route_leak",
   "difficulty": 8,
   "coordinates": {
-    "taxonomy_id": "scogo-enterprise-netops-v1",
+    "taxonomy_id": "scogo-enterprise-netops-v2",
+    "category_id": "enterprise_netops",
     "task_family": "troubleshooting_rca",
     "environment": "hybrid",
-    "vendor_scope": "multi_vendor",
-    "vendors": ["cisco_ios_xe", "juniper_junos"],
+    "platform_scope": "multi_platform",
+    "platforms": ["cisco_ios_xe", "juniper_junos"],
     "incident_mechanism": "misconfiguration",
     "evidence_condition": "contradictory",
     "evidence_bundle": "routing_tables",
@@ -84,7 +89,7 @@ The example task is generated from a fixed compositional coordinate:
 }
 ```
 
-The record deliberately has no task ID, split, tools, results, evidence registry, approval, state hash, ground truth, outcome, reward, verification, safety grade, or acceptance decision. Those values do not exist at prompt-generation time.
+The prompt record deliberately has no task ID, split, tools, results, evidence registry, approval, state hash, ground truth, outcome, reward, verification, safety grade, or trajectory-acceptance decision. Prompt acceptance is retained in the separate Taskgen review manifest rather than embedded in this record.
 
 ## Stage 2: teacher candidate
 
@@ -179,7 +184,7 @@ Only an accepted canonical audit record may be projected. The [complete example]
   "messages": [],
   "tools": [],
   "metadata": {
-    "taxonomy_id": "scogo-enterprise-netops-v1",
+    "taxonomy_id": "scogo-enterprise-netops-v2",
     "domain": "layer3_routing",
     "subdomain": "bgp_route_leak",
     "task_family": "troubleshooting_rca",
@@ -251,7 +256,11 @@ Every release must prove:
 9. canonical-to-ATIF-to-canonical preserves Scogo audit sections;
 10. external imports stay unverified and unaccepted;
 11. JSONL conversion failure does not publish a partial destination;
-12. generated NetOps tasks validate before write.
+12. generated NetOps tasks validate before write;
+13. every accepted prompt has one accepted review manifest entry;
+14. exact, lexical, semantic, and final serialized dedup gates reject duplicates;
+15. a successful `generate -c N` publishes exactly N new accepted prompts;
+16. incomplete generation retains work artifacts and does not replace the requested final output.
 
 ## Dataset split and contamination controls
 

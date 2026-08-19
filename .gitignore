@@ -1,4 +1,5 @@
 /target
+.fastembed_cache/
 .venv/
 __pycache__/
 *.pyc
@@ -7,4 +8,3 @@ graphify-out/
 *.jsonl
 *.README.md
 !README.md
-

@@ -1,139 +1,184 @@
 # taskgen
 
-`taskgen` creates diverse prompt seeds for teacher-model data generation through any OpenAI-compatible API. It supports the general Scogo IT Operations taxonomy and a dedicated compositional Enterprise NetOps taxonomy.
+`taskgen` creates reviewed, unique prompt seeds for teacher-model dataset generation through OpenAI-compatible APIs. It ships Scogo's compositional IT Operations and Sovereign Enterprise NetOps taxonomies.
 
-Taskgen owns only the user prompt and sampled taxonomy coordinates. It does **not** fabricate tool results, live state, approvals, state hashes, ground truth, verification, safety grades, rewards, or acceptance decisions. Those fields belong to the downstream teacher, harness, policy gate, verifier, and dataset pipeline.
+Taskgen owns prompt text, sampled coordinates, prompt-schema validation, local deduplication, and the configured model-review decision. It does not fabricate telemetry, tool results, live state, approvals, ground truth, remediation success, safety grades, or trainable teacher trajectories.
 
-## What is included
+## Core contract
 
-- Runtime YAML taxonomy loading and validation.
-- General IT Ops hierarchical sampling from `docs/it-ops-taxonomy.yaml`.
-- Enterprise NetOps compositional sampling from `docs/netops-taxonomy.yaml`.
-- Reproducible coordinate sampling with `--seed`.
-- Prompt files loaded from the CLI or taxonomy defaults.
-- Concurrent generation through OpenAI-compatible chat-completion APIs.
-- Schema validation before NetOps prompt records are written.
-- Canonical audit and accepted-SFT JSON Schema contracts.
-- Guarded ATIF-v1.7 import/export for completed trajectories.
-- JSON and JSONL ATIF conversion with atomic output replacement.
-- API-key and proxy rotation, retry/backoff, budget tracking, multilingual output, and deduplication.
+A successful command:
 
-## Build
+```text
+taskgen generate -c N
+  => exactly N newly accepted prompt records
+  => every record is schema-valid
+  => every record passed exact, lexical, and configured semantic dedup
+  => every record passed a separate operational-quality review call
+  => no partial final dataset is published on failure
+```
+
+`-c N` is not a request for N model attempts. Taskgen pre-samples N immutable taxonomy coordinate slots and retries each rejected slot until it receives an accepted replacement or `--max-attempts-per-slot` is exhausted. This preserves the sampled distribution instead of silently dropping hard subjects.
+
+The model reviewer is an auditable gate, not an infallible source of truth. Its model, prompt, token usage, decisions, rejection reasons, and retry guidance are retained in sidecars.
+
+## Build and commands
 
 ```bash
 cargo build --release
 ./target/release/taskgen --version
 ```
 
-Prebuilt Apple Silicon and Linux ARM64 artifacts are published in [GitHub Releases](https://github.com/ksingh-scogo/taskgen/releases/latest).
-
-## Commands
-
 ```text
 taskgen generate [OPTIONS]
+taskgen dedup --input <FILE> [OPTIONS]
 taskgen taxonomy validate --taxonomy <FILE>
 taskgen atif export --input <FILE> --output <FILE>
 taskgen atif import --input <FILE> --output <FILE>
 ```
 
-The old root-level generation syntax has been replaced by the explicit `generate` subcommand.
+## Compositional taxonomies
 
-## Generate general IT Ops prompts
+Both taxonomies use `schema_version: scogo.taskgen.taxonomy.v2`, `kind: compositional`, and the same sampling/validation implementation.
 
-When `--taxonomy` is omitted, the general taxonomy is embedded in the binary:
+| Taxonomy | ID | Categories | Domains | Subdomains |
+|---|---|---:|---:|---:|
+| IT Operations | `scogo-itops-v4` | 14 | 129 | 884 |
+| Enterprise NetOps | `scogo-enterprise-netops-v2` | 1 | 25 | 531 |
+
+Every sampled task composes:
+
+```text
+category + domain + subdomain
++ task family + environment
++ platform scope + selected platforms
++ incident mechanism + evidence condition + evidence bundle
++ action risk + difficulty + presentation
+```
+
+IT Ops retains its complete category/domain/subdomain inventory but now gains operational coordinates such as task family, environment, platform scope, evidence state, and risk. NetOps includes enterprise, campus, branch, data-center, cloud, hybrid, multicloud, Kubernetes, remote-access, edge, OT/IoT, AI/HPC, and enterprise real-time networks. Telecom-provider RAN, packet core, IMS, OSS/BSS, and carrier-core operations remain out of scope.
+
+Validate either file without an API key:
+
+```bash
+taskgen taxonomy validate --taxonomy docs/it-ops-taxonomy.yaml
+taskgen taxonomy validate --taxonomy docs/netops-taxonomy.yaml
+```
+
+Validation rejects v1/hierarchical taxonomies, duplicate or unknown IDs, unreachable coordinate combinations, invalid platform cardinality, empty eligible sets, and invalid weights.
+
+## Generate prompts
+
+IT Ops is embedded and is used when `--taxonomy` is omitted:
 
 ```bash
 taskgen generate \
   --api-base https://api.example.com/v1 \
-  --api-key "$OPENAI_API_KEY" \
+  --api-key "$GENERATION_API_KEY" \
   --model teacher/model \
   --count 1000 \
   --workers 5 \
   --output data/itops-prompts.jsonl
 ```
 
-The general taxonomy is hierarchical:
-
-```text
-category -> domain -> subdomain
-```
-
-For capability categories, a subdomain is a failure mode. In the `oem` category, it is a product line and the product-voice addendum requests realistic SKU, firmware, console, CLI, TAC, and licensing context.
-
-## Generate Enterprise NetOps prompts
+Enterprise NetOps:
 
 ```bash
 taskgen generate \
   --taxonomy docs/netops-taxonomy.yaml \
   --api-base https://api.example.com/v1 \
-  --api-key "$OPENAI_API_KEY" \
+  --api-key "$GENERATION_API_KEY" \
   --model teacher/model \
   --count 1000 \
   --workers 5 \
-  --seed 20260819 \
+  --seed 20260820 \
   --output data/netops-prompts.jsonl
 ```
 
-`docs/netops-taxonomy.yaml` contains 25 domains and 531 domain-scoped subdomains. Each prompt seed composes:
+Generation-prompt precedence is `--system-prompt`, `--system-prompt-file`, `defaults.system_prompt_file`, then the built-in IT Ops prompt. The taxonomy defaults are `prompts/itops-taskgen-system-v2.txt` and `prompts/netops-taskgen-system-v2.txt`.
 
-```text
-domain
-+ subdomain
-+ task family
-+ environment
-+ vendor scope and selected vendors/platforms
-+ incident mechanism
-+ evidence condition
-+ evidence bundle
-+ action risk
-+ difficulty
-+ presentation
-```
+### Mandatory reviewer
 
-The model request identifies every sampled coordinate as mandatory. The resulting prompt is expected to make each one operationally relevant rather than recite the labels.
+With no review overrides, Taskgen makes a separate review call using the effective generation model, endpoint, and credential pool.
 
-Enterprise, campus, branch, data-center, cloud, hybrid, multicloud, Kubernetes, remote-access, edge, OT/IoT, AI/HPC, and enterprise real-time networks are included. Telecom-provider operations such as 3GPP RAN, EPC, 5GC, IMS, carrier OSS/BSS, carrier optical backbone, and service-provider core operations are excluded. Enterprise LTE/5G WAN underlays remain in scope.
-
-### Prompt selection
-
-The complete system prompt is resolved before the output file is opened or an API request is made. Precedence is:
-
-1. `--system-prompt <TEXT>`
-2. `--system-prompt-file <FILE>`
-3. `defaults.system_prompt_file` in the selected taxonomy, relative to that taxonomy file
-4. the built-in general IT Ops prompt
-
-For NetOps, the taxonomy default is `prompts/netops-taskgen-system-v1.txt`:
+Different model on the same provider:
 
 ```bash
 taskgen generate \
-  --taxonomy docs/netops-taxonomy.yaml \
-  --system-prompt-file prompts/netops-taskgen-system-v1.txt \
-  --api-key "$OPENAI_API_KEY" \
-  --model teacher/model \
-  --count 100 \
-  --output data/netops-prompts.jsonl
+  --api-base https://api.example.com/v1 \
+  --api-key "$GENERATION_API_KEY" \
+  --model fast/generator \
+  --review-model strong/reviewer \
+  --count 1000 \
+  --output data/tasks.jsonl
 ```
 
-`--system-prompt` and `--system-prompt-file` are mutually exclusive. ATIF is not mentioned in the task-generation prompt because interchange happens only after a completed trajectory exists. The teacher contract is `prompts/netops-teacher-system-v1.txt`.
+Different reviewer provider:
 
-### NetOps output record
+```bash
+taskgen generate \
+  --api-base https://generator.example/v1 \
+  --api-key "$GENERATION_API_KEY" \
+  --model fast/generator \
+  --review-api-base https://reviewer.example/v1 \
+  --review-api-key "$REVIEW_API_KEY" \
+  --review-model strong/reviewer \
+  --count 1000 \
+  --output data/tasks.jsonl
+```
 
-Every NetOps JSONL line is validated against `schemas/netops-task-v1.schema.json` before write:
+A different normalized review endpoint requires explicit review credentials. Taskgen never sends generation credentials to another endpoint implicitly. `--keyfile` and `--review-keyfile` take precedence over single or ambient keys. CLI help hides environment-secret values.
+
+Reviewer-prompt precedence is `--review-system-prompt`, `--review-system-prompt-file`, `defaults.review_system_prompt_file`, then the built-in IT Ops reviewer. Malformed output, reviewer errors, or review rejection never become implicit acceptance.
+
+Using the generation model as its own reviewer is the convenience default, not the recommended production release gate. It can share the generator's blind spots. For benchmark/release datasets, configure a stronger independently hosted `--review-model`, calibrate it against expert-labeled accept/reject cases, and retain human sampling for platform syntax, architecture, capacity, pricing, and causal claims.
+
+### Mandatory native dedup
+
+Deduplication cannot be disabled. Acceptance applies:
+
+- global lowercased, whitespace-collapsed exact matching;
+- word 5-gram Jaccard within `(language, domain, subdomain)`, default threshold `0.80`;
+- local embedding cosine similarity in the same bucket, default threshold `0.90`;
+- a serialized final recheck immediately before insertion.
+
+Semantic mode uses local FastEmbed ONNX inference. English defaults to `sentence-transformers/all-MiniLM-L6-v2`; multilingual generation defaults to `intfloat/multilingual-e5-small`. Embeddings and prompts are not sent to an embedding API. The model is downloaded on first use and cached; air-gapped deployments must pre-populate `--semantic-model-cache`.
+
+Use `--dedup-mode lexical` only when semantic inference is intentionally excluded. Exact and Jaccard checks remain mandatory.
+
+### Atomic outputs and append
+
+For `data/netops.jsonl`, success publishes:
+
+```text
+data/netops.jsonl
+data/netops.reviews.jsonl
+data/netops.rejected.jsonl
+data/netops.run.json
+```
+
+Incomplete runs retain a hidden run working directory next to the target and exit non-zero. They do not replace the requested final dataset.
+
+`--append -c N` adds exactly N accepted records. Existing records are staged into a replacement file and loaded into the dedup index, so new candidates cannot duplicate previous output.
+
+### Prompt record
+
+Every final line validates against `schemas/task-v2.schema.json`:
 
 ```json
 {
-  "schema_version": "scogo.netops.task.v1",
-  "prompt": "Investigate the suspected route leak using read-only evidence...",
-  "domain": "enterprise_netops::layer3_routing",
+  "schema_version": "scogo.taskgen.task.v2",
+  "prompt": "BGP paths changed after the maintenance window...",
+  "category": "enterprise_netops",
+  "domain": "layer3_routing",
   "subdomain": "bgp_route_leak",
   "difficulty": 8,
   "coordinates": {
-    "taxonomy_id": "scogo-enterprise-netops-v1",
+    "taxonomy_id": "scogo-enterprise-netops-v2",
+    "category_id": "enterprise_netops",
     "task_family": "troubleshooting_rca",
     "environment": "hybrid",
-    "vendor_scope": "multi_vendor",
-    "vendors": ["cisco_ios_xe", "juniper_junos"],
+    "platform_scope": "multi_platform",
+    "platforms": ["cisco_ios_xe", "juniper_junos"],
     "incident_mechanism": "misconfiguration",
     "evidence_condition": "contradictory",
     "evidence_bundle": "routing_tables",
@@ -145,78 +190,56 @@ Every NetOps JSONL line is validated against `schemas/netops-task-v1.schema.json
 }
 ```
 
-Schema acceptance is not semantic acceptance. The write gate proves record shape, coordinate membership, vendor cardinality, difficulty bounds, completion integrity, and basic leakage/length rules; it cannot prove that a generated vendor command exists or that supplied evidence really supports the scenario's causal claim. Before prompt seeds are submitted to a teacher, an independent NetOps prompt-quality review must reject vendor or protocol inventions, arithmetic and condition errors, unsupported root causes, coordinate mismatches, unsafe change framing, and internally inconsistent evidence. Keep that decision in a separate review manifest; the prompt-seed schema deliberately does not let Taskgen mark its own output accepted.
-
-`language` is present only for multilingual generation. The seed controls coordinate and language sampling; it cannot make a remote model response deterministic.
-
-## Validate taxonomies
-
-Validation requires no API key and makes no model call:
-
-```bash
-taskgen taxonomy validate --taxonomy docs/it-ops-taxonomy.yaml
-taskgen taxonomy validate --taxonomy docs/netops-taxonomy.yaml
-```
-
-Validation rejects duplicate IDs, unknown references, empty eligible sets, negative or non-finite weights, and complete distributions that do not sum to `1.0 +/- 0.000001`. A subdomain ID is unique within its parent domain; its stable key is `domain_id/subdomain_id`.
-
-To override a distribution, provide every non-zero category for a hierarchical taxonomy or domain for a compositional taxonomy, with a total of exactly 1.0:
-
-```bash
-taskgen generate \
-  --api-key "$OPENAI_API_KEY" \
-  --distribution "infra=0.4,observe=0.3,network=0.3" \
-  --count 500
-```
-
-Difficulty overrides use the same exact-sum rule:
-
-```bash
-taskgen generate \
-  --api-key "$OPENAI_API_KEY" \
-  --difficulty "7=0.25,8=0.25,9=0.25,10=0.25" \
-  --count 500
-```
+`language` appears only for multilingual generation. A seed makes coordinate/language sampling reproducible; it cannot make a remote completion deterministic.
 
 ## Generation options
 
 | Flag | Default | Purpose |
 |---|---:|---|
-| `--taxonomy <FILE>` | embedded IT Ops | Runtime taxonomy source |
-| `--system-prompt <TEXT>` | taxonomy/built-in | Inline complete system prompt |
-| `--system-prompt-file <FILE>` | taxonomy/built-in | UTF-8 complete system prompt file |
-| `--seed <U64>` | random | Reproducible coordinate sampling |
-| `--api-base <URL>` | OpenAI | OpenAI-compatible API base |
-| `--api-key <KEY>` | `OPENAI_API_KEY` | Provider credential |
-| `-m, --model <MODEL>` | `gpt-4o-mini` | Teacher model |
-| `-c, --count <N>` | `250` | Requested prompt count |
-| `-w, --workers <N>` | `5` | Concurrent requests |
-| `-o, --output <FILE>` | `output.jsonl` | Output JSONL |
-| `-t, --temperature <F>` | `0.9` | Sampling temperature when supported |
-| `--max-output-tokens <N>` | `2048` (`4096` for Qwen) | Provider completion-token budget; must be positive |
-| `--append` | off | Append to an existing generation JSONL |
-| `--multilingual` | off | Sample one of eight supported languages |
-| `--dedup` | off | Exact and trigram-Jaccard deduplication |
-| `--dedup-threshold <F>` | `0.6` | Jaccard removal threshold |
-| `--keyfile <FILE>` | none | Round-robin API keys, one per line |
-| `--proxies <FILE>` | none | Proxy list |
-| `--rotating-proxy` | off | Sticky random proxy |
-| `--input-price <F>` | none | Input price per million tokens |
-| `--output-price <F>` | none | Output price per million tokens |
-| `--budget <F>` | none | Stop at the configured USD budget |
+| `--taxonomy <FILE>` | embedded IT Ops | Runtime taxonomy |
+| `-c, --count <N>` | `250` | Newly accepted records required for success |
+| `-w, --workers <N>` | `5` | Concurrent coordinate slots |
+| `--request-timeout-seconds <N>` | `120` | Per generation/review HTTP request timeout |
+| `--max-attempts-per-slot <N>` | `20` | Candidate ceiling for each slot |
+| `--review-model <MODEL>` | generation model | Separate review-call model |
+| `--review-api-base <URL>` | generation endpoint | Reviewer provider endpoint |
+| `--review-api-key <KEY>` | inherited on same endpoint | Reviewer credential |
+| `--review-keyfile <FILE>` | none | Reviewer keys, round-robin |
+| `--review-max-output-tokens <N>` | `1024` (`4096` for Qwen) | Reviewer completion limit |
+| `--dedup-mode <MODE>` | `semantic` | `semantic` or `lexical` |
+| `--jaccard-threshold <F>` | `0.80` | Inclusive lexical threshold |
+| `--semantic-threshold <F>` | `0.90` | Inclusive cosine threshold |
+| `--dedup-ngram <N>` | `5` | Lexical word n-gram size |
+| `--semantic-model <MODEL>` | language-dependent | Local FastEmbed model |
+| `--semantic-model-cache <DIR>` | FastEmbed default | Local model cache |
+| `--append` | off | Add exactly N to an existing dataset |
+| `--overwrite` | off | Replace an existing dataset only after success |
+| `--multilingual` | off | Sample one of eight languages |
 
-For GPT-5, o-series, and model names containing `luna`, Taskgen omits unsupported `temperature` and `max_tokens` request fields and uses `max_completion_tokens`. It still records the requested temperature as generation metadata.
+GPT-5, o-series, and Luna request bodies omit unsupported sampling fields. Qwen requests use no/low-thinking controls, provider reasoning fields are discarded, and only final prompt content enters the dataset. Empty, truncated, overlong, or exposed-planning completions are rejected and replaced.
 
-For Qwen models, Taskgen requests low/no-thinking behavior, discards provider `reasoning` and `reasoning_content`, and uses a 4096-token completion budget by default because some OpenAI-compatible routes count private reasoning against that budget. `--max-output-tokens` overrides the model default. The saved prompt remains independently capped at 800 words. Empty output, exposed planning, non-stop finish reasons such as `length`, and overlong prompts are rejected and retried rather than written to the dataset. Retryable HTTP 408 and 5xx responses use bounded exponential backoff.
+## Standalone Rust dedup
 
-## Teacher trajectory contracts
+Deduplicate an existing JSONL without top-up generation:
 
-The downstream pipeline is:
+```bash
+taskgen dedup \
+  --input data/raw.jsonl \
+  --output data/raw.dedup.jsonl \
+  --dropped data/raw.dropped.jsonl \
+  --report data/raw.dedup-report.json
+```
+
+The kept and dropped files are written atomically. Dropped records include `_dedup` metadata with the reason, score/threshold when applicable, bucket, and accepted prompt hash. If output paths are omitted, Taskgen derives `<stem>.dedup.jsonl` and `<stem>.dropped.jsonl`.
+
+## Teacher trajectory and ATIF contracts
+
+Prompt generation is followed by a separately governed trajectory pipeline:
 
 ```text
-Taskgen prompt seeds
+accepted Taskgen prompt seed
   -> teacher candidate trajectory
-  -> harness-owned tool execution and state capture
+  -> deterministic tool execution and evidence capture
   -> approval/policy gate
   -> independent verification and safety grading
   -> canonical audit record
@@ -226,74 +249,32 @@ Taskgen prompt seeds
 
 Schemas:
 
-- `schemas/netops-task-v1.schema.json`: Taskgen prompt seed.
-- `schemas/netops-teacher-trajectory-audit-v1.schema.json`: full canonical candidate/imported/accepted/rejected audit record.
+- `schemas/task-v2.schema.json`: Taskgen prompt seed.
+- `schemas/prompt-review-v1.schema.json`: model-review decision.
+- `schemas/netops-teacher-trajectory-audit-v1.schema.json`: full canonical trajectory audit.
 - `schemas/netops-teacher-trajectory-sft-v1.schema.json`: accepted trainable projection only.
 
-The SFT projection excludes hidden reasoning, hidden ground truth, rewards, grader output, customer identifiers, secrets, copied ATIF context, deterministic `llm_call_count=0` steps, and unverified imports. See [docs/netops-data-contract.md](docs/netops-data-contract.md) for an end-to-end example and ownership rules.
-
-## ATIF-v1.7 import and export
-
-ATIF is an interchange format, not Scogo's canonical audit schema.
-
-Export one canonical audit object:
-
-```bash
-taskgen atif export \
-  --input data/netops-teacher.audit.v1.json \
-  --output data/netops-teacher.atif.v1.7.json
-```
-
-Export JSONL:
+ATIF is an interchange representation for completed trajectories, not the prompt-generation schema or Scogo's canonical audit object.
 
 ```bash
 taskgen atif export \
   --input data/netops-teacher.audit.v1.jsonl \
   --output data/netops-teacher.atif.v1.7.jsonl
-```
 
-Import external ATIF:
-
-```bash
 taskgen atif import \
   --input data/external.atif.v1.7.jsonl \
   --output data/external.audit.v1.jsonl
 ```
 
-`.json` and `.jsonl` infer their container. For another extension, provide `--container json` or `--container jsonl`. Existing destinations are refused unless `--overwrite` is set.
+ATIF import/export validates v1.7 and writes atomically. External imports receive the `external_atif_unverified` rejection reason and remain unaccepted until independently replayed and evaluated. See `docs/netops-data-contract.md` for evidence, safety, and SFT projection rules.
 
-The converter validates all input records before publishing the output, writes through a sibling temporary file, flushes and synchronizes it, and atomically renames it. JSONL errors report their source line.
+## Tests
 
-ATIF validation enforces:
+```bash
+cargo fmt --check
+cargo test
+cargo clippy --all-targets --all-features -- -D warnings
+cargo build --release
+```
 
-- exactly `schema_version: ATIF-v1.7`;
-- sequential step IDs starting at 1;
-- valid source-specific step fields and multimodal content parts;
-- unique tool-call IDs and matching observations;
-- `llm_call_count=0` restrictions;
-- resolvable subagent references and unique embedded trajectory IDs;
-- copied-context preservation.
-
-Canonical exports omit hidden reasoning and preserve Scogo-only audit sections in `extra.scogo`. External imports preserve the original object under `interop.original_atif`, use `record_kind: imported`, set `outcome.status: unknown`, set `quality.accepted: false`, and add the rejection reason `external_atif_unverified`. Importing ATIF never proves that actions succeeded and never makes a trajectory trainable.
-
-The implementation targets the active [Harbor ATIF specification](https://github.com/harbor-framework/harbor/blob/main/rfcs/0001-trajectory-format.md).
-
-## Operational notes
-
-- Credentials are read from the CLI, `OPENAI_API_KEY`, or a key file. They are not written into prompt records.
-- API errors are surfaced; 429 responses use bounded exponential backoff.
-- Five consecutive timeouts or a billing error stop generation gracefully.
-- Each accepted task is flushed to JSONL as it is generated.
-- A dataset card is written beside the output as `{stem}.README.md` with observed distributions and token/cost totals.
-- Generated files under `data/` are ignored by Git.
-- `--append` applies only to generation. ATIF conversion always produces a complete atomic destination.
-
-## General IT Ops taxonomy
-
-`docs/it-ops-taxonomy.yaml` remains the general 14-category source. It uses `kind: hierarchical`, while `docs/netops-taxonomy.yaml` uses `kind: compositional`. Both follow `schema_version: scogo.taskgen.taxonomy.v1` and are parsed at runtime; there is no generated Rust taxonomy catalog.
-
-The general default distribution favors infrastructure, endpoints, ITSM, identity, workplace, network, security, observability, delivery, data, agentic operations, secure edge, enterprise applications, and OEM/platform tasks. Edit the YAML and validate it directly; no code-generation step is required.
-
-## License and origin
-
-Fork of [empero-org/taskgen](https://github.com/empero-org/taskgen), retargeted for Scogo IT Operations and sovereign Enterprise NetOps dataset work.
+The suite covers taxonomy migration counts, eligibility, schemas, ATIF round trips, provider isolation, reviewer decisions, native dedup, atomic artifacts, and replacement to an exact accepted count.

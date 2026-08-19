@@ -1,12 +1,13 @@
 use std::cmp::Reverse;
-use std::collections::{HashMap, HashSet};
-use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use anyhow::{Context, Result, bail};
+#[cfg(test)]
 use chrono::Local;
 use clap::{Args as ClapArgs, Parser, Subcommand, ValueEnum};
 use futures::stream::{self, StreamExt};
@@ -16,7 +17,9 @@ use rand::prelude::*;
 use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 
+pub mod artifacts;
 pub mod atif;
+pub mod dedup;
 pub mod provider;
 pub mod review;
 pub mod schema;
@@ -150,6 +153,7 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Command {
     Generate(Box<GenerateArgs>),
+    Dedup(DedupArgs),
     Atif {
         #[command(subcommand)]
         command: AtifCommand,
@@ -158,6 +162,45 @@ enum Command {
         #[command(subcommand)]
         command: TaxonomyCommand,
     },
+}
+
+#[derive(ClapArgs, Debug)]
+struct DedupArgs {
+    #[arg(long)]
+    input: PathBuf,
+
+    #[arg(long)]
+    output: Option<PathBuf>,
+
+    #[arg(long)]
+    dropped: Option<PathBuf>,
+
+    #[arg(long)]
+    report: Option<PathBuf>,
+
+    #[arg(long, default_value = "prompt")]
+    prompt_field: String,
+
+    #[arg(long, value_enum, default_value_t = dedup::DedupMode::Semantic)]
+    dedup_mode: dedup::DedupMode,
+
+    #[arg(long, default_value_t = 0.80)]
+    jaccard_threshold: f32,
+
+    #[arg(long, default_value_t = 0.90)]
+    semantic_threshold: f32,
+
+    #[arg(long, default_value_t = 5)]
+    dedup_ngram: usize,
+
+    #[arg(long, value_enum)]
+    semantic_model: Option<dedup::SemanticModel>,
+
+    #[arg(long)]
+    semantic_model_cache: Option<PathBuf>,
+
+    #[arg(long)]
+    overwrite: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -209,7 +252,7 @@ struct GenerateArgs {
     #[arg(long, default_value = "https://api.openai.com/v1")]
     api_base: String,
 
-    #[arg(long, env = "OPENAI_API_KEY")]
+    #[arg(long, env = "OPENAI_API_KEY", hide_env_values = true)]
     api_key: Option<String>,
 
     #[arg(short, long, default_value = "gpt-4o-mini")]
@@ -245,6 +288,9 @@ struct GenerateArgs {
     #[arg(short, long, default_value_t = 5)]
     workers: usize,
 
+    #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..))]
+    request_timeout_seconds: u64,
+
     #[arg(short, long, default_value = "output.jsonl")]
     output: PathBuf,
 
@@ -261,23 +307,64 @@ struct GenerateArgs {
     keyfile: Option<PathBuf>,
 
     #[arg(long)]
-    dedup: bool,
+    review_model: Option<String>,
 
-    #[arg(long, default_value_t = 0.6)]
-    dedup_threshold: f64,
+    #[arg(long)]
+    review_api_base: Option<String>,
+
+    #[arg(long, env = "TASKGEN_REVIEW_API_KEY", hide_env_values = true)]
+    review_api_key: Option<String>,
+
+    #[arg(long)]
+    review_keyfile: Option<PathBuf>,
+
+    #[arg(long, conflicts_with = "review_system_prompt_file")]
+    review_system_prompt: Option<String>,
+
+    #[arg(long, conflicts_with = "review_system_prompt")]
+    review_system_prompt_file: Option<PathBuf>,
+
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    review_max_output_tokens: Option<u64>,
+
+    #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u64).range(1..))]
+    max_attempts_per_slot: u64,
+
+    #[arg(long, value_enum, default_value_t = dedup::DedupMode::Semantic)]
+    dedup_mode: dedup::DedupMode,
+
+    #[arg(long, default_value_t = 0.80)]
+    jaccard_threshold: f32,
+
+    #[arg(long, default_value_t = 0.90)]
+    semantic_threshold: f32,
+
+    #[arg(long, default_value_t = 5)]
+    dedup_ngram: usize,
+
+    #[arg(long, value_enum)]
+    semantic_model: Option<dedup::SemanticModel>,
+
+    #[arg(long)]
+    semantic_model_cache: Option<PathBuf>,
+
+    #[arg(long)]
+    overwrite: bool,
 
     #[arg(long)]
     free_models: bool,
-
-    /// Rescan interval in minutes for free model availability (default: 10)
-    #[arg(long, default_value_t = 10)]
-    free_rescan: u64,
 
     #[arg(long)]
     input_price: Option<f64>,
 
     #[arg(long)]
     output_price: Option<f64>,
+
+    #[arg(long)]
+    review_input_price: Option<f64>,
+
+    #[arg(long)]
+    review_output_price: Option<f64>,
 
     #[arg(long)]
     budget: Option<f64>,
@@ -607,39 +694,12 @@ fn extract_usage(v: &serde_json::Value) -> (u64, u64) {
     )
 }
 
-const MAX_MODEL_FAILURES: usize = 3;
-
-struct ModelFailures {
-    counts: std::sync::Mutex<HashMap<String, usize>>,
-    rescan_notify: tokio::sync::Notify,
-}
-
-impl ModelFailures {
-    fn new() -> Self {
-        Self {
-            counts: std::sync::Mutex::new(HashMap::new()),
-            rescan_notify: tokio::sync::Notify::new(),
-        }
-    }
-
-    /// Record a failure. Returns true if the model just crossed the threshold.
-    fn record(&self, model: &str) -> bool {
-        let mut counts = self.counts.lock().unwrap();
-        let count = counts.entry(model.to_string()).or_insert(0);
-        *count += 1;
-        *count == MAX_MODEL_FAILURES
-    }
-
-    /// Remove a model from tracking (called after rescan replaces the list).
-    fn reset(&self) {
-        let mut counts = self.counts.lock().unwrap();
-        counts.clear();
-    }
-}
-
 struct AtomicStats {
     input_tokens: AtomicU64,
     output_tokens: AtomicU64,
+    review_input_tokens: AtomicU64,
+    review_output_tokens: AtomicU64,
+    attempts: AtomicUsize,
     tasks: AtomicUsize,
     errors: AtomicUsize,
 }
@@ -649,12 +709,16 @@ impl AtomicStats {
         Self {
             input_tokens: AtomicU64::new(0),
             output_tokens: AtomicU64::new(0),
+            review_input_tokens: AtomicU64::new(0),
+            review_output_tokens: AtomicU64::new(0),
+            attempts: AtomicUsize::new(0),
             tasks: AtomicUsize::new(0),
             errors: AtomicUsize::new(0),
         }
     }
 }
 
+#[cfg(test)]
 struct RunStats {
     total_input_tokens: u64,
     total_output_tokens: u64,
@@ -662,6 +726,7 @@ struct RunStats {
     errors: usize,
 }
 
+#[cfg(test)]
 #[derive(Debug, Default)]
 struct DatasetCounts {
     categories: HashMap<String, usize>,
@@ -671,6 +736,7 @@ struct DatasetCounts {
     n: usize,
 }
 
+#[cfg(test)]
 impl DatasetCounts {
     fn add(&mut self, domain: &str, subdomain: &str, difficulty: u8) {
         let cat = domain.split_once("::").map(|(c, _)| c).unwrap_or(domain);
@@ -685,23 +751,7 @@ impl DatasetCounts {
     }
 }
 
-fn tally_jsonl(path: &std::path::Path) -> DatasetCounts {
-    let mut counts = DatasetCounts::default();
-    let Ok(file) = File::open(path) else {
-        return counts;
-    };
-    for line in BufReader::new(file)
-        .lines()
-        .map_while(std::result::Result::ok)
-    {
-        let Ok(entry) = serde_json::from_str::<TaskEntry>(&line) else {
-            continue;
-        };
-        counts.add(&entry.domain, &entry.subdomain, entry.difficulty);
-    }
-    counts
-}
-
+#[cfg(test)]
 fn sorted_count_rows(map: &HashMap<String, usize>) -> Vec<(&String, usize)> {
     let mut rows: Vec<_> = map.iter().map(|(k, v)| (k, *v)).collect();
     rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
@@ -818,54 +868,17 @@ fn load_proxies(path: &PathBuf) -> Result<Vec<reqwest::Proxy>> {
     Ok(proxies)
 }
 
-fn build_clients(proxies: &[reqwest::Proxy]) -> Vec<reqwest::Client> {
+fn build_clients(proxies: &[reqwest::Proxy], timeout: std::time::Duration) -> Vec<reqwest::Client> {
     proxies
         .iter()
         .map(|p| {
             reqwest::Client::builder()
                 .proxy(p.clone())
+                .timeout(timeout)
                 .build()
                 .expect("failed to build client with proxy")
         })
         .collect()
-}
-
-fn word_trigrams(text: &str) -> HashSet<String> {
-    let words: Vec<&str> = text.split_whitespace().collect();
-    if words.len() < 3 {
-        return words.iter().map(|w| w.to_string()).collect();
-    }
-    words.windows(3).map(|w| w.join(" ")).collect()
-}
-
-fn jaccard_similarity(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
-    if a.is_empty() && b.is_empty() {
-        return 1.0;
-    }
-    let intersection = a.intersection(b).count();
-    let union = a.union(b).count();
-    if union == 0 {
-        return 0.0;
-    }
-    intersection as f64 / union as f64
-}
-
-fn load_api_keys(path: &PathBuf) -> Result<Vec<String>> {
-    let file = File::open(path).context(format!("failed to open keyfile: {}", path.display()))?;
-    let reader = BufReader::new(file);
-    let mut keys = Vec::new();
-    for line in reader.lines() {
-        let line = line.context("failed to read keyfile")?;
-        let line = line.trim().to_string();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        keys.push(line);
-    }
-    if keys.is_empty() {
-        bail!("keyfile is empty: {}", path.display());
-    }
-    Ok(keys)
 }
 
 const OPENROUTER_API_BASE: &str = "https://openrouter.ai/api/v1";
@@ -1135,6 +1148,7 @@ struct GenerateTaskRequest<'a> {
     temperature: f64,
     max_output_tokens: Option<u64>,
     language: Option<&'a str>,
+    retry_guidance: Option<&'a str>,
     cancel: &'a AtomicBool,
     consecutive_timeouts: &'a AtomicUsize,
     progress: &'a ProgressBar,
@@ -1153,12 +1167,24 @@ async fn generate_task(
         temperature,
         max_output_tokens,
         language,
+        retry_guidance,
         cancel,
         consecutive_timeouts,
         progress,
     } = request;
-    let user_msg = model_user_message(model, &task_user_message(sample, language));
-    let system = system_prompt.to_string();
+    let mut task_message = task_user_message(sample, language);
+    if let Some(guidance) = retry_guidance.filter(|value| !value.trim().is_empty()) {
+        task_message.push_str(
+            "\n\nThe previous candidate was rejected. Correct this issue in the replacement: ",
+        );
+        task_message.push_str(guidance.trim());
+    }
+    let user_msg = model_user_message(model, &task_message);
+    let system = if model.to_ascii_lowercase().contains("qwen") {
+        format!("{system_prompt}\n/no_think")
+    } else {
+        system_prompt.to_string()
+    };
 
     let body = chat_request(
         model,
@@ -1291,6 +1317,7 @@ fn count_existing_tasks(path: &PathBuf) -> usize {
     }
 }
 
+#[cfg(test)]
 fn share(count: usize, total: usize) -> f64 {
     if total == 0 {
         0.0
@@ -1299,6 +1326,7 @@ fn share(count: usize, total: usize) -> f64 {
     }
 }
 
+#[cfg(test)]
 fn generate_readme(
     args: &GenerateArgs,
     stats: &RunStats,
@@ -1526,7 +1554,7 @@ fn generate_readme(
     md.push_str("```json\n");
     md.push_str("{\n");
     if compositional {
-        md.push_str("  \"schema_version\": \"scogo.netops.task.v1\",\n");
+        md.push_str("  \"schema_version\": \"scogo.taskgen.task.v2\",\n");
     }
     md.push_str("  \"prompt\": \"...\",\n");
     if compositional {
@@ -1556,6 +1584,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Generate(args) => run_generate(*args).await,
+        Command::Dedup(args) => run_dedup(args).await,
         Command::Atif { command } => {
             let (direction, args) = match command {
                 AtifCommand::Export(args) => (atif::ConversionDirection::Export, args),
@@ -1591,538 +1620,654 @@ async fn main() -> Result<()> {
     }
 }
 
+fn dedup_default_path(input: &std::path::Path, suffix: &str) -> Result<PathBuf> {
+    let parent = input.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let stem = input
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .context("dedup input must have a UTF-8 file stem")?;
+    Ok(parent.join(format!("{stem}.{suffix}.jsonl")))
+}
+
+async fn run_dedup(args: DedupArgs) -> Result<()> {
+    let output = match args.output {
+        Some(path) => path,
+        None => dedup_default_path(&args.input, "dedup")?,
+    };
+    let dropped = match args.dropped {
+        Some(path) => path,
+        None => dedup_default_path(&args.input, "dropped")?,
+    };
+    let config = dedup::DedupConfig {
+        mode: args.dedup_mode,
+        prompt_field: args.prompt_field,
+        ngram: args.dedup_ngram,
+        jaccard_threshold: args.jaccard_threshold,
+        semantic_threshold: args.semantic_threshold,
+    };
+    config.validate()?;
+    let embedder: Option<Arc<dyn dedup::PromptEmbedder>> =
+        if args.dedup_mode == dedup::DedupMode::Semantic {
+            Some(Arc::new(dedup::FastEmbedder::initialize(
+                args.semantic_model
+                    .unwrap_or(dedup::SemanticModel::AllMiniLmL6V2),
+                args.semantic_model_cache,
+            )?))
+        } else {
+            None
+        };
+    let stats = dedup::dedup_jsonl(
+        dedup::FileDedupOptions {
+            input: args.input,
+            output: output.clone(),
+            dropped: dropped.clone(),
+            report: args.report,
+            overwrite: args.overwrite,
+            config,
+        },
+        embedder,
+    )
+    .await?;
+    println!(
+        "dedup complete: {} kept, {} dropped -> {}",
+        stats.kept_records,
+        stats.dropped_records,
+        output.display()
+    );
+    println!("dropped records written to {}", dropped.display());
+    Ok(())
+}
+
+fn resolve_review_system_prompt(
+    args: &GenerateArgs,
+    taxonomy: &taxonomy::TaxonomyCatalog,
+) -> Result<String> {
+    if let Some(prompt) = &args.review_system_prompt {
+        return Ok(prompt.clone());
+    }
+    if let Some(path) = &args.review_system_prompt_file {
+        return std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read review system prompt: {}", path.display()));
+    }
+    if let Some(path) = taxonomy.default_review_system_prompt_path() {
+        return std::fs::read_to_string(&path).with_context(|| {
+            format!(
+                "failed to read taxonomy review system prompt: {}",
+                path.display()
+            )
+        });
+    }
+    Ok(include_str!("../prompts/itops-prompt-review-system-v2.txt").to_string())
+}
+
+async fn seed_existing_dedup(
+    path: &std::path::Path,
+    index: &mut dedup::DedupIndex,
+    embedder: Option<&Arc<dyn dedup::PromptEmbedder>>,
+) -> Result<usize> {
+    let file = File::open(path)
+        .with_context(|| format!("failed to open existing append dataset: {}", path.display()))?;
+    let mut count = 0usize;
+    for (line_index, line) in BufReader::new(file).lines().enumerate() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let entry: TaskEntry = serde_json::from_str(&line).with_context(|| {
+            format!(
+                "invalid existing task at {}:{}",
+                path.display(),
+                line_index + 1
+            )
+        })?;
+        let embedding = match embedder {
+            Some(embedder) => Some(embedder.embed(&entry.prompt).await?),
+            None => None,
+        };
+        index.insert(
+            dedup::DedupCandidate {
+                prompt: &entry.prompt,
+                language: entry.language.as_deref(),
+                domain: &entry.domain,
+                subdomain: &entry.subdomain,
+            },
+            embedding,
+        )?;
+        count += 1;
+    }
+    Ok(count)
+}
+
+fn generation_cost(
+    stats: &AtomicStats,
+    input_price: Option<f64>,
+    output_price: Option<f64>,
+) -> f64 {
+    match (input_price, output_price) {
+        (Some(input), Some(output)) => {
+            input * stats.input_tokens.load(Ordering::Relaxed) as f64 / 1_000_000.0
+                + output * stats.output_tokens.load(Ordering::Relaxed) as f64 / 1_000_000.0
+        }
+        _ => 0.0,
+    }
+}
+
+fn review_cost(stats: &AtomicStats, input_price: Option<f64>, output_price: Option<f64>) -> f64 {
+    match (input_price, output_price) {
+        (Some(input), Some(output)) => {
+            input * stats.review_input_tokens.load(Ordering::Relaxed) as f64 / 1_000_000.0
+                + output * stats.review_output_tokens.load(Ordering::Relaxed) as f64 / 1_000_000.0
+        }
+        _ => 0.0,
+    }
+}
+
 async fn run_generate(args: GenerateArgs) -> Result<()> {
+    use review::CandidateReviewer;
+
     let taxonomy = match args.taxonomy.as_deref() {
         Some(path) => taxonomy::TaxonomyCatalog::from_path(path)?,
         None => taxonomy::TaxonomyCatalog::embedded_itops()?,
     };
-    let dist: HashMap<String, f64> = match &args.distribution {
-        Some(distribution) => parse_distribution(distribution)?,
+    let dist = match &args.distribution {
+        Some(value) => parse_distribution(value)?,
         None => taxonomy.default_distribution(),
     };
-    let diff_dist: HashMap<u8, f64> = match &args.difficulty {
-        Some(difficulty) => parse_difficulty(difficulty)?,
+    let diff_dist = match &args.difficulty {
+        Some(value) => parse_difficulty(value)?,
         None => taxonomy.default_difficulty(),
     };
-    let system_prompt = resolve_system_prompt(&args, &taxonomy)?;
     taxonomy.validate_sampling_distributions(&dist, &diff_dist)?;
+    let system_prompt = resolve_system_prompt(&args, &taxonomy)?;
+    let review_system_prompt = resolve_review_system_prompt(&args, &taxonomy)?;
 
-    let api_keys: Arc<Vec<String>> = Arc::new(match &args.keyfile {
-        Some(path) => {
-            let keys = load_api_keys(path)?;
-            println!("Loaded {} API keys (round-robin)", keys.len());
-            keys
-        }
-        None => {
-            let key = args
-                .api_key
-                .clone()
-                .context("API key required. Use --api-key, set OPENAI_API_KEY, or use --keyfile")?;
-            vec![key]
-        }
-    });
-    let key_counter = Arc::new(AtomicUsize::new(0));
-
-    // discover free models from OpenRouter if requested
-    let api_base = if args.free_models {
-        OPENROUTER_API_BASE.to_string()
+    let generation_credentials = provider::load_credential_pool(
+        args.keyfile.as_deref(),
+        args.api_key.clone(),
+        "generation",
+    )?;
+    let effective_api_base = if args.free_models {
+        OPENROUTER_API_BASE
     } else {
-        args.api_base.clone()
+        &args.api_base
     };
+    let generation_provider = provider::ProviderConfig {
+        api_base: provider::normalize_api_base(effective_api_base)?,
+        model: args.model.clone(),
+        credentials: generation_credentials,
+    };
+    let review_credentials = if args.review_keyfile.is_some() || args.review_api_key.is_some() {
+        Some(provider::load_credential_pool(
+            args.review_keyfile.as_deref(),
+            args.review_api_key.clone(),
+            "review",
+        )?)
+    } else {
+        None
+    };
+    let review_provider = provider::resolve_review_provider(
+        &generation_provider,
+        provider::ProviderOverrides {
+            api_base: args.review_api_base.clone(),
+            model: args.review_model.clone(),
+            credentials: review_credentials,
+        },
+    )?;
 
-    let model_failures = Arc::new(ModelFailures::new());
+    let dedup_config = dedup::DedupConfig {
+        mode: args.dedup_mode,
+        prompt_field: "prompt".into(),
+        ngram: args.dedup_ngram,
+        jaccard_threshold: args.jaccard_threshold,
+        semantic_threshold: args.semantic_threshold,
+    };
+    dedup_config.validate()?;
+    let effective_semantic_model = args.semantic_model.unwrap_or(if args.multilingual {
+        dedup::SemanticModel::MultilingualE5Small
+    } else {
+        dedup::SemanticModel::AllMiniLmL6V2
+    });
+    let embedder: Option<Arc<dyn dedup::PromptEmbedder>> =
+        if args.dedup_mode == dedup::DedupMode::Semantic {
+            Some(Arc::new(dedup::FastEmbedder::initialize(
+                effective_semantic_model,
+                args.semantic_model_cache.clone(),
+            )?))
+        } else {
+            None
+        };
+    let mut dedup_index = dedup::DedupIndex::new(dedup_config.clone(), embedder.clone())?;
+    let existing = if args.append {
+        seed_existing_dedup(&args.output, &mut dedup_index, embedder.as_ref()).await?
+    } else {
+        0
+    };
+    if existing > 0 {
+        println!("Loaded {existing} existing tasks into the append dedup index");
+    }
 
-    let free_model_list: Option<Arc<tokio::sync::RwLock<Vec<String>>>> = if args.free_models {
-        let discovery_client = reqwest::Client::new();
-        let models = fetch_free_models(&discovery_client, &api_keys[0]).await?;
-        Some(Arc::new(tokio::sync::RwLock::new(models)))
+    let artifacts = artifacts::RunArtifacts::create(&args.output, args.append, args.overwrite)?;
+    let work_dir = artifacts.work_dir().to_path_buf();
+    println!("Run work directory: {}", work_dir.display());
+    let artifacts = Arc::new(std::sync::Mutex::new(Some(artifacts)));
+    let dedup_index = Arc::new(std::sync::Mutex::new(dedup_index));
+
+    let clients: Arc<Vec<reqwest::Client>> = Arc::new(match &args.proxies {
+        Some(proxy_path) => {
+            let proxies = load_proxies(proxy_path)?;
+            let timeout = std::time::Duration::from_secs(args.request_timeout_seconds);
+            if args.rotating_proxy {
+                let index = thread_rng().gen_range(0..proxies.len());
+                vec![
+                    reqwest::Client::builder()
+                        .proxy(proxies.into_iter().nth(index).unwrap())
+                        .timeout(timeout)
+                        .build()?,
+                ]
+            } else {
+                build_clients(&proxies, timeout)
+            }
+        }
+        None => vec![
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(args.request_timeout_seconds))
+                .build()?,
+        ],
+    });
+    let proxy_counter = Arc::new(AtomicUsize::new(0));
+
+    let free_models: Option<Arc<Vec<String>>> = if args.free_models {
+        let credential = generation_provider.credentials.next();
+        Some(Arc::new(
+            fetch_free_models(&reqwest::Client::new(), credential.expose()).await?,
+        ))
     } else {
         None
     };
     let model_counter = Arc::new(AtomicUsize::new(0));
 
-    let existing = if args.append {
-        count_existing_tasks(&args.output)
-    } else {
-        0
-    };
-    if existing > 0 {
-        println!("Appending to existing file with {} tasks", existing);
-    }
-
-    let file = if args.append && args.output.exists() {
-        OpenOptions::new().append(true).open(&args.output)?
-    } else {
-        File::create(&args.output)?
-    };
-
-    let clients: Arc<Vec<reqwest::Client>> = Arc::new(match &args.proxies {
-        Some(proxy_path) => {
-            let proxies = load_proxies(proxy_path)?;
-            let total = proxies.len();
-            if args.rotating_proxy {
-                let idx = thread_rng().gen_range(0..total);
-                println!("Using rotating proxy (sticky): proxy #{}", idx + 1);
-                vec![
-                    reqwest::Client::builder()
-                        .proxy(proxies.into_iter().nth(idx).unwrap())
-                        .build()?,
-                ]
-            } else {
-                println!("Loaded {} proxies (round-robin)", total);
-                build_clients(&proxies)
-            }
-        }
-        None => vec![reqwest::Client::new()],
-    });
-    let proxy_counter = Arc::new(AtomicUsize::new(0));
-
-    let file = Arc::new(std::sync::Mutex::new(file));
-    let stats = Arc::new(AtomicStats::new());
-    let cancel = Arc::new(AtomicBool::new(false));
-    let consecutive_timeouts = Arc::new(AtomicUsize::new(0));
-
-    let budget = args.budget;
-    let input_price = args.input_price;
-    let output_price = args.output_price;
-    let count = args.count;
-    let workers = args.workers;
-
-    // pre-sample all domain/difficulty/language tuples to avoid RNG contention in workers
     let mut rng = match args.seed {
         Some(seed) => StdRng::seed_from_u64(seed),
         None => StdRng::from_entropy(),
     };
-    let multilingual = args.multilingual;
-    let presampled: Vec<(taxonomy::SampledTask, Option<String>)> = (0..count)
+    let slots: Vec<(taxonomy::SampledTask, Option<String>)> = (0..args.count)
         .map(|_| {
             let sample = taxonomy.sample(&mut rng, &dist, &diff_dist)?;
-            let lang = if multilingual {
-                let idx = rng.gen_range(0..LANGUAGES.len());
-                Some(LANGUAGES[idx].0.to_string())
-            } else {
-                None
-            };
-            Ok((sample, lang))
+            let language = args.multilingual.then(|| {
+                let index = rng.gen_range(0..LANGUAGES.len());
+                LANGUAGES[index].0.to_string()
+            });
+            Ok((sample, language))
         })
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<Result<_>>()?;
+    let slots = Arc::new(slots);
 
-    let presampled = Arc::new(presampled);
-
-    let pb = ProgressBar::new(count as u64);
+    let stats = Arc::new(AtomicStats::new());
+    let cancel = Arc::new(AtomicBool::new(false));
+    let consecutive_timeouts = Arc::new(AtomicUsize::new(0));
+    let pb = ProgressBar::new(args.count as u64);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({per_sec}) | {msg}")
-            .unwrap()
+            .template(
+                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} | {msg}",
+            )?
             .progress_chars("##-"),
     );
-    pb.set_message("starting...");
+    pb.set_message("waiting for accepted prompts");
+    let started_at = chrono::Utc::now();
 
-    // spawn background rescan task for free models
-    let rescan_handle = if let Some(ref model_list) = free_model_list {
-        let model_list = model_list.clone();
-        let cancel = cancel.clone();
-        let model_failures = model_failures.clone();
-        let api_key = api_keys[0].clone();
-        let rescan_mins = args.free_rescan;
-        let pb = pb.clone();
-        Some(tokio::spawn(async move {
-            let client = reqwest::Client::new();
-            loop {
-                // wait for either the timer or an immediate rescan trigger
-                tokio::select! {
-                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(rescan_mins * 60)) => {},
-                    _ = model_failures.rescan_notify.notified() => {},
-                }
-                if cancel.load(Ordering::Relaxed) {
-                    break;
-                }
-                pb.suspend(|| println!("[RESCAN] refreshing free model list..."));
-                match fetch_free_models(&client, &api_key).await {
-                    Ok(new_models) => {
-                        let count = new_models.len();
-                        model_failures.reset();
-                        let mut list = model_list.write().await;
-                        *list = new_models;
-                        pb.suspend(|| println!("[RESCAN] updated: {} models available", count));
-                    }
-                    Err(e) => {
-                        pb.suspend(|| {
-                            eprintln!("[RESCAN] failed to refresh: {}, keeping current list", e)
-                        });
-                    }
-                }
-            }
-        }))
-    } else {
-        None
-    };
-
-    stream::iter(0..count)
-        .for_each_concurrent(workers, |i| {
+    let workers = args.workers;
+    let results: Vec<Result<()>> = stream::iter(0..args.count)
+        .map(|slot_index| {
+            let slots = slots.clone();
             let clients = clients.clone();
             let proxy_counter = proxy_counter.clone();
-            let file = file.clone();
+            let generation_provider = generation_provider.clone();
+            let review_provider = review_provider.clone();
+            let free_models = free_models.clone();
+            let model_counter = model_counter.clone();
+            let artifacts = artifacts.clone();
+            let dedup_index = dedup_index.clone();
+            let embedder = embedder.clone();
             let stats = stats.clone();
             let cancel = cancel.clone();
             let consecutive_timeouts = consecutive_timeouts.clone();
-            let api_base = api_base.clone();
-            let api_keys = api_keys.clone();
-            let key_counter = key_counter.clone();
-            let model = args.model.clone();
-            let free_model_list = free_model_list.clone();
-            let model_counter = model_counter.clone();
-            let model_failures = model_failures.clone();
+            let pb = pb.clone();
             let system_prompt = system_prompt.clone();
-            let presampled = presampled.clone();
+            let review_system_prompt = review_system_prompt.clone();
+            let taxonomy_id = taxonomy.id().to_string();
+            let taxonomy_kind = format!("{:?}", taxonomy.kind()).to_ascii_lowercase();
+            let explicit_review_model = args.review_model.is_some();
             let temperature = args.temperature;
             let max_output_tokens = args.max_output_tokens;
-            let pb = pb.clone();
+            let review_max_output_tokens = args.review_max_output_tokens.unwrap_or_else(|| {
+                if review_provider.model.to_ascii_lowercase().contains("qwen") {
+                    4096
+                } else {
+                    1024
+                }
+            });
+            let max_attempts = args.max_attempts_per_slot;
+            let input_price = args.input_price;
+            let output_price = args.output_price;
+            let review_input_price = args.review_input_price.or(args.input_price);
+            let review_output_price = args.review_output_price.or(args.output_price);
+            let budget = args.budget;
 
             async move {
-                if cancel.load(Ordering::Relaxed) {
-                    pb.inc(1);
-                    return;
-                }
-
-                let (ref sample, ref lang) = presampled[i];
-
-                if let (Some(b), Some(ip), Some(op)) = (budget, input_price, output_price) {
-                    let in_tok = stats.input_tokens.load(Ordering::Relaxed) as f64;
-                    let out_tok = stats.output_tokens.load(Ordering::Relaxed) as f64;
-                    let cost = (ip * in_tok / 1_000_000.0) + (op * out_tok / 1_000_000.0);
-                    if cost >= b {
-                        cancel.store(true, Ordering::Relaxed);
-                        pb.inc(1);
-                        return;
+                let (sample, language) = &slots[slot_index];
+                let mut retry_guidance = String::new();
+                for attempt in 1..=max_attempts {
+                    if cancel.load(Ordering::Relaxed) {
+                        bail!("slot {} cancelled before acceptance", slot_index + 1);
                     }
-                }
-
-                let use_model = match &free_model_list {
-                    Some(models) => {
-                        let list = models.read().await;
-                        let idx = model_counter.fetch_add(1, Ordering::Relaxed) % list.len();
-                        list[idx].clone()
-                    }
-                    None => model.clone(),
-                };
-
-                let client_idx = proxy_counter.fetch_add(1, Ordering::Relaxed) % clients.len();
-                let client = &clients[client_idx];
-                let key_idx = key_counter.fetch_add(1, Ordering::Relaxed) % api_keys.len();
-                let api_key = &api_keys[key_idx];
-
-                match generate_task(GenerateTaskRequest {
-                    client,
-                    api_base: &api_base,
-                    api_key,
-                    model: &use_model,
-                    system_prompt: &system_prompt,
-                    sample,
-                    temperature,
-                    max_output_tokens,
-                    language: lang.as_deref(),
-                    cancel: &cancel,
-                    consecutive_timeouts: &consecutive_timeouts,
-                    progress: &pb,
-                })
-                .await
-                {
-                    Ok((prompt, in_tok, out_tok)) => {
-                        if prompt.trim().is_empty() {
-                            stats.errors.fetch_add(1, Ordering::Relaxed);
-                            pb.inc(1);
-                            return;
+                    if let Some(limit) = budget {
+                        let spent = generation_cost(&stats, input_price, output_price)
+                            + review_cost(&stats, review_input_price, review_output_price);
+                        if spent >= limit {
+                            cancel.store(true, Ordering::Relaxed);
+                            bail!("budget exhausted before slot {} was accepted", slot_index + 1);
                         }
-                        let entry = TaskEntry {
-                            schema_version: Some("scogo.taskgen.task.v2".to_string()),
-                            prompt,
-                            category: sample.category_id.clone(),
-                            domain: sample.domain_id.clone(),
-                            subdomain: sample.subdomain_id.clone(),
-                            difficulty: sample.difficulty,
-                            coordinates: sample.coordinates.clone(),
-                            language: lang.clone(),
-                            taskgen_model: use_model,
-                            temperature,
-                        };
-                        let line = match serialize_task_entry(&entry) {
-                            Ok(line) => line + "\n",
-                            Err(error) => {
-                                stats.errors.fetch_add(1, Ordering::Relaxed);
-                                pb.suspend(|| eprintln!("[SCHEMA] task rejected: {error}"));
-                                pb.inc(1);
-                                return;
-                            }
-                        };
-                        let write_result = {
-                            let mut f = file.lock().unwrap();
-                            f.write_all(line.as_bytes()).and_then(|_| f.flush())
-                        };
-                        if let Err(error) = write_result {
-                            stats.errors.fetch_add(1, Ordering::Relaxed);
-                            pb.suspend(|| eprintln!("[WRITE] task rejected: {error}"));
-                            pb.inc(1);
-                            return;
-                        }
-                        stats.input_tokens.fetch_add(in_tok, Ordering::Relaxed);
-                        stats.output_tokens.fetch_add(out_tok, Ordering::Relaxed);
-                        let done = stats.tasks.fetch_add(1, Ordering::Relaxed) + 1;
-                        let errs = stats.errors.load(Ordering::Relaxed);
-                        let cur_in = stats.input_tokens.load(Ordering::Relaxed) as f64;
-                        let cur_out = stats.output_tokens.load(Ordering::Relaxed) as f64;
-                        let total_tok = (cur_in + cur_out) as u64;
-                        let cost_str = match (input_price, output_price) {
-                            (Some(ip), Some(op)) => {
-                                let cost = (ip * cur_in / 1_000_000.0) + (op * cur_out / 1_000_000.0);
-                                if let Some(b) = budget
-                                    && cost >= b
-                                {
-                                    cancel.store(true, Ordering::Relaxed);
-                                }
-                                format!(" | ${:.4}", cost)
-                            }
-                            _ => String::new(),
-                        };
-                        pb.set_message(format!(
-                            "{} ok | {} err | {}k tok{}",
-                            done, errs, total_tok / 1000, cost_str
-                        ));
                     }
-                    Err(e) => {
+                    stats.attempts.fetch_add(1, Ordering::Relaxed);
+                    let use_model = match &free_models {
+                        Some(models) => {
+                            let index = model_counter.fetch_add(1, Ordering::Relaxed) % models.len();
+                            models[index].clone()
+                        }
+                        None => generation_provider.model.clone(),
+                    };
+                    let client_index =
+                        proxy_counter.fetch_add(1, Ordering::Relaxed) % clients.len();
+                    let client = &clients[client_index];
+                    let credential = generation_provider.credentials.next();
+                    let generated = generate_task(GenerateTaskRequest {
+                        client,
+                        api_base: generation_provider.api_base.as_str(),
+                        api_key: credential.expose(),
+                        model: &use_model,
+                        system_prompt: &system_prompt,
+                        sample,
+                        temperature,
+                        max_output_tokens,
+                        language: language.as_deref(),
+                        retry_guidance: (!retry_guidance.is_empty()).then_some(retry_guidance.as_str()),
+                        cancel: &cancel,
+                        consecutive_timeouts: &consecutive_timeouts,
+                        progress: &pb,
+                    })
+                    .await;
+                    let (prompt, input_tokens, output_tokens) = match generated {
+                        Ok(result) => result,
+                        Err(error) => {
+                            stats.errors.fetch_add(1, Ordering::Relaxed);
+                            let event = serde_json::json!({
+                                "schema_version": "scogo.taskgen.rejection.v1",
+                                "slot": slot_index + 1,
+                                "attempt": attempt,
+                                "stage": "generation",
+                                "reason": error.to_string(),
+                                "coordinate": sample,
+                            });
+                            artifacts.lock().unwrap().as_mut().unwrap().write_rejection(&event)?;
+                            if cancel.load(Ordering::Relaxed) {
+                                bail!("slot {} generation stopped: {error}", slot_index + 1);
+                            }
+                            continue;
+                        }
+                    };
+                    stats.input_tokens.fetch_add(input_tokens, Ordering::Relaxed);
+                    stats.output_tokens.fetch_add(output_tokens, Ordering::Relaxed);
+                    let entry = TaskEntry {
+                        schema_version: Some("scogo.taskgen.task.v2".into()),
+                        prompt,
+                        category: sample.category_id.clone(),
+                        domain: sample.domain_id.clone(),
+                        subdomain: sample.subdomain_id.clone(),
+                        difficulty: sample.difficulty,
+                        coordinates: sample.coordinates.clone(),
+                        language: language.clone(),
+                        taskgen_model: use_model.clone(),
+                        temperature,
+                    };
+                    let line = match serialize_task_entry(&entry) {
+                        Ok(line) => line,
+                        Err(error) => {
+                            stats.errors.fetch_add(1, Ordering::Relaxed);
+                            let event = serde_json::json!({
+                                "schema_version": "scogo.taskgen.rejection.v1",
+                                "slot": slot_index + 1,
+                                "attempt": attempt,
+                                "stage": "schema_validation",
+                                "reason": error.to_string(),
+                                "candidate": entry,
+                            });
+                            artifacts.lock().unwrap().as_mut().unwrap().write_rejection(&event)?;
+                            continue;
+                        }
+                    };
+                    let embedding = match &embedder {
+                        Some(embedder) => Some(embedder.embed(&entry.prompt).await?),
+                        None => None,
+                    };
+                    let candidate = dedup::DedupCandidate {
+                        prompt: &entry.prompt,
+                        language: entry.language.as_deref(),
+                        domain: &entry.domain,
+                        subdomain: &entry.subdomain,
+                    };
+                    let pre_duplicate = dedup_index
+                        .lock()
+                        .unwrap()
+                        .find_duplicate(&candidate, embedding.as_deref())?;
+                    if let Some(duplicate) = pre_duplicate {
                         stats.errors.fetch_add(1, Ordering::Relaxed);
-                        if !cancel.load(Ordering::Relaxed) {
-                            pb.suspend(|| eprintln!("[ERROR] task {}: {}", i + 1, e));
-                        }
-                        // track per-model failures for free model rotation
-                        if free_model_list.is_some() {
-                            let tripped = model_failures.record(&use_model);
-                            if tripped {
-                                pb.suspend(|| {
-                                    eprintln!(
-                                        "[RESCAN] {} failed {} times, marking offline and triggering rescan",
-                                        use_model, MAX_MODEL_FAILURES
-                                    );
-                                });
-                                model_failures.rescan_notify.notify_one();
-                            }
-                        }
+                        retry_guidance = "Generate a materially different incident scenario for the same coordinates.".into();
+                        let event = serde_json::json!({
+                            "schema_version": "scogo.taskgen.rejection.v1",
+                            "slot": slot_index + 1,
+                            "attempt": attempt,
+                            "stage": "dedup_precheck",
+                            "duplicate": duplicate,
+                            "candidate": entry,
+                        });
+                        artifacts.lock().unwrap().as_mut().unwrap().write_rejection(&event)?;
+                        continue;
                     }
+
+                    let mut effective_review_provider = review_provider.clone();
+                    if free_models.is_some() && !explicit_review_model {
+                        effective_review_provider.model = use_model.clone();
+                    }
+                    let reviewer = review::ReviewClient::new(
+                        effective_review_provider,
+                        client.clone(),
+                        review_max_output_tokens,
+                    )?;
+                    let review = match reviewer
+                        .review(review::ReviewRequest {
+                            candidate: serde_json::to_value(&entry)?,
+                            taxonomy_id: taxonomy_id.clone(),
+                            taxonomy_kind: taxonomy_kind.clone(),
+                            system_prompt: review_system_prompt.clone(),
+                        })
+                        .await
+                    {
+                        Ok(review) => review,
+                        Err(error) => {
+                            stats.errors.fetch_add(1, Ordering::Relaxed);
+                            retry_guidance = "Return a technically grounded, internally consistent replacement.".into();
+                            let event = serde_json::json!({
+                                "schema_version": "scogo.taskgen.rejection.v1",
+                                "slot": slot_index + 1,
+                                "attempt": attempt,
+                                "stage": "review_error",
+                                "reason": error.to_string(),
+                                "candidate": entry,
+                            });
+                            artifacts.lock().unwrap().as_mut().unwrap().write_rejection(&event)?;
+                            continue;
+                        }
+                    };
+                    stats
+                        .review_input_tokens
+                        .fetch_add(review.input_tokens, Ordering::Relaxed);
+                    stats
+                        .review_output_tokens
+                        .fetch_add(review.output_tokens, Ordering::Relaxed);
+                    if review.decision.verdict == review::ReviewVerdict::Reject {
+                        stats.errors.fetch_add(1, Ordering::Relaxed);
+                        retry_guidance = review.decision.retry_guidance.clone();
+                        let event = serde_json::json!({
+                            "schema_version": "scogo.taskgen.rejection.v1",
+                            "slot": slot_index + 1,
+                            "attempt": attempt,
+                            "stage": "model_review",
+                            "review_model": review.model,
+                            "decision": review.decision,
+                            "candidate": entry,
+                        });
+                        artifacts.lock().unwrap().as_mut().unwrap().write_rejection(&event)?;
+                        continue;
+                    }
+
+                    let final_duplicate = {
+                        let mut index = dedup_index.lock().unwrap();
+                        if let Some(duplicate) =
+                            index.find_duplicate(&candidate, embedding.as_deref())?
+                        {
+                            Some(duplicate)
+                        } else {
+                            index.insert(candidate, embedding)?;
+                            None
+                        }
+                    };
+                    if let Some(duplicate) = final_duplicate {
+                        stats.errors.fetch_add(1, Ordering::Relaxed);
+                        retry_guidance = "Generate a materially different incident scenario for the same coordinates.".into();
+                        let event = serde_json::json!({
+                            "schema_version": "scogo.taskgen.rejection.v1",
+                            "slot": slot_index + 1,
+                            "attempt": attempt,
+                            "stage": "dedup_final",
+                            "duplicate": duplicate,
+                            "review_model": review.model,
+                            "decision": review.decision,
+                            "candidate": entry,
+                        });
+                        artifacts.lock().unwrap().as_mut().unwrap().write_rejection(&event)?;
+                        continue;
+                    }
+
+                    let review_event = serde_json::json!({
+                        "schema_version": "scogo.taskgen.accepted-review.v1",
+                        "slot": slot_index + 1,
+                        "attempt": attempt,
+                        "prompt_sha256": dedup::prompt_sha256(&entry.prompt),
+                        "review_model": review.model,
+                        "input_tokens": review.input_tokens,
+                        "output_tokens": review.output_tokens,
+                        "decision": review.decision,
+                    });
+                    {
+                        let mut guard = artifacts.lock().unwrap();
+                        let run = guard.as_mut().unwrap();
+                        run.write_accepted_line(&line)?;
+                        run.write_review(&review_event)?;
+                    }
+                    let accepted = stats.tasks.fetch_add(1, Ordering::Relaxed) + 1;
+                    let rejected = stats.errors.load(Ordering::Relaxed);
+                    pb.inc(1);
+                    pb.set_message(format!("{accepted} accepted | {rejected} rejected"));
+                    return Ok(());
                 }
-                pb.inc(1);
+                bail!(
+                    "slot {} exhausted {} attempts without an accepted candidate",
+                    slot_index + 1,
+                    max_attempts
+                )
             }
         })
+        .buffer_unordered(workers)
+        .collect()
         .await;
 
-    // stop the rescan task
-    if let Some(handle) = rescan_handle {
-        handle.abort();
-    }
-
-    let was_cancelled = cancel.load(Ordering::Relaxed);
-    if was_cancelled {
-        pb.finish_with_message("stopped early — saving progress");
-    } else {
-        pb.finish_with_message("done");
-    }
-
-    let total_tasks = stats.tasks.load(Ordering::Relaxed);
-    let total_errors = stats.errors.load(Ordering::Relaxed);
-    let total_in = stats.input_tokens.load(Ordering::Relaxed);
-    let total_out = stats.output_tokens.load(Ordering::Relaxed);
-
-    if was_cancelled {
-        println!(
-            "\nGraceful shutdown — saved {} tasks before exit",
-            total_tasks
+    if let Some(error) = results.into_iter().find_map(Result::err) {
+        cancel.store(true, Ordering::Relaxed);
+        pb.abandon_with_message("incomplete; final output not published");
+        bail!(
+            "generation incomplete: {error}. Partial audit artifacts retained at {}",
+            work_dir.display()
         );
     }
-    println!("Generated {} tasks ({} errors)", total_tasks, total_errors);
-    println!("Tokens: {} in / {} out", total_in, total_out);
-
-    let stats = RunStats {
-        total_input_tokens: total_in,
-        total_output_tokens: total_out,
-        total_tasks,
-        errors: total_errors,
-    };
-
-    if args.dedup && args.output.exists() {
-        println!(
-            "\nRunning deduplication (threshold: {:.2})...",
-            args.dedup_threshold
+    let accepted = stats.tasks.load(Ordering::Relaxed);
+    if accepted != args.count {
+        pb.abandon_with_message("incomplete; final output not published");
+        bail!(
+            "generation accepted {accepted} records, expected {}. Partial artifacts retained at {}",
+            args.count,
+            work_dir.display()
         );
-
-        let reader = BufReader::new(File::open(&args.output)?);
-        let mut lines: Vec<String> = Vec::new();
-        let mut entries: Vec<Option<TaskEntry>> = Vec::new();
-
-        for line in reader.lines().map_while(std::result::Result::ok) {
-            let entry = serde_json::from_str::<TaskEntry>(&line).ok();
-            entries.push(entry);
-            lines.push(line);
-        }
-
-        // pass 1: exact duplicates
-        let mut seen: HashSet<String> = HashSet::new();
-        let mut keep = vec![true; lines.len()];
-        let mut exact_dupes = 0usize;
-
-        for (i, entry) in entries.iter().enumerate() {
-            if let Some(e) = entry {
-                let normalized: String = e.prompt.to_lowercase().split_whitespace().collect();
-                if !seen.insert(normalized) {
-                    keep[i] = false;
-                    exact_dupes += 1;
-                }
-            }
-        }
-
-        if exact_dupes > 0 {
-            println!("Removed {} exact duplicates", exact_dupes);
-        }
-
-        // pass 2: semantic duplicates via word-trigram jaccard
-        let kept_indices: Vec<usize> = (0..lines.len()).filter(|&i| keep[i]).collect();
-        let trigrams: Vec<Option<HashSet<String>>> = kept_indices
-            .iter()
-            .map(|&i| {
-                entries[i]
-                    .as_ref()
-                    .map(|e| word_trigrams(&e.prompt.to_lowercase()))
-            })
-            .collect();
-
-        let mut semantic_dupes = 0usize;
-        for j in 1..kept_indices.len() {
-            if !keep[kept_indices[j]] {
-                continue;
-            }
-            let trig_b = match &trigrams[j] {
-                Some(t) => t,
-                None => continue,
-            };
-            for k in 0..j {
-                if !keep[kept_indices[k]] {
-                    continue;
-                }
-                let trig_a = match &trigrams[k] {
-                    Some(t) => t,
-                    None => continue,
-                };
-                if jaccard_similarity(trig_a, trig_b) >= args.dedup_threshold {
-                    keep[kept_indices[j]] = false;
-                    semantic_dupes += 1;
-                    break;
-                }
-            }
-        }
-
-        if semantic_dupes > 0 {
-            println!(
-                "Removed {} semantic duplicates (similarity >= {:.2})",
-                semantic_dupes, args.dedup_threshold
-            );
-        }
-
-        let total_removed = exact_dupes + semantic_dupes;
-        if total_removed > 0 {
-            let mut f = File::create(&args.output)?;
-            for (i, line) in lines.iter().enumerate() {
-                if keep[i] {
-                    f.write_all(line.as_bytes())?;
-                    f.write_all(b"\n")?;
-                }
-            }
-            let remaining = lines.len() - total_removed;
-            println!(
-                "Deduplication complete: {} removed, {} remaining",
-                total_removed, remaining
-            );
-        } else {
-            println!("No duplicates found");
-        }
+    }
+    let staged_path = artifacts
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .accepted_path()
+        .to_path_buf();
+    let staged_count = count_existing_tasks(&staged_path);
+    if staged_count != existing + args.count {
+        pb.abandon_with_message("staged count mismatch; final output not published");
+        bail!(
+            "staged dataset contains {staged_count} records, expected {}. Partial artifacts retained at {}",
+            existing + args.count,
+            work_dir.display()
+        );
     }
 
-    // split output into per-language files when --multilingual is set
-    let lang_counts: Option<HashMap<String, usize>> = if multilingual && args.output.exists() {
-        println!("\nSplitting output by language...");
-        let reader = BufReader::new(File::open(&args.output)?);
-        let mut lang_buckets: HashMap<String, Vec<String>> = HashMap::new();
-
-        for line in reader.lines().map_while(std::result::Result::ok) {
-            let lang_code = serde_json::from_str::<serde_json::Value>(&line)
-                .ok()
-                .and_then(|v| {
-                    v.get("language")
-                        .and_then(|l| l.as_str().map(|s| s.to_string()))
-                })
-                .unwrap_or_else(|| "en".to_string());
-            lang_buckets.entry(lang_code).or_default().push(line);
+    let report = serde_json::json!({
+        "schema_version": "scogo.taskgen.run.v1",
+        "status": "success",
+        "started_at": started_at.to_rfc3339(),
+        "completed_at": chrono::Utc::now().to_rfc3339(),
+        "taxonomy_id": taxonomy.id(),
+        "requested_new_records": args.count,
+        "accepted_new_records": accepted,
+        "existing_records": existing,
+        "final_records": staged_count,
+        "candidate_attempts": stats.attempts.load(Ordering::Relaxed),
+        "rejected_candidates": stats.errors.load(Ordering::Relaxed),
+        "generation_model": args.model,
+        "review_model": review_provider.model,
+        "generation_input_tokens": stats.input_tokens.load(Ordering::Relaxed),
+        "generation_output_tokens": stats.output_tokens.load(Ordering::Relaxed),
+        "review_input_tokens": stats.review_input_tokens.load(Ordering::Relaxed),
+        "review_output_tokens": stats.review_output_tokens.load(Ordering::Relaxed),
+        "dedup": {
+            "mode": args.dedup_mode,
+            "ngram": args.dedup_ngram,
+            "jaccard_threshold": args.jaccard_threshold,
+            "semantic_threshold": args.semantic_threshold,
+            "semantic_model": effective_semantic_model.model_id(),
         }
-
-        let out_dir = args.output.parent().unwrap_or(std::path::Path::new("."));
-        let stem = args
-            .output
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy();
-        let ext = args
-            .output
-            .extension()
-            .map(|e| format!(".{}", e.to_string_lossy()))
-            .unwrap_or_default();
-
-        let counts: HashMap<String, usize> = lang_buckets
-            .iter()
-            .map(|(k, v)| (k.clone(), v.len()))
-            .collect();
-
-        for (lang, lines) in &lang_buckets {
-            let lang_path = out_dir.join(format!("{}_{}{}", stem, lang, ext));
-            let mut f = File::create(&lang_path)?;
-            for line in lines {
-                f.write_all(line.as_bytes())?;
-                f.write_all(b"\n")?;
-            }
-            println!(
-                "  {} — {} tasks -> {}",
-                lang,
-                lines.len(),
-                lang_path.display()
-            );
-        }
-
-        Some(counts)
-    } else {
-        None
-    };
-
-    let observed = if args.output.exists() {
-        tally_jsonl(&args.output)
-    } else {
-        DatasetCounts::default()
-    };
-    let readme = generate_readme(
-        &args,
-        &stats,
-        taxonomy.kind(),
-        &dist,
-        &diff_dist,
-        lang_counts.as_ref(),
-        &observed,
+    });
+    let run = artifacts.lock().unwrap().take().unwrap();
+    let published = run.publish(&report)?;
+    let final_count = count_existing_tasks(&published.output);
+    if final_count != staged_count {
+        bail!("published dataset count changed unexpectedly: {final_count} != {staged_count}");
+    }
+    pb.finish_with_message("exact accepted count published");
+    println!(
+        "Generated exactly {} newly accepted tasks ({} total) -> {}",
+        args.count,
+        final_count,
+        published.output.display()
     );
-    let out_dir = args.output.parent().unwrap_or(std::path::Path::new("."));
-    let stem = args
-        .output
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy();
-    let readme_path = out_dir.join(format!("{}.README.md", stem));
-    let mut rf = File::create(&readme_path).context("failed to create dataset README")?;
-    rf.write_all(readme.as_bytes())?;
-    println!("dataset README written to {}", readme_path.display());
-
+    println!("Accepted reviews: {}", published.reviews.display());
+    println!("Rejected candidates: {}", published.rejected.display());
+    println!("Run report: {}", published.run.display());
     Ok(())
 }
 
@@ -2405,7 +2550,7 @@ mod tests {
             None,
             &observed,
         );
-        assert!(md.contains("scogo.netops.task.v1"), "{md}");
+        assert!(md.contains("scogo.taskgen.task.v2"), "{md}");
         assert!(md.contains("enterprise_netops::layer3_routing"), "{md}");
         assert!(md.contains("coordinates"), "{md}");
         assert!(md.contains("Coordinate Seed | `42`"), "{md}");
@@ -2534,6 +2679,44 @@ mod tests {
     }
 
     #[test]
+    fn cli_help_never_displays_environment_secret_values() {
+        use clap::CommandFactory;
+
+        let help = Cli::command().render_long_help().to_string();
+        if let Ok(secret) = std::env::var("OPENAI_API_KEY")
+            && !secret.is_empty()
+        {
+            assert!(!help.contains(&secret));
+        }
+        if let Ok(secret) = std::env::var("TASKGEN_REVIEW_API_KEY")
+            && !secret.is_empty()
+        {
+            assert!(!help.contains(&secret));
+        }
+    }
+
+    #[test]
+    fn keyfiles_parse_even_when_environment_keys_are_present() {
+        let cli = Cli::try_parse_from([
+            "taskgen",
+            "generate",
+            "--keyfile",
+            "keys.txt",
+            "--review-keyfile",
+            "review-keys.txt",
+        ])
+        .unwrap();
+        let Command::Generate(args) = cli.command else {
+            panic!("expected generate command");
+        };
+        assert_eq!(args.keyfile.unwrap(), PathBuf::from("keys.txt"));
+        assert_eq!(
+            args.review_keyfile.unwrap(),
+            PathBuf::from("review-keys.txt")
+        );
+    }
+
+    #[test]
     fn netops_task_message_contains_every_sampled_coordinate() {
         let sample = taxonomy::SampledTask {
             taxonomy_id: "scogo-enterprise-netops-v1".into(),
@@ -2633,5 +2816,123 @@ mod tests {
             temperature: 0.9,
         };
         assert!(serialize_task_entry(&entry).is_err());
+    }
+
+    #[tokio::test]
+    async fn generate_replaces_rejected_candidates_until_exact_count_is_published() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+        #[derive(Clone)]
+        struct TaskgenResponder {
+            generations: Arc<AtomicUsize>,
+            reviews: Arc<AtomicUsize>,
+        }
+
+        impl Respond for TaskgenResponder {
+            fn respond(&self, request: &Request) -> ResponseTemplate {
+                let body = String::from_utf8_lossy(&request.body);
+                if body.contains("Review this prompt seed") {
+                    let review_number = self.reviews.fetch_add(1, Ordering::SeqCst) + 1;
+                    let decision = if review_number == 1 {
+                        serde_json::json!({
+                            "schema_version": "scogo.taskgen.prompt-review.v1",
+                            "verdict": "reject",
+                            "reason_codes": ["ambiguous_or_unanswerable"],
+                            "summary": "The first candidate lacks decisive evidence.",
+                            "retry_guidance": "Include a concrete observed symptom and one conflicting signal."
+                        })
+                    } else {
+                        serde_json::json!({
+                            "schema_version": "scogo.taskgen.prompt-review.v1",
+                            "verdict": "accept",
+                            "reason_codes": [],
+                            "summary": "Operationally coherent and coordinate-aligned.",
+                            "retry_guidance": ""
+                        })
+                    };
+                    return ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "choices": [{"message": {"content": decision.to_string()}}],
+                        "usage": {"prompt_tokens": 10, "completion_tokens": 5}
+                    }));
+                }
+                let number = self.generations.fetch_add(1, Ordering::SeqCst) + 1;
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices": [{
+                        "finish_reason": "stop",
+                        "message": {"content": format!(
+                            "Candidate {number}: latency changed after the maintenance window, interface counters disagree with the flow telemetry, and rollback approval is pending—which read-only evidence should we collect first?"
+                        )}
+                    }],
+                    "usage": {"prompt_tokens": 20, "completion_tokens": 12}
+                }))
+            }
+        }
+
+        let server = MockServer::start().await;
+        let generations = Arc::new(AtomicUsize::new(0));
+        let reviews = Arc::new(AtomicUsize::new(0));
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(TaskgenResponder {
+                generations: generations.clone(),
+                reviews: reviews.clone(),
+            })
+            .mount(&server)
+            .await;
+
+        let temp = tempfile::tempdir().unwrap();
+        let output = temp.path().join("tasks.jsonl");
+        let cli = Cli::try_parse_from([
+            "taskgen",
+            "generate",
+            "--api-base",
+            &format!("{}/v1", server.uri()),
+            "--api-key",
+            "test-key",
+            "--model",
+            "test-model",
+            "--taxonomy",
+            "docs/netops-taxonomy.yaml",
+            "--count",
+            "2",
+            "--workers",
+            "2",
+            "--dedup-mode",
+            "lexical",
+            "--max-attempts-per-slot",
+            "5",
+            "--output",
+            output.to_str().unwrap(),
+        ])
+        .unwrap();
+        let Command::Generate(args) = cli.command else {
+            panic!("expected generate command");
+        };
+        run_generate(*args).await.unwrap();
+
+        let paths = artifacts::PublishedPaths::for_output(&output).unwrap();
+        assert_eq!(std::fs::read_to_string(&output).unwrap().lines().count(), 2);
+        assert_eq!(
+            std::fs::read_to_string(paths.reviews)
+                .unwrap()
+                .lines()
+                .count(),
+            2
+        );
+        assert!(
+            std::fs::read_to_string(paths.rejected)
+                .unwrap()
+                .lines()
+                .count()
+                >= 1
+        );
+        let report: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(paths.run).unwrap()).unwrap();
+        assert_eq!(report["accepted_new_records"], 2);
+        assert_eq!(report["final_records"], 2);
+        assert!(generations.load(Ordering::SeqCst) >= 3);
+        assert!(reviews.load(Ordering::SeqCst) >= 3);
     }
 }

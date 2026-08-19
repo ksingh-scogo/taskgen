@@ -135,9 +135,6 @@ pub fn load_credential_pool(
     key: Option<String>,
     label: &str,
 ) -> Result<CredentialPool> {
-    if keyfile.is_some() && key.is_some() {
-        bail!("{label} keyfile conflicts with {label} API key");
-    }
     if let Some(path) = keyfile {
         let file = File::open(path)
             .with_context(|| format!("failed to open {label} keyfile: {}", path.display()))?;
@@ -207,7 +204,9 @@ mod tests {
             ProviderOverrides {
                 api_base: Some("https://reviewer.example/v1/".into()),
                 model: Some("reviewer".into()),
-                credentials: Some(CredentialPool::new(vec![SecretString::new("review-key")]).unwrap()),
+                credentials: Some(
+                    CredentialPool::new(vec![SecretString::new("review-key")]).unwrap(),
+                ),
             },
         )
         .unwrap();

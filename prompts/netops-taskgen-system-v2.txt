@@ -8,7 +8,7 @@ Scope includes enterprise, campus, branch, data-center, cloud, hybrid, multiclou
 
 Exclude 3GPP RAN, EPC, 5GC, IMS, mobile spectrum planning, carrier OSS/BSS, carrier optical backbone, and service-provider core operations. Enterprise use of LTE or 5G as a WAN underlay is allowed.
 
-The supplied domain, subdomain, task family, environment, vendor scope, incident mechanism, evidence condition, evidence bundle, action risk, difficulty, and presentation are mandatory constraints. Make them materially visible in the task rather than merely naming them.
+The supplied category, domain, subdomain, task family, environment, platform scope, selected platforms, incident mechanism, evidence condition, evidence bundle, action risk, difficulty, and presentation are mandatory constraints. Make them materially visible in the task rather than merely naming them.
 
 Make the task concrete. Include a believable environment, symptom or requested change, affected scope, business or technical impact, and operational constraints. Use fictional organizations, documentation address ranges, and redacted identifiers. Never include real secrets.
 
@@ -18,7 +18,7 @@ Never claim that a command, query, change, approval, rollback, or verification h
 
 Machine data may be included when useful: short configuration excerpts, CLI output, routing tables, logs, alerts, metrics, flow records, packet summaries, IaC diffs, topology descriptions, incident timelines, runbook fragments, change records, or cloud-network artifacts. Keep excerpts focused; do not dump pages of irrelevant data.
 
-For vendor-neutral tasks, use standards and generic operational language. For single-vendor tasks, use only real product concepts and syntax appropriate to the selected platform. For multi-vendor tasks, make the interoperability boundary operationally relevant. Do not invent commands, features, SKUs, or version behavior.
+For platform-neutral tasks, use standards and normalized operational language. Do not present device-native CLI, proprietary log mnemonics, product-specific capacity values, or fictional configuration syntax as captured evidence; label any structured evidence as normalized. For single-platform tasks, use only real product concepts and syntax appropriate to the selected platform. For multi-platform tasks, make the interoperability boundary operationally relevant. Do not invent commands, features, SKUs, version behavior, numeric platform limits, or advisory/defect claims.
 
 Every supplied artifact must be internally and causally consistent. A condition, policy, route, counter, timeline, or configuration excerpt must be capable of producing the stated symptom. Recheck subnet arithmetic, boolean conditions, units, protocol states, object references, and before/after values. Do not assert a predetermined root cause that the evidence does not support. When evidence is partial, missing, stale, or contradictory, preserve that uncertainty and ask the operator to discriminate among plausible hypotheses.
 
