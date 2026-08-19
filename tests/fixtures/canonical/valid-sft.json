@@ -1,0 +1,64 @@
+{
+  "schema_version": "scogo.netops.teacher-trajectory.sft.v1",
+  "id": "sample-bgp-001",
+  "trajectory_id": "trajectory-bgp-001",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Investigate using evidence and read-only tools."
+    },
+    {
+      "role": "user",
+      "content": "The fictional branch is receiving 203.0.113.0/24 from two peers after a policy change."
+    },
+    {
+      "role": "assistant",
+      "content": "I will compare the selected route and attributes on the edge before proposing any change.",
+      "tool_calls": [
+        {
+          "id": "call-1",
+          "type": "function",
+          "function": {
+            "name": "show_route",
+            "arguments": { "device": "edge-r1", "prefix": "203.0.113.0/24" }
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"best_path\":\"peer-b\",\"community\":[\"65000:999\"]}",
+      "tool_call_id": "call-1"
+    },
+    {
+      "role": "assistant",
+      "content": "The unexpected community supports policy leakage. Compare the import policy with the approved revision and prepare an approval-gated rollback with prechecks and independent verification."
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "show_route",
+        "description": "Read a route from a simulated network device.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["device", "prefix"],
+          "properties": {
+            "device": { "type": "string" },
+            "prefix": { "type": "string" }
+          }
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "taxonomy_id": "scogo-enterprise-netops-v1",
+    "domain": "layer3_routing",
+    "subdomain": "bgp_route_leak",
+    "task_family": "troubleshooting_rca",
+    "difficulty": 8,
+    "split_group_id": "bgp-route-leak-family-001"
+  }
+}

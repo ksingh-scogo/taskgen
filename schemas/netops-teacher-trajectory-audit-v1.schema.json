@@ -1,0 +1,485 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scogo.ai/schemas/netops-teacher-trajectory-audit-v1.schema.json",
+  "title": "Scogo NetOps teacher trajectory audit record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_kind",
+    "sample_id",
+    "trajectory_id",
+    "task",
+    "generation",
+    "environment",
+    "tools",
+    "messages",
+    "evidence",
+    "approval",
+    "outcome",
+    "verification",
+    "safety",
+    "quality",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": { "const": "scogo.netops.teacher-trajectory.audit.v1" },
+    "record_kind": { "enum": ["candidate", "imported", "accepted", "rejected"] },
+    "sample_id": { "$ref": "#/$defs/nonempty" },
+    "trajectory_id": { "$ref": "#/$defs/nonempty" },
+    "task": { "$ref": "#/$defs/task" },
+    "generation": { "$ref": "#/$defs/generation" },
+    "environment": { "$ref": "#/$defs/environment" },
+    "tools": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/toolDefinition" }
+    },
+    "messages": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/message" }
+    },
+    "evidence": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidence" }
+    },
+    "approval": { "$ref": "#/$defs/approval" },
+    "outcome": { "$ref": "#/$defs/outcome" },
+    "verification": { "$ref": "#/$defs/verification" },
+    "safety": { "$ref": "#/$defs/safety" },
+    "quality": { "$ref": "#/$defs/quality" },
+    "provenance": { "$ref": "#/$defs/provenance" },
+    "interop": { "$ref": "#/$defs/interop" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "record_kind": { "const": "imported" } },
+        "required": ["record_kind"]
+      },
+      "else": {
+        "properties": {
+          "task": {
+            "properties": {
+              "difficulty": { "type": "integer", "minimum": 1, "maximum": 10 }
+            }
+          },
+          "outcome": {
+            "properties": {
+              "status": {
+                "enum": ["resolved", "mitigated", "planned", "abstained", "escalated", "failed"]
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nonempty": { "type": "string", "minLength": 1 },
+    "nullableString": { "type": ["string", "null"] },
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "nullableHash": {
+      "oneOf": [
+        { "$ref": "#/$defs/hash" },
+        { "type": "null" }
+      ]
+    },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "nullableTimestamp": {
+      "oneOf": [
+        { "$ref": "#/$defs/timestamp" },
+        { "type": "null" }
+      ]
+    },
+    "stringArray": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "coordinates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "taxonomy_id",
+        "task_family",
+        "environment",
+        "vendor_scope",
+        "vendors",
+        "incident_mechanism",
+        "evidence_condition",
+        "evidence_bundle",
+        "action_risk",
+        "presentation"
+      ],
+      "properties": {
+        "taxonomy_id": { "type": "string", "minLength": 1 },
+        "task_family": { "$ref": "#/$defs/nonempty" },
+        "environment": { "$ref": "#/$defs/nonempty" },
+        "vendor_scope": { "$ref": "#/$defs/nonempty" },
+        "vendors": { "$ref": "#/$defs/stringArray" },
+        "incident_mechanism": { "$ref": "#/$defs/nonempty" },
+        "evidence_condition": { "$ref": "#/$defs/nonempty" },
+        "evidence_bundle": { "$ref": "#/$defs/nonempty" },
+        "action_risk": { "$ref": "#/$defs/nonempty" },
+        "presentation": { "$ref": "#/$defs/nonempty" }
+      }
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prompt_id",
+        "prompt_sha256",
+        "prompt",
+        "taxonomy_id",
+        "coordinates",
+        "difficulty",
+        "action_risk",
+        "split_group_id"
+      ],
+      "properties": {
+        "prompt_id": { "$ref": "#/$defs/nonempty" },
+        "prompt_sha256": { "$ref": "#/$defs/hash" },
+        "prompt": { "$ref": "#/$defs/nonempty" },
+        "taxonomy_id": { "$ref": "#/$defs/nonempty" },
+        "coordinates": { "$ref": "#/$defs/coordinates" },
+        "difficulty": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 10
+        },
+        "action_risk": { "$ref": "#/$defs/nonempty" },
+        "split_group_id": { "$ref": "#/$defs/nonempty" }
+      }
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "provider",
+        "teacher_model",
+        "model_revision",
+        "temperature",
+        "seed",
+        "system_prompt_version",
+        "generated_at",
+        "raw_response_ref"
+      ],
+      "properties": {
+        "run_id": { "$ref": "#/$defs/nonempty" },
+        "provider": { "$ref": "#/$defs/nonempty" },
+        "teacher_model": { "$ref": "#/$defs/nonempty" },
+        "model_revision": { "$ref": "#/$defs/nullableString" },
+        "temperature": { "type": ["number", "null"] },
+        "seed": { "type": ["integer", "null"] },
+        "system_prompt_version": { "$ref": "#/$defs/nonempty" },
+        "generated_at": { "$ref": "#/$defs/timestamp" },
+        "raw_response_ref": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "environment_id",
+        "topology_ref",
+        "fixture_ref",
+        "reset_ref",
+        "initial_state_sha256",
+        "allowed_tool_names"
+      ],
+      "properties": {
+        "mode": { "enum": ["simulated", "replay", "authorized_live"] },
+        "environment_id": { "$ref": "#/$defs/nonempty" },
+        "topology_ref": { "$ref": "#/$defs/nullableString" },
+        "fixture_ref": { "$ref": "#/$defs/nullableString" },
+        "reset_ref": { "$ref": "#/$defs/nullableString" },
+        "initial_state_sha256": { "$ref": "#/$defs/nullableHash" },
+        "allowed_tool_names": { "$ref": "#/$defs/stringArray" }
+      }
+    },
+    "toolDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "function"],
+      "properties": {
+        "type": { "const": "function" },
+        "function": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "parameters"],
+          "properties": {
+            "name": { "$ref": "#/$defs/nonempty" },
+            "description": { "type": "string" },
+            "parameters": {
+              "type": ["object", "boolean"],
+              "additionalProperties": true
+            }
+          }
+        }
+      }
+    },
+    "contentPart": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string", "minLength": 1 },
+        "text": { "type": "string" },
+        "image_url": {},
+        "data": {},
+        "mime_type": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "content": {
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/contentPart" }
+        }
+      ]
+    },
+    "toolCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "function"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonempty" },
+        "type": { "const": "function" },
+        "function": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "arguments"],
+          "properties": {
+            "name": { "$ref": "#/$defs/nonempty" },
+            "arguments": { "type": "object", "additionalProperties": true }
+          }
+        }
+      }
+    },
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "message_id",
+        "role",
+        "content",
+        "tool_calls",
+        "tool_call_id",
+        "evidence_refs",
+        "timestamp"
+      ],
+      "properties": {
+        "message_id": { "$ref": "#/$defs/nonempty" },
+        "role": { "enum": ["system", "user", "assistant", "tool"] },
+        "content": { "$ref": "#/$defs/content" },
+        "tool_calls": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/toolCall" }
+        },
+        "tool_call_id": { "$ref": "#/$defs/nullableString" },
+        "evidence_refs": { "$ref": "#/$defs/stringArray" },
+        "timestamp": { "$ref": "#/$defs/nullableTimestamp" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "type",
+        "source",
+        "artifact_ref",
+        "sha256",
+        "observed_at",
+        "excerpt",
+        "generated_by",
+        "sensitivity"
+      ],
+      "properties": {
+        "evidence_id": { "$ref": "#/$defs/nonempty" },
+        "type": { "$ref": "#/$defs/nonempty" },
+        "source": { "$ref": "#/$defs/nonempty" },
+        "artifact_ref": { "$ref": "#/$defs/nullableString" },
+        "sha256": { "$ref": "#/$defs/nullableHash" },
+        "observed_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "excerpt": { "$ref": "#/$defs/nullableString" },
+        "generated_by": { "enum": ["user", "teacher", "tool", "harness", "fixture"] },
+        "sensitivity": { "enum": ["public", "synthetic", "internal", "restricted"] }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "requested", "granted", "scope", "decision_source", "decided_at"],
+      "properties": {
+        "required": { "type": "boolean" },
+        "requested": { "type": "boolean" },
+        "granted": { "type": ["boolean", "null"] },
+        "scope": { "$ref": "#/$defs/nullableString" },
+        "decision_source": { "$ref": "#/$defs/nullableString" },
+        "decided_at": { "$ref": "#/$defs/nullableTimestamp" }
+      }
+    },
+    "rootCause": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "entities", "evidence_refs"],
+      "properties": {
+        "summary": { "$ref": "#/$defs/nullableString" },
+        "entities": { "$ref": "#/$defs/stringArray" },
+        "evidence_refs": { "$ref": "#/$defs/stringArray" }
+      }
+    },
+    "remediation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["planned", "executed"],
+      "properties": {
+        "planned": { "$ref": "#/$defs/stringArray" },
+        "executed": { "$ref": "#/$defs/stringArray" }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "root_cause",
+        "confidence",
+        "uncertainty",
+        "remediation",
+        "verification_summary",
+        "rollback_summary",
+        "abstention_reason",
+        "escalation_target"
+      ],
+      "properties": {
+        "status": { "enum": ["resolved", "mitigated", "planned", "abstained", "escalated", "failed", "unknown"] },
+        "root_cause": { "$ref": "#/$defs/rootCause" },
+        "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "uncertainty": { "$ref": "#/$defs/stringArray" },
+        "remediation": { "$ref": "#/$defs/remediation" },
+        "verification_summary": { "$ref": "#/$defs/nullableString" },
+        "rollback_summary": { "$ref": "#/$defs/nullableString" },
+        "abstention_reason": { "$ref": "#/$defs/nullableString" },
+        "escalation_target": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "verificationCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["check_id", "description", "passed", "evidence_refs"],
+      "properties": {
+        "check_id": { "$ref": "#/$defs/nonempty" },
+        "description": { "$ref": "#/$defs/nonempty" },
+        "passed": { "type": "boolean" },
+        "evidence_refs": { "$ref": "#/$defs/stringArray" }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "oracle",
+        "checks",
+        "passed",
+        "pre_state_sha256",
+        "post_state_sha256",
+        "regressions",
+        "rollback_tested",
+        "verifier"
+      ],
+      "properties": {
+        "oracle": { "$ref": "#/$defs/nullableString" },
+        "checks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/verificationCheck" }
+        },
+        "passed": { "type": ["boolean", "null"] },
+        "pre_state_sha256": { "$ref": "#/$defs/nullableHash" },
+        "post_state_sha256": { "$ref": "#/$defs/nullableHash" },
+        "regressions": { "$ref": "#/$defs/stringArray" },
+        "rollback_tested": { "type": ["boolean", "null"] },
+        "verifier": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "read_before_write",
+        "write_without_approval",
+        "prohibited_actions",
+        "destructive_actions",
+        "secrets_exposed",
+        "policy_pass",
+        "violations"
+      ],
+      "properties": {
+        "read_before_write": { "type": ["boolean", "null"] },
+        "write_without_approval": { "type": "boolean" },
+        "prohibited_actions": { "$ref": "#/$defs/stringArray" },
+        "destructive_actions": { "$ref": "#/$defs/stringArray" },
+        "secrets_exposed": { "type": "boolean" },
+        "policy_pass": { "type": ["boolean", "null"] },
+        "violations": { "$ref": "#/$defs/stringArray" }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_valid",
+        "tool_calls_valid",
+        "grounded",
+        "terminal_claim_valid",
+        "accepted",
+        "rejection_reasons",
+        "grader_refs"
+      ],
+      "properties": {
+        "schema_valid": { "type": "boolean" },
+        "tool_calls_valid": { "type": ["boolean", "null"] },
+        "grounded": { "type": ["boolean", "null"] },
+        "terminal_claim_valid": { "type": ["boolean", "null"] },
+        "accepted": { "type": "boolean" },
+        "rejection_reasons": { "$ref": "#/$defs/stringArray" },
+        "grader_refs": { "$ref": "#/$defs/stringArray" }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "taskgen_run_id",
+        "source_prompt_ref",
+        "source_refs",
+        "license_review",
+        "contamination_review",
+        "content_sha256"
+      ],
+      "properties": {
+        "taskgen_run_id": { "$ref": "#/$defs/nonempty" },
+        "source_prompt_ref": { "$ref": "#/$defs/nonempty" },
+        "source_refs": { "$ref": "#/$defs/stringArray" },
+        "license_review": { "enum": ["approved", "rejected", "pending"] },
+        "contamination_review": { "enum": ["passed", "failed", "pending"] },
+        "content_sha256": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "interop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_format", "source_schema_version", "original_atif"],
+      "properties": {
+        "source_format": { "enum": ["scogo_audit", "atif"] },
+        "source_schema_version": { "$ref": "#/$defs/nonempty" },
+        "original_atif": { "type": ["object", "null"], "additionalProperties": true }
+      }
+    }
+  }
+}

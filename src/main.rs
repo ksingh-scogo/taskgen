@@ -15,6 +15,7 @@ use rand::prelude::*;
 use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 
+mod schema;
 mod taxonomy;
 
 const DEFAULT_SYSTEM_PROMPT: &str = r#"Write prompts as if a competent on-call asked a question at 2am — Slack, PagerDuty, a war-room thread, or an SSH session. They might be tired or frustrated, but they're competent. They state symptoms, what they already checked, and what they're afraid of. Don't be a child. Don't be a robot. Don't write a formal runbook. Be a human who forgot to be formal.
@@ -256,6 +257,14 @@ struct TaskEntry {
     language: Option<String>,
     taskgen_model: String,
     temperature: f64,
+}
+
+fn serialize_task_entry(entry: &TaskEntry) -> Result<String> {
+    let value = serde_json::to_value(entry)?;
+    if entry.schema_version.as_deref() == Some("scogo.netops.task.v1") {
+        schema::validate_instance(schema::SchemaKind::NetOpsTask, &value)?;
+    }
+    serde_json::to_string(&value).map_err(Into::into)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1586,7 +1595,15 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                             taskgen_model: use_model,
                             temperature,
                         };
-                        let line = serde_json::to_string(&entry).unwrap() + "\n";
+                        let line = match serialize_task_entry(&entry) {
+                            Ok(line) => line + "\n",
+                            Err(error) => {
+                                stats.errors.fetch_add(1, Ordering::Relaxed);
+                                pb.suspend(|| eprintln!("[SCHEMA] task rejected: {error}"));
+                                pb.inc(1);
+                                return;
+                            }
+                        };
                         {
                             let mut f = file.lock().unwrap();
                             let _ = f.write_all(line.as_bytes());
@@ -2125,7 +2142,7 @@ mod tests {
             temperature: 0.9,
         };
 
-        let value = serde_json::to_value(entry).unwrap();
+        let value = serde_json::to_value(&entry).unwrap();
         assert_eq!(value["schema_version"], "scogo.netops.task.v1");
         assert_eq!(value["domain"], "enterprise_netops::layer3_routing");
         assert_eq!(value["subdomain"], "bgp_route_leak");
@@ -2133,5 +2150,22 @@ mod tests {
             value["coordinates"]["action_risk"],
             "read_only_investigation"
         );
+        serialize_task_entry(&entry).unwrap();
+    }
+
+    #[test]
+    fn netops_task_record_requires_coordinates_before_write() {
+        let entry = TaskEntry {
+            schema_version: Some("scogo.netops.task.v1".into()),
+            prompt: "Investigate safely.".into(),
+            domain: "enterprise_netops::layer3_routing".into(),
+            subdomain: "bgp_route_leak".into(),
+            difficulty: 8,
+            coordinates: None,
+            language: None,
+            taskgen_model: "teacher".into(),
+            temperature: 0.9,
+        };
+        assert!(serialize_task_entry(&entry).is_err());
     }
 }

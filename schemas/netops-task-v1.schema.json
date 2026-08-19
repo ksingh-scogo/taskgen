@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scogo.ai/schemas/netops-task-v1.schema.json",
+  "title": "Scogo NetOps prompt-seed record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "prompt",
+    "domain",
+    "subdomain",
+    "difficulty",
+    "coordinates",
+    "taskgen_model",
+    "temperature"
+  ],
+  "properties": {
+    "schema_version": { "const": "scogo.netops.task.v1" },
+    "prompt": { "type": "string", "minLength": 1 },
+    "domain": {
+      "type": "string",
+      "pattern": "^enterprise_netops::[a-z0-9_]+$"
+    },
+    "subdomain": { "$ref": "#/$defs/id" },
+    "difficulty": { "type": "integer", "minimum": 1, "maximum": 10 },
+    "coordinates": { "$ref": "#/$defs/coordinates" },
+    "language": { "type": "string", "minLength": 2 },
+    "taskgen_model": { "type": "string", "minLength": 1 },
+    "temperature": { "type": "number", "minimum": 0 }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_.-]*$"
+    },
+    "coordinates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "taxonomy_id",
+        "task_family",
+        "environment",
+        "vendor_scope",
+        "vendors",
+        "incident_mechanism",
+        "evidence_condition",
+        "evidence_bundle",
+        "action_risk",
+        "presentation"
+      ],
+      "properties": {
+        "taxonomy_id": { "const": "scogo-enterprise-netops-v1" },
+        "task_family": { "$ref": "#/$defs/id" },
+        "environment": { "$ref": "#/$defs/id" },
+        "vendor_scope": {
+          "enum": ["vendor_neutral", "single_vendor", "multi_vendor"]
+        },
+        "vendors": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/id" }
+        },
+        "incident_mechanism": { "$ref": "#/$defs/id" },
+        "evidence_condition": { "$ref": "#/$defs/id" },
+        "evidence_bundle": { "$ref": "#/$defs/id" },
+        "action_risk": { "$ref": "#/$defs/id" },
+        "presentation": { "$ref": "#/$defs/id" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "vendor_scope": { "const": "vendor_neutral" } } },
+          "then": { "properties": { "vendors": { "maxItems": 0 } } }
+        },
+        {
+          "if": { "properties": { "vendor_scope": { "const": "single_vendor" } } },
+          "then": { "properties": { "vendors": { "minItems": 1, "maxItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "vendor_scope": { "const": "multi_vendor" } } },
+          "then": { "properties": { "vendors": { "minItems": 2, "maxItems": 2 } } }
+        }
+      ]
+    }
+  }
+}

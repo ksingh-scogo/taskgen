@@ -1,0 +1,21 @@
+{
+  "schema_version": "scogo.netops.task.v1",
+  "prompt": "Investigate a suspected BGP route leak using read-only evidence before proposing a bounded repair.",
+  "domain": "enterprise_netops::layer3_routing",
+  "subdomain": "bgp_route_leak",
+  "difficulty": 8,
+  "coordinates": {
+    "taxonomy_id": "scogo-enterprise-netops-v1",
+    "task_family": "troubleshooting_rca",
+    "environment": "hybrid",
+    "vendor_scope": "multi_vendor",
+    "vendors": ["cisco_ios_xe", "juniper_junos"],
+    "incident_mechanism": "misconfiguration",
+    "evidence_condition": "contradictory",
+    "evidence_bundle": "routing_tables",
+    "action_risk": "read_only_investigation",
+    "presentation": "war_room"
+  },
+  "taskgen_model": "teacher/model",
+  "temperature": 0.9
+}

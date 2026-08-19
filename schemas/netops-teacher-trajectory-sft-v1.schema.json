@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scogo.ai/schemas/netops-teacher-trajectory-sft-v1.schema.json",
+  "title": "Scogo NetOps accepted SFT projection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "trajectory_id", "messages", "tools", "metadata"],
+  "properties": {
+    "schema_version": { "const": "scogo.netops.teacher-trajectory.sft.v1" },
+    "id": { "$ref": "#/$defs/nonempty" },
+    "trajectory_id": { "$ref": "#/$defs/nonempty" },
+    "messages": {
+      "type": "array",
+      "minItems": 2,
+      "items": { "$ref": "#/$defs/message" }
+    },
+    "tools": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/toolDefinition" }
+    },
+    "metadata": { "$ref": "#/$defs/metadata" }
+  },
+  "$defs": {
+    "nonempty": { "type": "string", "minLength": 1 },
+    "contentPart": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "minLength": 1 },
+        "text": { "type": "string" },
+        "image_url": {},
+        "data": {},
+        "mime_type": { "type": "string" }
+      }
+    },
+    "content": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "$ref": "#/$defs/contentPart" } }
+      ]
+    },
+    "toolCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "function"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonempty" },
+        "type": { "const": "function" },
+        "function": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "arguments"],
+          "properties": {
+            "name": { "$ref": "#/$defs/nonempty" },
+            "arguments": { "type": "object", "additionalProperties": true }
+          }
+        }
+      }
+    },
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "content"],
+      "properties": {
+        "role": { "enum": ["system", "user", "assistant", "tool"] },
+        "content": { "$ref": "#/$defs/content" },
+        "tool_calls": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/toolCall" }
+        },
+        "tool_call_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "toolDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "function"],
+      "properties": {
+        "type": { "const": "function" },
+        "function": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "parameters"],
+          "properties": {
+            "name": { "$ref": "#/$defs/nonempty" },
+            "description": { "type": "string" },
+            "parameters": {
+              "type": ["object", "boolean"],
+              "additionalProperties": true
+            }
+          }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "taxonomy_id",
+        "domain",
+        "subdomain",
+        "task_family",
+        "difficulty",
+        "split_group_id"
+      ],
+      "properties": {
+        "taxonomy_id": { "const": "scogo-enterprise-netops-v1" },
+        "domain": { "$ref": "#/$defs/nonempty" },
+        "subdomain": { "$ref": "#/$defs/nonempty" },
+        "task_family": { "$ref": "#/$defs/nonempty" },
+        "difficulty": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "split_group_id": { "$ref": "#/$defs/nonempty" }
+      }
+    }
+  }
+}
