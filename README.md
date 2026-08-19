@@ -27,6 +27,43 @@ A fast, concurrent SFT (Supervised Fine-Tuning) task generator for distillation 
 
 ## Install
 
+Prebuilt **ARM64** binaries ship on every push to `master` via [Releases](https://github.com/ksingh-scogo/taskgen/releases/latest). Linux ARM64 is the NVIDIA DGX Spark / aarch64 Linux build. macOS ARM64 is Apple Silicon. They are **not** interchangeable — a Linux binary will not run on macOS.
+
+**NVIDIA DGX Spark / Linux ARM64** — fetch the executable, no Rust toolchain:
+
+```bash
+curl -fsSL -o taskgen \
+  "https://github.com/ksingh-scogo/taskgen/releases/latest/download/taskgen-linux-arm64"
+chmod +x taskgen
+./taskgen --version
+```
+
+Long-running generation (use `tmux`/`screen`/systemd so SSH disconnects don't kill it):
+
+```bash
+./taskgen \
+  --api-key "$OPENAI_API_KEY" \
+  --api-base https://omniroute.scogo.ai/v1 \
+  -m scogoai/gpt-5.6-luna-max \
+  -c 50000 -w 20 \
+  --append \
+  -o /data/itops.jsonl
+```
+
+**macOS Apple Silicon:**
+
+```bash
+curl -fsSL -o taskgen \
+  "https://github.com/ksingh-scogo/taskgen/releases/latest/download/taskgen-darwin-arm64"
+chmod +x taskgen
+xattr -d com.apple.quarantine taskgen 2>/dev/null || true
+./taskgen --version
+```
+
+Each release also has `SHA256SUMS`. Versions are auto-bumped from the latest GitHub release (patch +1) unless `Cargo.toml` is already ahead.
+
+### Build from source
+
 ```bash
 git clone https://github.com/ksingh-scogo/taskgen.git
 cd taskgen
