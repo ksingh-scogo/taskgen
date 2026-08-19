@@ -10,8 +10,9 @@ use chrono::Local;
 use clap::{Args as ClapArgs, Parser, Subcommand};
 use futures::stream::{self, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
-use rand::distributions::WeightedIndex;
+use rand::SeedableRng;
 use rand::prelude::*;
+use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 
 mod taxonomy;
@@ -44,179 +45,6 @@ const LANGUAGES: &[(&str, &str)] = &[
     ("ru", "Russian"),
 ];
 
-#[derive(Debug, Clone)]
-struct DomainDef {
-    category: &'static str,
-    name: &'static str, 
-    subdomains: &'static [&'static str],
-}
-
-// BEGIN GENERATED DOMAINS
-static DOMAINS: &[DomainDef] = &[
-    DomainDef { category: "itsm", name: "Service Desk", subdomains: &["auto_deflection", "classification_routing", "l0_l1_autoresolve", "ticket_enrichment", "sla_breach", "major_incident", "approval_workflows", "reassignment_churn", "conversational_status", "knowledge_deflection"] },
-    DomainDef { category: "itsm", name: "Incident Management", subdomains: &["sev_classify", "war_room", "customer_comms", "timeline", "page_storm", "commander_role", "handoff", "major_incident_bridge"] },
-    DomainDef { category: "itsm", name: "Problem Management", subdomains: &["rca", "known_error", "workaround", "problem_trend", "ke_article", "recurring_incident"] },
-    DomainDef { category: "itsm", name: "Change Enablement", subdomains: &["cab_risk", "emergency_change", "backout_plan", "collision_window", "standard_change", "post_impl_verify", "freeze_calendar"] },
-    DomainDef { category: "itsm", name: "Request Catalog", subdomains: &["catalog_item", "fulfillment_path", "entitlement", "approval_chain", "service_offering", "request_sla"] },
-    DomainDef { category: "itsm", name: "CMDB Configuration", subdomains: &["ci_reconciliation", "relationship_map", "stale_ci", "discovery_gap", "service_mapping", "orphan_ci"] },
-    DomainDef { category: "itsm", name: "Knowledge Management", subdomains: &["kb_gap", "article_decay", "sop_from_ticket", "search_miss", "deflection_quality", "conflicting_sop"] },
-    DomainDef { category: "itsm", name: "Task Project Management", subdomains: &["sprint_block", "it_project_risk", "dependency", "resource_conflict", "change_project", "milestone_slip"] },
-    DomainDef { category: "itsm", name: "SLA Measurement", subdomains: &["sla_clock", "ola_breach", "kpi_drift", "report_pack", "under_reporting"] },
-    DomainDef { category: "workplace", name: "Collaboration Messaging", subdomains: &["teams_outage", "slack_guest", "channel_perm", "message_retention", "webhook_fail", "federation"] },
-    DomainDef { category: "workplace", name: "Email Communication", subdomains: &["mailbox_full", "mail_flow", "shared_mailbox", "alias", "journaling", "transport_rule"] },
-    DomainDef { category: "workplace", name: "Calendar Scheduling", subdomains: &["room_conflict", "booking_delegate", "timezone", "resource_mailbox", "calendar_perm"] },
-    DomainDef { category: "workplace", name: "Document Management", subdomains: &["share_perm", "version_conflict", "retention_label", "sync_fail", "external_share", "checkout_lock"] },
-    DomainDef { category: "workplace", name: "Content Website", subdomains: &["cms_outage", "publish_fail", "cert_on_site", "wcm_perm", "plugin_break"] },
-    DomainDef { category: "workplace", name: "Print Workplace Devices", subdomains: &["print_queue", "driver_mapping", "scan_workflow", "meeting_room_av", "badge_access", "thin_client"] },
-    DomainDef { category: "workplace", name: "UCaaS Voice", subdomains: &["call_quality", "sbc", "did_port", "contact_center_queue", "voicemail", "recording_compliance"] },
-    DomainDef { category: "workplace", name: "Digital Experience", subdomains: &["login_slowness", "saas_apdex", "rum_error", "last_mile", "crash_free"] },
-    DomainDef { category: "endpoint", name: "RMM", subdomains: &["agent_offline", "self_heal", "script_fail", "patch_job", "remote_session", "policy_drift"] },
-    DomainDef { category: "endpoint", name: "UEM MDM", subdomains: &["enrollment", "compliance_policy", "wipe", "app_push", "byod_privacy", "autopilot"] },
-    DomainDef { category: "endpoint", name: "VDI DaaS", subdomains: &["pool_exhaust", "profile_corrupt", "protocol_quality", "golden_image", "gpu_contention", "broker"] },
-    DomainDef { category: "endpoint", name: "Endpoint Health", subdomains: &["health_score", "disk_pressure", "encryption_bitlocker", "edr_presence", "baseline_drift", "service_failures"] },
-    DomainDef { category: "identity", name: "Identity Access", subdomains: &["joiner", "mover", "leaver", "sso_break", "mfa_enrollment", "conditional_access", "scim_sync", "guest_stale", "entra_ad_sync"] },
-    DomainDef { category: "identity", name: "Privileged Access", subdomains: &["vault_checkout", "jit_elevation", "session_record", "standing_admin", "password_rotation", "break_glass"] },
-    DomainDef { category: "identity", name: "Identity Governance", subdomains: &["access_certification", "sod_conflict", "orphan_account", "entitlement_creep", "role_mining", "joiner_lag"] },
-    DomainDef { category: "identity", name: "Directory Services", subdomains: &["ad_replication", "fsmo", "gpo_drift", "aad_connect", "ldap_bind", "dns_srv"] },
-    DomainDef { category: "secops", name: "SIEM", subdomains: &["use_case_tune", "parser_break", "ingestion_lag", "correlation_miss", "ueba_alert", "retention_cost", "data_lake"] },
-    DomainDef { category: "secops", name: "SOAR", subdomains: &["playbook_fail", "enrichment_gap", "ticket_loop", "containment_action", "approval_gate", "stale_playbook"] },
-    DomainDef { category: "secops", name: "EDR XDR", subdomains: &["isolate_host", "false_positive", "ransomware_roll", "sensor_health", "threat_hunt", "identity_signal"] },
-    DomainDef { category: "secops", name: "Vulnerability Management", subdomains: &["scan_coverage", "risk_score", "exception_waiver", "exploit_available", "agentless_gap", "patch_advisory"] },
-    DomainDef { category: "secops", name: "Threat Intel NDR", subdomains: &["ioc_match", "dns_tunnel", "lateral_movement", "beacon", "feed_stale", "east_west"] },
-    DomainDef { category: "secops", name: "GRC Audit", subdomains: &["control_evidence", "iso27001", "soc2", "policy_exception", "vendor_risk", "dpdp"] },
-    DomainDef { category: "secops", name: "Forensics IR", subdomains: &["disk_image", "chain_of_custody", "timeline", "malware_sandbox", "legal_hold", "memory_capture"] },
-    DomainDef { category: "secure_edge", name: "SASE SSE", subdomains: &["ztna_app", "swg_block", "fwaas", "private_access", "policy_conflict", "user_steering"] },
-    DomainDef { category: "secure_edge", name: "CASB", subdomains: &["unsanctioned_saas", "session_control", "api_mode", "shadow_it", "dlp_saas"] },
-    DomainDef { category: "secure_edge", name: "Data Loss Prevention", subdomains: &["exfil_alert", "false_positive", "endpoint_dlp", "email_dlp", "classification"] },
-    DomainDef { category: "secure_edge", name: "Email Security", subdomains: &["phish", "bec", "spoof_dmarc", "quarantine", "impersonation", "time_of_click"] },
-    DomainDef { category: "secure_edge", name: "Web Security", subdomains: &["url_filter", "malicious_site", "ssl_inspect", "category_miss", "swg_bypass"] },
-    DomainDef { category: "secure_edge", name: "WAF DDoS", subdomains: &["l7_flood", "bot", "owasp", "api_abuse", "tls_policy", "origin_shield"] },
-    DomainDef { category: "secure_edge", name: "DSPM", subdomains: &["public_bucket_data", "shadow_db", "classification_gap", "overshare", "lineage"] },
-    DomainDef { category: "secure_edge", name: "SSPM", subdomains: &["saas_posture", "third_party_app", "oauth_grant", "m365_hardening", "salesforce_perm"] },
-    DomainDef { category: "network", name: "Networking", subdomains: &["l2_loop", "dhcp_exhaust", "spanning_tree", "vlan_misconfig", "mtu", "ipam"] },
-    DomainDef { category: "network", name: "DNS CDN", subdomains: &["dns_outage", "cache_poison", "cdn_purge", "ttl", "split_horizon", "dnssec"] },
-    DomainDef { category: "network", name: "Firewall", subdomains: &["unused_rule", "any_any", "hit_count", "nat", "change_window", "app_id"] },
-    DomainDef { category: "network", name: "Load Balancer", subdomains: &["pool_down", "ssl_offload", "persistence", "health_check", "cert_expiry"] },
-    DomainDef { category: "network", name: "Network Management", subdomains: &["snmp_poll", "config_backup", "config_drift", "inventory", "capacity", "syslog"] },
-    DomainDef { category: "network", name: "Routers", subdomains: &["bgp_flap", "ospf_neighbor", "route_leak", "acl", "wan_brownout"] },
-    DomainDef { category: "network", name: "SD-WAN", subdomains: &["sla_class", "underlay_fail", "app_steering", "overlay_flap", "qos", "site_brownout"] },
-    DomainDef { category: "network", name: "Wireless", subdomains: &["ap_down", "roam", "rf_interference", "captive_portal", "controller"] },
-    DomainDef { category: "network", name: "NAC", subdomains: &["dot1x", "posture", "quarantine_vlan", "guest_ssid", "eap_cert"] },
-    DomainDef { category: "infra", name: "Cloud Infrastructure", subdomains: &["landing_zone", "iam_role", "sg_open", "quota", "region_failover", "orphan_resource", "public_bucket"] },
-    DomainDef { category: "infra", name: "FinOps", subdomains: &["cost_anomaly", "ri_coverage", "idle_orphans", "tag_gap", "commitment", "unit_econ"] },
-    DomainDef { category: "infra", name: "CNAPP", subdomains: &["cspm_finding", "cwpp_runtime", "kspm", "ciem_perm", "secret_in_image", "toxic_combo"] },
-    DomainDef { category: "infra", name: "Virtualization", subdomains: &["vm_health", "snapshot_age", "cpu_ready", "datastore", "ha_failover", "template_golden", "capacity_forecast"] },
-    DomainDef { category: "infra", name: "Storage", subdomains: &["volume_full", "latency", "raid_degrade", "lun_map", "replication", "thin_provision", "array_health"] },
-    DomainDef { category: "infra", name: "Backup", subdomains: &["job_fail", "rpo_miss", "restore_test", "immutable", "catalog_corrupt", "ransomware_recovery"] },
-    DomainDef { category: "infra", name: "BCDR Continuity", subdomains: &["dr_drill", "rto_miss", "runbook", "site_failover", "chaos", "comms_tree"] },
-    DomainDef { category: "infra", name: "DCIM Facilities", subdomains: &["pdu", "cooling", "rack", "generator", "environmental", "colo"] },
-    DomainDef { category: "observe", name: "Monitoring", subdomains: &["alert_storm", "threshold", "snmp", "agent_down", "auto_close", "noise", "runbook_restart", "webhook_enrich"] },
-    DomainDef { category: "observe", name: "Observability APM", subdomains: &["trace_break", "golden_signals", "otel", "service_map", "error_budget", "slow_span"] },
-    DomainDef { category: "observe", name: "AIOps", subdomains: &["correlate", "suppress", "probable_cause", "forecast", "anomaly", "ticket_reduce"] },
-    DomainDef { category: "observe", name: "Synthetics DEM", subdomains: &["synthetic_fail", "rum", "apdex", "last_mile", "mobile_crash", "journey"] },
-    DomainDef { category: "observe", name: "AI Agent Observability", subdomains: &["tool_fail", "hallucination", "token_cost", "loop", "policy_break", "eval_regress"] },
-    DomainDef { category: "data", name: "Database", subdomains: &["replication_lag", "failover", "bloat_vacuum", "connection_exhaustion", "slow_query", "backup_restore", "blocking_locks", "storage_growth"] },
-    DomainDef { category: "data", name: "Analytics", subdomains: &["pipeline_sla", "warehouse_spend", "refresh_fail", "semantic_layer", "access", "cube_stale"] },
-    DomainDef { category: "data", name: "Messaging Streaming", subdomains: &["kafka_lag", "consumer_rebalance", "redis_eviction", "rabbit_poison", "dlq_replay", "schema"] },
-    DomainDef { category: "data", name: "iPaaS API", subdomains: &["connector_fail", "rate_limit", "mapping_break", "webhook", "contract_test", "dead_letter"] },
-    DomainDef { category: "data", name: "Data Governance", subdomains: &["catalog_stale", "lineage", "quality_rule", "pii_tag", "retention", "mdq"] },
-    DomainDef { category: "delivery", name: "DevOps", subdomains: &["pipeline_red", "flaky_tests", "secret_in_ci", "runner_capacity", "artifact", "env_drift"] },
-    DomainDef { category: "delivery", name: "Kubernetes", subdomains: &["crashloopbackoff", "oomkill", "hpa_thrash", "pdb_block", "ingress_tls", "etcd_health", "pending_pods", "image_cve"] },
-    DomainDef { category: "delivery", name: "IaC GitOps", subdomains: &["terraform_drift", "state_lock", "helm_rollback", "argo_out_of_sync", "opa_deny", "module_blast_radius"] },
-    DomainDef { category: "delivery", name: "Release Orchestration", subdomains: &["canary_abort", "rollback", "feature_flag", "change_freeze", "artifact_promote", "smoke"] },
-    DomainDef { category: "delivery", name: "AppSec ASPM", subdomains: &["sast", "sca", "dast", "iac_scan", "secret_scan", "container_scan"] },
-    DomainDef { category: "delivery", name: "Mainframe Midrange", subdomains: &["batch_abend", "racf", "cics", "capacity", "tape", "lpar"] },
-    DomainDef { category: "enterprise", name: "CRM Sales", subdomains: &["sync_fail", "sandbox", "api_limit", "sharing_rule", "integration_user", "duplicate"] },
-    DomainDef { category: "enterprise", name: "HR Payroll", subdomains: &["joiner_feed", "payroll_file", "pii", "access", "offboard_hris", "org_chart"] },
-    DomainDef { category: "enterprise", name: "ERP Finance", subdomains: &["sap_rfc", "transport", "job_fail", "tcode", "idoc", "interface_queue"] },
-    DomainDef { category: "enterprise", name: "Supplier Contract", subdomains: &["vendor_sla", "license_trueup", "sow", "offboarding_vendor", "saas_renewal"] },
-    DomainDef { category: "agentic", name: "Agent Fabric", subdomains: &["connector_outage", "oauth_scope", "mcp_tool_fail", "oem_version_skew", "least_privilege_app_reg", "integration_auth_rot"] },
-    DomainDef { category: "agentic", name: "SIA Guardrails", subdomains: &["approval_gate", "dry_run_preview", "rollback", "audit_export", "hallucination_refuse", "destructive_cmd_block", "human_in_loop"] },
-    DomainDef { category: "agentic", name: "Knowledge Graph", subdomains: &["cross_system_join", "stale_cmdb", "alert_to_asset", "identity_to_device", "policy_conflict", "context_gap"] },
-    DomainDef { category: "agentic", name: "Channels Knowledge", subdomains: &["slack_teams_whatsapp", "sop_curation", "kb_from_ticket", "remote_session_learn", "deflection_accuracy"] },
-    DomainDef { category: "agentic", name: "Platform Deploy", subdomains: &["saas_india", "byoc", "on_prem", "airgap", "rmm_agent", "browser_intel"] },
-    DomainDef { category: "oem", name: "AWS", subdomains: &["ec2", "vpc_iam", "s3", "rds", "eks", "lambda", "cloudwatch", "route53", "direct_connect", "elb_alb", "waf_shield", "organizations", "secrets_manager", "backup"] },
-    DomainDef { category: "oem", name: "Azure", subdomains: &["vm", "vnet", "blob", "aks", "azure_sql", "monitor", "expressroute", "firewall", "sentinel", "policy_arc", "lb_appgw", "backup", "files"] },
-    DomainDef { category: "oem", name: "Google Cloud", subdomains: &["gce", "vpc", "gke", "cloud_sql", "bigquery", "gcs", "iam", "cloud_armor", "interconnect", "logging", "pubsub", "cloud_run"] },
-    DomainDef { category: "oem", name: "Other Cloud", subdomains: &["oci", "ibm_cloud", "alibaba", "digitalocean", "akamai_linode", "ovh", "hetzner"] },
-    DomainDef { category: "oem", name: "Microsoft", subdomains: &["windows_server", "active_directory", "m365", "exchange", "sharepoint", "teams", "entra_id", "intune", "defender", "sql_server", "hyper_v", "sccm_mecm", "power_platform", "windows_11"] },
-    DomainDef { category: "oem", name: "IBM", subdomains: &["power_aix", "ibm_i", "zos", "flashsystem", "maximo", "qradar", "instana", "turbonomic", "mq", "db2", "watsonx", "cloud_pak", "websphere", "spectrum_protect"] },
-    DomainDef { category: "oem", name: "Red Hat", subdomains: &["rhel", "openshift", "ansible_aap", "satellite", "idm", "ceph", "openstack", "insights"] },
-    DomainDef { category: "oem", name: "Canonical", subdomains: &["ubuntu_server", "ubuntu_pro", "landscape", "lxd", "maas", "juju"] },
-    DomainDef { category: "oem", name: "Linux Distros", subdomains: &["debian", "rocky", "alma", "oracle_linux", "amazon_linux", "sles", "freebsd"] },
-    DomainDef { category: "oem", name: "Kubernetes", subdomains: &["control_plane", "etcd", "cni", "ingress", "rbac", "storage_class", "operators", "gateway_api", "network_policy", "cluster_upgrade"] },
-    DomainDef { category: "oem", name: "Cisco", subdomains: &["ios_xe", "ios_xr", "nxos", "meraki", "catalyst_center", "ise", "firepower", "umbrella", "duo", "thousandeyes", "viptela", "webex", "appdynamics", "ucs"] },
-    DomainDef { category: "oem", name: "Juniper", subdomains: &["junos", "mist", "srx", "mx", "qfx", "apstra", "contrail", "session_smart"] },
-    DomainDef { category: "oem", name: "Fortinet", subdomains: &["fortigate", "fortimanager", "fortianalyzer", "forticlient", "fortisase", "fortimail", "fortiweb", "fortiedr", "fortiswitch", "fortiap", "fortiauthenticator", "forticnapp"] },
-    DomainDef { category: "oem", name: "Versa", subdomains: &["versa_director", "versa_analytics", "versa_os", "versa_sase", "versa_titan"] },
-    DomainDef { category: "oem", name: "Palo Alto", subdomains: &["panos", "panorama", "prisma_access", "prisma_cloud", "cortex_xdr", "globalprotect", "wildfire", "sdwan"] },
-    DomainDef { category: "oem", name: "HPE Aruba", subdomains: &["aos_cx", "central", "clearpass", "silver_peak", "ssid_rf", "nac"] },
-    DomainDef { category: "oem", name: "Other Network OEM", subdomains: &["arista_eos", "extreme", "ubiquiti", "mikrotik", "f5_bigip", "checkpoint", "nokia_srlinux", "sonicwall", "ruckus", "infoblox"] },
-    DomainDef { category: "oem", name: "Cloudflare", subdomains: &["cdn_cache", "waf", "tunnel", "zero_trust", "workers", "r2", "dns", "bot_mgmt", "magic_wan"] },
-    DomainDef { category: "oem", name: "Zscaler", subdomains: &["zia", "zpa", "zdx", "zcc", "bsp", "deception"] },
-    DomainDef { category: "oem", name: "Other SASE", subdomains: &["netskope", "cato", "forcepoint", "skyhigh", "perimeter81"] },
-    DomainDef { category: "oem", name: "CrowdStrike", subdomains: &["falcon_prevent", "insight", "overwatch", "identity", "cloud", "logscale", "discover", "spotlight"] },
-    DomainDef { category: "oem", name: "CyberArk", subdomains: &["privileged_cloud", "pam", "identity", "endpoint_privilege", "secrets_manager", "conjur", "remote_access"] },
-    DomainDef { category: "oem", name: "Okta", subdomains: &["workforce", "cic", "wga", "privileged_access", "workflows", "fastpass"] },
-    DomainDef { category: "oem", name: "Other Security ISV", subdomains: &["sentinelone", "tenable", "qualys", "rapid7", "proofpoint", "mimecast", "trend_micro", "sophos", "tanium", "darktrace"] },
-    DomainDef { category: "oem", name: "Other Identity ISV", subdomains: &["ping", "sailpoint", "beyondtrust", "delinea", "forgerock", "jumpcloud"] },
-    DomainDef { category: "oem", name: "Dell", subdomains: &["poweredge", "idrac", "powerstore", "powerscale", "vxrail", "avamar", "networker", "openmanage"] },
-    DomainDef { category: "oem", name: "HPE", subdomains: &["proliant", "ilo", "alletra", "synergy", "greenlake", "primera_3par", "storeonce", "oneview"] },
-    DomainDef { category: "oem", name: "NetApp", subdomains: &["ontap", "ontap_select", "storagegrid", "cloud_volumes", "snapmirror", "active_iq"] },
-    DomainDef { category: "oem", name: "Pure Storage", subdomains: &["flasharray", "flashblade", "portworx", "fusion", "cloud_block"] },
-    DomainDef { category: "oem", name: "Other Compute OEM", subdomains: &["lenovo_thinksystem", "supermicro", "hitachi_vantara"] },
-    DomainDef { category: "oem", name: "VMware", subdomains: &["vsphere", "vcenter", "vsan", "nsx", "horizon", "aria", "velocloud", "tanzu", "vcf"] },
-    DomainDef { category: "oem", name: "Nutanix", subdomains: &["ahv", "prism", "files", "flow", "calm", "nkp"] },
-    DomainDef { category: "oem", name: "Other Hypervisor", subdomains: &["proxmox", "citrix_cvad", "kvm_libvirt", "oracle_virtualization"] },
-    DomainDef { category: "oem", name: "Oracle", subdomains: &["database", "rac_dataguard", "exadata", "goldengate", "ebs", "fusion_cloud", "weblogic", "mysql_heatwave"] },
-    DomainDef { category: "oem", name: "Database ISVs", subdomains: &["postgresql", "mysql", "mariadb", "mongodb", "redis", "elasticsearch", "snowflake", "databricks", "cockroach", "cassandra", "neo4j", "clickhouse"] },
-    DomainDef { category: "oem", name: "Datadog", subdomains: &["infra", "apm", "logs", "synthetics", "rum", "security", "k8s", "usm"] },
-    DomainDef { category: "oem", name: "Splunk", subdomains: &["enterprise", "cloud", "otel", "enterprise_security", "it_si", "observability", "forwarder"] },
-    DomainDef { category: "oem", name: "Other Observability", subdomains: &["dynatrace", "new_relic", "grafana", "zabbix", "elastic", "pagerduty", "solarwinds", "manageengine", "prometheus"] },
-    DomainDef { category: "oem", name: "Backup ISVs", subdomains: &["veeam", "rubrik", "cohesity", "commvault", "veritas", "acronis", "datto", "druva"] },
-    DomainDef { category: "oem", name: "ServiceNow", subdomains: &["itsm", "itom", "cmdb", "now_assist", "secops", "hrsd", "csm", "integration_hub"] },
-    DomainDef { category: "oem", name: "Atlassian", subdomains: &["jira", "jira_sm", "confluence", "bitbucket", "opsgenie", "statuspage"] },
-    DomainDef { category: "oem", name: "Google Workspace", subdomains: &["gmail", "drive", "calendar", "meet", "chromeos", "cloud_identity", "vault", "admin"] },
-    DomainDef { category: "oem", name: "Workplace SaaS", subdomains: &["slack", "zoom", "box", "dropbox", "adobe", "freshservice", "zendesk", "bmc_helix"] },
-    DomainDef { category: "oem", name: "RMM UEM ISVs", subdomains: &["jamf", "ninjaone", "connectwise", "kaseya", "datto_rmm", "omnissa", "addigy", "hexnode"] },
-    DomainDef { category: "oem", name: "GitHub", subdomains: &["actions", "packages", "enterprise", "copilot", "advanced_security", "codespaces"] },
-    DomainDef { category: "oem", name: "HashiCorp", subdomains: &["terraform", "vault", "consul", "nomad", "boundary", "packer"] },
-    DomainDef { category: "oem", name: "Other DevOps ISV", subdomains: &["gitlab", "jfrog", "harness", "circleci", "pulumi", "argo", "flux", "jenkins", "azure_devops", "docker"] },
-];
-// END GENERATED DOMAINS
-
-// BEGIN GENERATED DISTRIBUTION
-const DEFAULT_DISTRIBUTION: &[(&str, f64)] = &[
-    ("infra", 0.12),
-    ("endpoint", 0.11),
-    ("itsm", 0.10),
-    ("identity", 0.10),
-    ("oem", 0.10),
-    ("workplace", 0.08),
-    ("network", 0.08),
-    ("secops", 0.07),
-    ("observe", 0.06),
-    ("delivery", 0.06),
-    ("data", 0.05),
-    ("agentic", 0.03),
-    ("secure_edge", 0.03),
-    ("enterprise", 0.01),
-];
-// END GENERATED DISTRIBUTION
-
-const DEFAULT_DIFFICULTY: &[(u8, f64)] = &[
-    (1, 0.05),
-    (2, 0.05),
-    (3, 0.10),
-    (4, 0.15),
-    (5, 0.20),
-    (6, 0.15),
-    (7, 0.10),
-    (8, 0.08),
-    (9, 0.07),
-    (10, 0.05),
-];
-
 fn difficulty_label(d: u8) -> &'static str {
     match d {
         1 => "Very Easy (junior on-call)",
@@ -236,39 +64,82 @@ fn difficulty_label(d: u8) -> &'static str {
 fn language_instruction(language: Option<&str>) -> String {
     match language {
         Some(code) if code != "en" => {
-            let lang_name = LANGUAGES.iter().find(|(c, _)| *c == code).map(|(_, n)| *n).unwrap_or("English");
-            format!("\n\nIMPORTANT: Write the entire task/prompt in {}. Do NOT use English.", lang_name)
+            let lang_name = LANGUAGES
+                .iter()
+                .find(|(c, _)| *c == code)
+                .map(|(_, n)| *n)
+                .unwrap_or("English");
+            format!(
+                "\n\nIMPORTANT: Write the entire task/prompt in {}. Do NOT use English.",
+                lang_name
+            )
         }
         _ => String::new(),
     }
 }
 
-fn task_user_message(
-    category: &str,
-    domain_display: &str,
-    subdomain: &str,
-    difficulty: u8,
-    language: Option<&str>,
-) -> String {
+fn task_user_message(sample: &taxonomy::SampledTask, language: Option<&str>) -> String {
     let lang_instruction = language_instruction(language);
-    if category == "oem" {
+    if let Some(coordinates) = &sample.coordinates {
+        let vendors = if coordinates.vendors.is_empty() {
+            "none; stay vendor-neutral".to_string()
+        } else {
+            coordinates.vendors.join(", ")
+        };
+        format!(
+            "Generate one task prompt using all of these mandatory constraints:\n\nTaxonomy: {}\nDomain: {} ({})\nSubdomain: {}\nTask family: {}\nEnvironment: {}\nVendor scope: {}\nVendors/platforms: {}\nIncident mechanism: {}\nEvidence condition: {}\nEvidence bundle: {}\nAction risk: {}\nPresentation: {}\nDifficulty: {}/10 ({})\n\nMake every coordinate materially affect the scenario. Do not merely list these labels in the generated prompt. Output only the task prompt, nothing else.{}",
+            sample.taxonomy_id,
+            sample.domain_id,
+            sample.domain_label,
+            sample.subdomain_id,
+            coordinates.task_family,
+            coordinates.environment,
+            coordinates.vendor_scope,
+            vendors,
+            coordinates.incident_mechanism,
+            coordinates.evidence_condition,
+            coordinates.evidence_bundle,
+            coordinates.action_risk,
+            coordinates.presentation,
+            sample.difficulty,
+            difficulty_label(sample.difficulty),
+            lang_instruction
+        )
+    } else if sample.category_id == "oem" {
+        let domain_display = format!("{}::{}", sample.category_id, sample.domain_label);
         format!(
             "Generate a task/prompt for the following:\n\nVendor/platform: {}\nProduct: {}\nDifficulty: {}/10 ({})\n\nThe subdomain is a product line, not a generic failure mode. The incident MUST be about the {} product \"{}\" specifically — use SKU, firmware, CLI, console, TAC, or license language an operator of that product would actually type. Do NOT write a generic capability ticket that could apply to any vendor.\n\nOutput only the task prompt, nothing else.{}",
-            domain_display, subdomain, difficulty, difficulty_label(difficulty),
-            domain_display, subdomain, lang_instruction
+            domain_display,
+            sample.subdomain_id,
+            sample.difficulty,
+            difficulty_label(sample.difficulty),
+            domain_display,
+            sample.subdomain_id,
+            lang_instruction
         )
     } else {
+        let domain_display = format!("{}::{}", sample.category_id, sample.domain_label);
         format!(
             "Generate a task/prompt for the following:\n\nDomain: {}\nSubdomain: {}\nDifficulty: {}/10 ({})\n\nThe task MUST be directly and specifically about the subdomain \"{}\" within {}. Do NOT generate a generic {} task — the content must focus on {} specifically.\n\nOutput only the task prompt, nothing else.{}",
-            domain_display, subdomain, difficulty, difficulty_label(difficulty),
-            subdomain, domain_display, domain_display, subdomain,
+            domain_display,
+            sample.subdomain_id,
+            sample.difficulty,
+            difficulty_label(sample.difficulty),
+            sample.subdomain_id,
+            domain_display,
+            domain_display,
+            sample.subdomain_id,
             lang_instruction
         )
     }
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "taskgen", version, about = "SFT task generator for distillation datasets")]
+#[command(
+    name = "taskgen",
+    version,
+    about = "SFT task generator for distillation datasets"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -373,10 +244,14 @@ struct GenerateArgs {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TaskEntry {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    schema_version: Option<String>,
     prompt: String,
     domain: String,
     subdomain: String,
     difficulty: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    coordinates: Option<taxonomy::TaskCoordinates>,
     #[serde(skip_serializing_if = "Option::is_none")]
     language: Option<String>,
     taskgen_model: String,
@@ -409,7 +284,12 @@ fn restricted_sampling(model: &str) -> bool {
         || name.starts_with("o4")
 }
 
-fn chat_request(model: &str, messages: Vec<ChatMessage>, temperature: f64, max_out: u64) -> ChatRequest {
+fn chat_request(
+    model: &str,
+    messages: Vec<ChatMessage>,
+    temperature: f64,
+    max_out: u64,
+) -> ChatRequest {
     if restricted_sampling(model) {
         ChatRequest {
             model: model.to_string(),
@@ -481,14 +361,20 @@ fn content_from_value(v: &serde_json::Value) -> Option<String> {
                 }
             }
             let t = out.trim();
-            if t.is_empty() { None } else { Some(t.to_string()) }
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
         }
         _ => None,
     }
 }
 
 fn append_choice_text(buf: &mut String, v: &serde_json::Value) {
-    let Some(choices) = v.get("choices").and_then(|c| c.as_array()) else { return };
+    let Some(choices) = v.get("choices").and_then(|c| c.as_array()) else {
+        return;
+    };
     let Some(c0) = choices.first() else { return };
     if let Some(delta) = c0.get("delta") {
         for key in ["content", "reasoning_content", "reasoning"] {
@@ -519,7 +405,9 @@ fn parse_chat_payload(raw: &str) -> Result<(String, u64, u64)> {
         let mut text = String::new();
         let mut usage = (0u64, 0u64);
         for line in t.lines() {
-            let Some(payload) = line.trim().strip_prefix("data:") else { continue };
+            let Some(payload) = line.trim().strip_prefix("data:") else {
+                continue;
+            };
             let payload = payload.trim();
             if payload.is_empty() || payload == "[DONE]" {
                 continue;
@@ -576,7 +464,9 @@ fn extract_completion(v: &serde_json::Value) -> Result<String> {
 }
 
 fn extract_usage(v: &serde_json::Value) -> (u64, u64) {
-    let Some(u) = v.get("usage") else { return (0, 0) };
+    let Some(u) = v.get("usage") else {
+        return (0, 0);
+    };
     (
         json_u64(u, &["prompt_tokens", "input_tokens"]),
         json_u64(u, &["completion_tokens", "output_tokens"]),
@@ -652,7 +542,10 @@ impl DatasetCounts {
         let cat = domain.split_once("::").map(|(c, _)| c).unwrap_or(domain);
         *self.categories.entry(cat.to_string()).or_insert(0) += 1;
         *self.domains.entry(domain.to_string()).or_insert(0) += 1;
-        *self.subdomains.entry((domain.to_string(), subdomain.to_string())).or_insert(0) += 1;
+        *self
+            .subdomains
+            .entry((domain.to_string(), subdomain.to_string()))
+            .or_insert(0) += 1;
         *self.difficulties.entry(difficulty).or_insert(0) += 1;
         self.n += 1;
     }
@@ -682,42 +575,77 @@ fn parse_distribution(input: &str) -> Result<HashMap<String, f64>> {
     let mut map = HashMap::new();
     for pair in input.split(',') {
         let pair = pair.trim();
-        let (key, val) = pair.split_once('=').context(format!("invalid distribution pair: {}", pair))?;
+        let (key, val) = pair
+            .split_once('=')
+            .context(format!("invalid distribution pair: {}", pair))?;
         let key = key.trim().to_lowercase();
-        let val: f64 = val.trim().parse().context(format!("invalid weight: {}", val))?;
+        let val: f64 = val
+            .trim()
+            .parse()
+            .context(format!("invalid weight: {}", val))?;
+        if !val.is_finite() || val < 0.0 {
+            bail!("distribution weight for '{key}' must be finite and non-negative");
+        }
         map.insert(key, val);
     }
     let total: f64 = map.values().sum();
-    if (total - 1.0).abs() > 0.05 {
-        bail!("distribution weights must sum to ~1.0, got {}", total);
+    if (total - 1.0).abs() > 0.000_001 {
+        bail!("distribution weights must sum to 1.0, got {}", total);
     }
-    let normalized: HashMap<String, f64> = map.into_iter().map(|(k, v)| (k, v / total)).collect();
-    Ok(normalized)
+    Ok(map)
 }
 
 fn parse_difficulty(input: &str) -> Result<HashMap<u8, f64>> {
     let mut map = HashMap::new();
     for pair in input.split(',') {
         let pair = pair.trim();
-        let (key, val) = pair.split_once('=').context(format!("invalid difficulty pair: {}", pair))?;
+        let (key, val) = pair
+            .split_once('=')
+            .context(format!("invalid difficulty pair: {}", pair))?;
         let key: String = key.trim().to_lowercase();
         let d: u8 = if key.starts_with('d') {
-            key[1..].parse().context(format!("invalid difficulty level: {}", key))?
+            key[1..]
+                .parse()
+                .context(format!("invalid difficulty level: {}", key))?
         } else {
-            key.parse().context(format!("invalid difficulty level: {}", key))?
+            key.parse()
+                .context(format!("invalid difficulty level: {}", key))?
         };
         if !(1..=10).contains(&d) {
             bail!("difficulty must be 1-10, got {}", d);
         }
-        let val: f64 = val.trim().parse().context(format!("invalid weight: {}", val))?;
+        let val: f64 = val
+            .trim()
+            .parse()
+            .context(format!("invalid weight: {}", val))?;
+        if !val.is_finite() || val < 0.0 {
+            bail!("difficulty weight for '{d}' must be finite and non-negative");
+        }
         map.insert(d, val);
     }
     let total: f64 = map.values().sum();
-    if (total - 1.0).abs() > 0.05 {
-        bail!("difficulty weights must sum to ~1.0, got {}", total);
+    if (total - 1.0).abs() > 0.000_001 {
+        bail!("difficulty weights must sum to 1.0, got {}", total);
     }
-    let normalized: HashMap<u8, f64> = map.into_iter().map(|(k, v)| (k, v / total)).collect();
-    Ok(normalized)
+    Ok(map)
+}
+
+fn resolve_system_prompt(
+    args: &GenerateArgs,
+    taxonomy: &taxonomy::TaxonomyCatalog,
+) -> Result<String> {
+    if let Some(prompt) = &args.system_prompt {
+        return Ok(prompt.clone());
+    }
+    if let Some(path) = &args.system_prompt_file {
+        return std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read system prompt: {}", path.display()));
+    }
+    if let Some(path) = taxonomy.default_system_prompt_path() {
+        return std::fs::read_to_string(&path)
+            .with_context(|| format!("failed to read taxonomy system prompt: {}", path.display()));
+    }
+    Ok(DEFAULT_SYSTEM_PROMPT.to_string())
 }
 
 fn parse_proxy_line(line: &str) -> Result<reqwest::Proxy> {
@@ -726,13 +654,17 @@ fn parse_proxy_line(line: &str) -> Result<reqwest::Proxy> {
     let proxy_url = match parts.len() {
         2 => format!("http://{}:{}", parts[0], parts[1]),
         4 => format!("http://{}:{}@{}:{}", parts[2], parts[3], parts[0], parts[1]),
-        _ => bail!("invalid proxy format '{}', expected host:port or host:port:user:pass", line),
+        _ => bail!(
+            "invalid proxy format '{}', expected host:port or host:port:user:pass",
+            line
+        ),
     };
     reqwest::Proxy::all(&proxy_url).context(format!("failed to create proxy from '{}'", line))
 }
 
 fn load_proxies(path: &PathBuf) -> Result<Vec<reqwest::Proxy>> {
-    let file = File::open(path).context(format!("failed to open proxy file: {}", path.display()))?;
+    let file =
+        File::open(path).context(format!("failed to open proxy file: {}", path.display()))?;
     let reader = BufReader::new(file);
     let mut proxies = Vec::new();
     for (i, line) in reader.lines().enumerate() {
@@ -775,7 +707,9 @@ fn jaccard_similarity(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
     }
     let intersection = a.intersection(b).count();
     let union = a.union(b).count();
-    if union == 0 { return 0.0; }
+    if union == 0 {
+        return 0.0;
+    }
     intersection as f64 / union as f64
 }
 
@@ -845,7 +779,10 @@ async fn fetch_free_models(client: &reqwest::Client, api_key: &str) -> Result<Ve
         bail!("OpenRouter models API error: {}", text);
     }
 
-    let models: ModelsResponse = resp.json().await.context("failed to parse models response")?;
+    let models: ModelsResponse = resp
+        .json()
+        .await
+        .context("failed to parse models response")?;
 
     let mut free: Vec<(String, String, u64)> = models
         .data
@@ -853,8 +790,12 @@ async fn fetch_free_models(client: &reqwest::Client, api_key: &str) -> Result<Ve
         .filter(|m| {
             m.pricing.prompt == "0"
                 && m.pricing.completion == "0"
-                && m.architecture.input_modalities.contains(&"text".to_string())
-                && m.architecture.output_modalities.contains(&"text".to_string())
+                && m.architecture
+                    .input_modalities
+                    .contains(&"text".to_string())
+                && m.architecture
+                    .output_modalities
+                    .contains(&"text".to_string())
                 && m.id != "openrouter/free"
                 && m.top_provider.context_length.unwrap_or(0) >= MIN_FREE_MODEL_CTX
         })
@@ -868,10 +809,16 @@ async fn fetch_free_models(client: &reqwest::Client, api_key: &str) -> Result<Ve
     free.sort_by(|a, b| b.2.cmp(&a.2));
 
     if free.is_empty() {
-        bail!("no free models with >= {}k context available on OpenRouter right now", MIN_FREE_MODEL_CTX / 1000);
+        bail!(
+            "no free models with >= {}k context available on OpenRouter right now",
+            MIN_FREE_MODEL_CTX / 1000
+        );
     }
 
-    println!("Found {} candidate free models, running health checks...", free.len());
+    println!(
+        "Found {} candidate free models, running health checks...",
+        free.len()
+    );
 
     // ping each model with a tiny request to verify it's actually online
     let mut verified: Vec<String> = Vec::new();
@@ -933,38 +880,6 @@ async fn test_model(client: &reqwest::Client, api_key: &str, model: &str) -> Res
     let raw = resp.text().await.unwrap_or_default();
     parse_chat_payload(&raw).context("bad response")?;
     Ok(())
-}
-
-fn build_domain_pool(dist: &HashMap<String, f64>) -> Vec<(String, String, String, f64)> {
-    let mut pool = Vec::new();
-    for (cat, &weight) in dist {
-        let domains_in_cat: Vec<&DomainDef> = DOMAINS.iter().filter(|d| d.category == cat).collect();
-        if domains_in_cat.is_empty() {
-            continue;
-        }
-        let per_domain = weight / domains_in_cat.len() as f64;
-        for d in &domains_in_cat {
-            for &sub in d.subdomains {
-                pool.push((cat.to_string(), d.name.to_string(), sub.to_string(), per_domain / d.subdomains.len() as f64));
-            }
-        }
-    }
-    pool
-}
-
-fn sample_domain(rng: &mut impl Rng, pool: &[(String, String, String, f64)]) -> (String, String, String) {
-    let weights: Vec<f64> = pool.iter().map(|(_, _, _, w)| *w).collect();
-    let idx = WeightedIndex::new(&weights).unwrap();
-    let i = idx.sample(rng);
-    let (cat, name, sub, _) = &pool[i];
-    (cat.clone(), name.clone(), sub.clone())
-}
-
-fn sample_difficulty(rng: &mut impl Rng, dist: &HashMap<u8, f64>) -> u8 {
-    let levels: Vec<u8> = dist.keys().copied().collect();
-    let weights: Vec<f64> = levels.iter().map(|l| dist[l]).collect();
-    let idx = WeightedIndex::new(&weights).unwrap();
-    levels[idx.sample(rng)]
 }
 
 enum ApiError {
@@ -1040,7 +955,11 @@ async fn api_request(
         if is_billing_error(status, &text) {
             return Err(ApiError::Billing(text));
         }
-        return Err(ApiError::Other(anyhow::anyhow!("API error {}: {}", status, text)));
+        return Err(ApiError::Other(anyhow::anyhow!(
+            "API error {}: {}",
+            status,
+            text
+        )));
     }
 
     let raw = resp
@@ -1048,7 +967,11 @@ async fn api_request(
         .await
         .map_err(|e| ApiError::Other(anyhow::anyhow!("failed to read API response: {}", e)))?;
     parse_chat_payload(&raw).map_err(|e| {
-        ApiError::Other(anyhow::anyhow!("{} | body: {}", e, truncate_body(&raw, 500)))
+        ApiError::Other(anyhow::anyhow!(
+            "{} | body: {}",
+            e,
+            truncate_body(&raw, 500)
+        ))
     })
 }
 
@@ -1060,18 +983,15 @@ async fn generate_task(
     api_key: &str,
     model: &str,
     system_prompt: &str,
-    category: &str,
-    domain_display: &str,
-    subdomain: &str,
-    difficulty: u8,
+    sample: &taxonomy::SampledTask,
     temperature: f64,
     language: Option<&str>,
     cancel: &AtomicBool,
     consecutive_timeouts: &AtomicUsize,
     pb: &ProgressBar,
 ) -> std::result::Result<(String, u64, u64), ApiError> {
-    let user_msg = task_user_message(category, domain_display, subdomain, difficulty, language);
-    let system = if category == "oem" {
+    let user_msg = task_user_message(sample, language);
+    let system = if sample.coordinates.is_none() && sample.category_id == "oem" {
         format!("{system_prompt}{OEM_SYSTEM_ADDENDUM}")
     } else {
         system_prompt.to_string()
@@ -1080,8 +1000,14 @@ async fn generate_task(
     let body = chat_request(
         model,
         vec![
-            ChatMessage { role: "system".into(), content: system },
-            ChatMessage { role: "user".into(), content: user_msg },
+            ChatMessage {
+                role: "system".into(),
+                content: system,
+            },
+            ChatMessage {
+                role: "user".into(),
+                content: user_msg,
+            },
         ],
         temperature,
         2048,
@@ -1107,7 +1033,10 @@ async fn generate_task(
                 }
                 let wait = retry_after.unwrap_or_else(|| 2u64.pow(retries).min(60));
                 pb.suspend(|| {
-                    eprintln!("[RATE] 429 hit, waiting {}s (retry {}/{})", wait, retries, MAX_RETRIES);
+                    eprintln!(
+                        "[RATE] 429 hit, waiting {}s (retry {}/{})",
+                        wait, retries, MAX_RETRIES
+                    );
                 });
                 tokio::time::sleep(tokio::time::Duration::from_secs(wait)).await;
             }
@@ -1115,7 +1044,10 @@ async fn generate_task(
                 let count = consecutive_timeouts.fetch_add(1, Ordering::Relaxed) + 1;
                 if count >= 5 {
                     pb.suspend(|| {
-                        eprintln!("[FATAL] {} consecutive timeouts, shutting down gracefully...", count);
+                        eprintln!(
+                            "[FATAL] {} consecutive timeouts, shutting down gracefully...",
+                            count
+                        );
                     });
                     cancel.store(true, Ordering::Relaxed);
                     return Err(ApiError::Timeout);
@@ -1126,7 +1058,10 @@ async fn generate_task(
                 }
                 let wait = 2u64.pow(retries).min(30);
                 pb.suspend(|| {
-                    eprintln!("[TIMEOUT] request timed out, waiting {}s (retry {}/{}, {} consecutive)", wait, retries, MAX_RETRIES, count);
+                    eprintln!(
+                        "[TIMEOUT] request timed out, waiting {}s (retry {}/{}, {} consecutive)",
+                        wait, retries, MAX_RETRIES, count
+                    );
                 });
                 tokio::time::sleep(tokio::time::Duration::from_secs(wait)).await;
             }
@@ -1148,7 +1083,11 @@ fn count_existing_tasks(path: &PathBuf) -> usize {
     }
     let file = File::open(path).ok();
     match file {
-        Some(f) => BufReader::new(f).lines().filter_map(|l| l.ok()).filter(|l| !l.trim().is_empty()).count(),
+        Some(f) => BufReader::new(f)
+            .lines()
+            .filter_map(|l| l.ok())
+            .filter(|l| !l.trim().is_empty())
+            .count(),
         None => 0,
     }
 }
@@ -1169,8 +1108,12 @@ fn generate_readme(
     lang_counts: Option<&HashMap<String, usize>>,
     observed: &DatasetCounts,
 ) -> String {
-    let input_cost = args.input_price.map(|p| p * stats.total_input_tokens as f64 / 1_000_000.0);
-    let output_cost = args.output_price.map(|p| p * stats.total_output_tokens as f64 / 1_000_000.0);
+    let input_cost = args
+        .input_price
+        .map(|p| p * stats.total_input_tokens as f64 / 1_000_000.0);
+    let output_cost = args
+        .output_price
+        .map(|p| p * stats.total_output_tokens as f64 / 1_000_000.0);
     let total_cost = match (input_cost, output_cost) {
         (Some(i), Some(o)) => Some(i + o),
         _ => None,
@@ -1188,11 +1131,20 @@ fn generate_readme(
     md.push_str(&format!("| Model | `{}` |\n", args.model));
     md.push_str(&format!("| Temperature | `{}` |\n", args.temperature));
     md.push_str(&format!("| Total Tasks | {} |\n", n));
-    md.push_str(&format!("| Unique Domains | {} |\n", observed.domains.len()));
-    md.push_str(&format!("| Unique Subdomains | {} |\n", observed.subdomains.len()));
+    md.push_str(&format!(
+        "| Unique Domains | {} |\n",
+        observed.domains.len()
+    ));
+    md.push_str(&format!(
+        "| Unique Subdomains | {} |\n",
+        observed.subdomains.len()
+    ));
     md.push_str(&format!("| Concurrency | {} workers |\n", args.workers));
     md.push_str(&format!("| API Base | `{}` |\n", args.api_base));
-    md.push_str(&format!("| Generated | {} |\n", Local::now().format("%Y-%m-%d %H:%M:%S")));
+    md.push_str(&format!(
+        "| Generated | {} |\n",
+        Local::now().format("%Y-%m-%d %H:%M:%S")
+    ));
     if let Some(b) = args.budget {
         md.push_str(&format!("| Budget Cap | ${:.4} |\n", b));
     }
@@ -1207,7 +1159,11 @@ fn generate_readme(
         let mut sorted: Vec<_> = counts.iter().collect();
         sorted.sort_by(|a, b| b.1.cmp(a.1));
         for (code, count) in &sorted {
-            let name = LANGUAGES.iter().find(|(c, _)| *c == code.as_str()).map(|(_, n)| *n).unwrap_or("Unknown");
+            let name = LANGUAGES
+                .iter()
+                .find(|(c, _)| *c == code.as_str())
+                .map(|(_, n)| *n)
+                .unwrap_or("Unknown");
             md.push_str(&format!("| {} | `{}` | {} |\n", name, code, count));
         }
         md.push('\n');
@@ -1222,14 +1178,19 @@ fn generate_readme(
         let count = observed.categories.get(*cat).copied().unwrap_or(0);
         md.push_str(&format!(
             "| {} | {} | {:.1}% | {:.1}% |\n",
-            cat, count, share(count, n), **w * 100.0
+            cat,
+            count,
+            share(count, n),
+            **w * 100.0
         ));
     }
     for (cat, count) in sorted_count_rows(&observed.categories) {
         if !dist.contains_key(cat) {
             md.push_str(&format!(
                 "| {} | {} | {:.1}% | — |\n",
-                cat, count, share(count, n)
+                cat,
+                count,
+                share(count, n)
             ));
         }
     }
@@ -1242,7 +1203,12 @@ fn generate_readme(
         md.push_str("| — | 0 | 0.0% |\n");
     } else {
         for (domain, count) in sorted_count_rows(&observed.domains) {
-            md.push_str(&format!("| `{}` | {} | {:.1}% |\n", domain, count, share(count, n)));
+            md.push_str(&format!(
+                "| `{}` | {} | {:.1}% |\n",
+                domain,
+                count,
+                share(count, n)
+            ));
         }
     }
     md.push('\n');
@@ -1253,12 +1219,23 @@ fn generate_readme(
     if observed.subdomains.is_empty() {
         md.push_str("| — | — | 0 | 0.0% |\n");
     } else {
-        let mut subs: Vec<_> = observed.subdomains.iter().map(|((d, s), c)| (d, s, *c)).collect();
-        subs.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(b.0)).then_with(|| a.1.cmp(b.1)));
+        let mut subs: Vec<_> = observed
+            .subdomains
+            .iter()
+            .map(|((d, s), c)| (d, s, *c))
+            .collect();
+        subs.sort_by(|a, b| {
+            b.2.cmp(&a.2)
+                .then_with(|| a.0.cmp(b.0))
+                .then_with(|| a.1.cmp(b.1))
+        });
         for (domain, subdomain, count) in subs {
             md.push_str(&format!(
                 "| `{}` | `{}` | {} | {:.1}% |\n",
-                domain, subdomain, count, share(count, n)
+                domain,
+                subdomain,
+                count,
+                share(count, n)
             ));
         }
     }
@@ -1274,16 +1251,29 @@ fn generate_readme(
         }
         md.push_str(&format!(
             "| {} | {} | {} | {:.1}% | {:.1}% |\n",
-            d, difficulty_label(d), count, share(count, n), target
+            d,
+            difficulty_label(d),
+            count,
+            share(count, n),
+            target
         ));
     }
     md.push('\n');
 
     md.push_str("## Token Usage & Cost\n\n");
     md.push_str("| Metric | Value |\n|---|---|\n");
-    md.push_str(&format!("| Input Tokens | {} |\n", stats.total_input_tokens));
-    md.push_str(&format!("| Output Tokens | {} |\n", stats.total_output_tokens));
-    md.push_str(&format!("| Total Tokens | {} |\n", stats.total_input_tokens + stats.total_output_tokens));
+    md.push_str(&format!(
+        "| Input Tokens | {} |\n",
+        stats.total_input_tokens
+    ));
+    md.push_str(&format!(
+        "| Output Tokens | {} |\n",
+        stats.total_output_tokens
+    ));
+    md.push_str(&format!(
+        "| Total Tokens | {} |\n",
+        stats.total_input_tokens + stats.total_output_tokens
+    ));
     md.push_str(&format!("| Errors | {} |\n", stats.errors));
     if let Some(ic) = input_cost {
         md.push_str(&format!("| Input Cost | ${:.6} |\n", ic));
@@ -1295,7 +1285,9 @@ fn generate_readme(
         md.push_str(&format!("| **Total Cost** | **${:.6}** |\n", tc));
     }
     if args.input_price.is_none() && args.output_price.is_none() {
-        md.push_str("| Cost | *Not calculated (use --input-price and --output-price per M tokens)* |\n");
+        md.push_str(
+            "| Cost | *Not calculated (use --input-price and --output-price per M tokens)* |\n",
+        );
     }
     md.push('\n');
 
@@ -1340,6 +1332,19 @@ async fn main() -> Result<()> {
 }
 
 async fn run_generate(args: GenerateArgs) -> Result<()> {
+    let taxonomy = match args.taxonomy.as_deref() {
+        Some(path) => taxonomy::TaxonomyCatalog::from_path(path)?,
+        None => taxonomy::TaxonomyCatalog::embedded_itops()?,
+    };
+    let dist: HashMap<String, f64> = match &args.distribution {
+        Some(distribution) => parse_distribution(distribution)?,
+        None => taxonomy.default_distribution(),
+    };
+    let diff_dist: HashMap<u8, f64> = match &args.difficulty {
+        Some(difficulty) => parse_difficulty(difficulty)?,
+        None => taxonomy.default_difficulty(),
+    };
+    let system_prompt = resolve_system_prompt(&args, &taxonomy)?;
 
     let api_keys: Arc<Vec<String>> = Arc::new(match &args.keyfile {
         Some(path) => {
@@ -1348,7 +1353,10 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             keys
         }
         None => {
-            let key = args.api_key.clone().context("API key required. Use --api-key, set OPENAI_API_KEY, or use --keyfile")?;
+            let key = args
+                .api_key
+                .clone()
+                .context("API key required. Use --api-key, set OPENAI_API_KEY, or use --keyfile")?;
             vec![key]
         }
     });
@@ -1372,25 +1380,11 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     };
     let model_counter = Arc::new(AtomicUsize::new(0));
 
-    let dist: HashMap<String, f64> = match &args.distribution {
-        Some(d) => parse_distribution(d)?,
-        None => DEFAULT_DISTRIBUTION.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+    let existing = if args.append {
+        count_existing_tasks(&args.output)
+    } else {
+        0
     };
-
-    let diff_dist: HashMap<u8, f64> = match &args.difficulty {
-        Some(d) => parse_difficulty(d)?,
-        None => DEFAULT_DIFFICULTY.iter().map(|(k, v)| (*k, *v)).collect(),
-    };
-
-    let pool = build_domain_pool(&dist);
-    if pool.is_empty() {
-        let cats: Vec<&str> = DEFAULT_DISTRIBUTION.iter().map(|(k, _)| *k).collect();
-        bail!("no domains matched the given distribution. Available categories: {}", cats.join(", "));
-    }
-
-    let system_prompt = args.system_prompt.as_deref().unwrap_or(DEFAULT_SYSTEM_PROMPT);
-
-    let existing = if args.append { count_existing_tasks(&args.output) } else { 0 };
     if existing > 0 {
         println!("Appending to existing file with {} tasks", existing);
     }
@@ -1408,9 +1402,11 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             if args.rotating_proxy {
                 let idx = thread_rng().gen_range(0..total);
                 println!("Using rotating proxy (sticky): proxy #{}", idx + 1);
-                vec![reqwest::Client::builder()
-                    .proxy(proxies.into_iter().nth(idx).unwrap())
-                    .build()?]
+                vec![
+                    reqwest::Client::builder()
+                        .proxy(proxies.into_iter().nth(idx).unwrap())
+                        .build()?,
+                ]
             } else {
                 println!("Loaded {} proxies (round-robin)", total);
                 build_clients(&proxies)
@@ -1432,21 +1428,23 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     let workers = args.workers;
 
     // pre-sample all domain/difficulty/language tuples to avoid RNG contention in workers
-    let mut rng = thread_rng();
+    let mut rng = match args.seed {
+        Some(seed) => StdRng::seed_from_u64(seed),
+        None => StdRng::from_entropy(),
+    };
     let multilingual = args.multilingual;
-    let presampled: Vec<(String, String, String, u8, Option<String>)> = (0..count)
+    let presampled: Vec<(taxonomy::SampledTask, Option<String>)> = (0..count)
         .map(|_| {
-            let (cat, name, sub) = sample_domain(&mut rng, &pool);
-            let diff = sample_difficulty(&mut rng, &diff_dist);
+            let sample = taxonomy.sample(&mut rng, &dist, &diff_dist)?;
             let lang = if multilingual {
                 let idx = rng.gen_range(0..LANGUAGES.len());
                 Some(LANGUAGES[idx].0.to_string())
             } else {
                 None
             };
-            (cat, name, sub, diff, lang)
+            Ok((sample, lang))
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
 
     let presampled = Arc::new(presampled);
 
@@ -1488,7 +1486,9 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                         pb.suspend(|| println!("[RESCAN] updated: {} models available", count));
                     }
                     Err(e) => {
-                        pb.suspend(|| eprintln!("[RESCAN] failed to refresh: {}, keeping current list", e));
+                        pb.suspend(|| {
+                            eprintln!("[RESCAN] failed to refresh: {}, keeping current list", e)
+                        });
                     }
                 }
             }
@@ -1512,7 +1512,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             let free_model_list = free_model_list.clone();
             let model_counter = model_counter.clone();
             let model_failures = model_failures.clone();
-            let system_prompt = system_prompt.to_string();
+            let system_prompt = system_prompt.clone();
             let presampled = presampled.clone();
             let temperature = args.temperature;
             let pb = pb.clone();
@@ -1523,7 +1523,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                     return;
                 }
 
-                let (ref cat, ref domain_name, ref subdomain, difficulty, ref lang) = presampled[i];
+                let (ref sample, ref lang) = presampled[i];
 
                 if let (Some(b), Some(ip), Some(op)) = (budget, input_price, output_price) {
                     let in_tok = stats.input_tokens.load(Ordering::Relaxed) as f64;
@@ -1545,7 +1545,6 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                     None => model.clone(),
                 };
 
-                let domain_display = format!("{}::{}", cat, domain_name);
                 let client_idx = proxy_counter.fetch_add(1, Ordering::Relaxed) % clients.len();
                 let client = &clients[client_idx];
                 let key_idx = key_counter.fetch_add(1, Ordering::Relaxed) % api_keys.len();
@@ -1557,10 +1556,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                     api_key,
                     &use_model,
                     &system_prompt,
-                    cat,
-                    &domain_display,
-                    subdomain,
-                    difficulty,
+                    sample,
                     temperature,
                     lang.as_deref(),
                     &cancel,
@@ -1576,10 +1572,16 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                             return;
                         }
                         let entry = TaskEntry {
+                            schema_version: sample.coordinates.as_ref().map(|_| "scogo.netops.task.v1".to_string()),
                             prompt,
-                            domain: format!("{}::{}", cat, domain_name),
-                            subdomain: subdomain.clone(),
-                            difficulty,
+                            domain: if sample.coordinates.is_some() {
+                                format!("enterprise_netops::{}", sample.domain_id)
+                            } else {
+                                format!("{}::{}", sample.category_id, sample.domain_label)
+                            },
+                            subdomain: sample.subdomain_id.clone(),
+                            difficulty: sample.difficulty,
+                            coordinates: sample.coordinates.clone(),
                             language: lang.clone(),
                             taskgen_model: use_model,
                             temperature,
@@ -1657,7 +1659,10 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     let total_out = stats.output_tokens.load(Ordering::Relaxed);
 
     if was_cancelled {
-        println!("\nGraceful shutdown — saved {} tasks before exit", total_tasks);
+        println!(
+            "\nGraceful shutdown — saved {} tasks before exit",
+            total_tasks
+        );
     }
     println!("Generated {} tasks ({} errors)", total_tasks, total_errors);
     println!("Tokens: {} in / {} out", total_in, total_out);
@@ -1670,7 +1675,10 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     };
 
     if args.dedup && args.output.exists() {
-        println!("\nRunning deduplication (threshold: {:.2})...", args.dedup_threshold);
+        println!(
+            "\nRunning deduplication (threshold: {:.2})...",
+            args.dedup_threshold
+        );
 
         let reader = BufReader::new(File::open(&args.output)?);
         let mut lines: Vec<String> = Vec::new();
@@ -1738,7 +1746,10 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         }
 
         if semantic_dupes > 0 {
-            println!("Removed {} semantic duplicates (similarity >= {:.2})", semantic_dupes, args.dedup_threshold);
+            println!(
+                "Removed {} semantic duplicates (similarity >= {:.2})",
+                semantic_dupes, args.dedup_threshold
+            );
         }
 
         let total_removed = exact_dupes + semantic_dupes;
@@ -1751,7 +1762,10 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                 }
             }
             let remaining = lines.len() - total_removed;
-            println!("Deduplication complete: {} removed, {} remaining", total_removed, remaining);
+            println!(
+                "Deduplication complete: {} removed, {} remaining",
+                total_removed, remaining
+            );
         } else {
             println!("No duplicates found");
         }
@@ -1766,16 +1780,30 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         for line in reader.lines().flatten() {
             let lang_code = serde_json::from_str::<serde_json::Value>(&line)
                 .ok()
-                .and_then(|v| v.get("language").and_then(|l| l.as_str().map(|s| s.to_string())))
+                .and_then(|v| {
+                    v.get("language")
+                        .and_then(|l| l.as_str().map(|s| s.to_string()))
+                })
                 .unwrap_or_else(|| "en".to_string());
             lang_buckets.entry(lang_code).or_default().push(line);
         }
 
         let out_dir = args.output.parent().unwrap_or(std::path::Path::new("."));
-        let stem = args.output.file_stem().unwrap_or_default().to_string_lossy();
-        let ext = args.output.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+        let stem = args
+            .output
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy();
+        let ext = args
+            .output
+            .extension()
+            .map(|e| format!(".{}", e.to_string_lossy()))
+            .unwrap_or_default();
 
-        let counts: HashMap<String, usize> = lang_buckets.iter().map(|(k, v)| (k.clone(), v.len())).collect();
+        let counts: HashMap<String, usize> = lang_buckets
+            .iter()
+            .map(|(k, v)| (k.clone(), v.len()))
+            .collect();
 
         for (lang, lines) in &lang_buckets {
             let lang_path = out_dir.join(format!("{}_{}{}", stem, lang, ext));
@@ -1784,7 +1812,12 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                 f.write_all(line.as_bytes())?;
                 f.write_all(b"\n")?;
             }
-            println!("  {} — {} tasks -> {}", lang, lines.len(), lang_path.display());
+            println!(
+                "  {} — {} tasks -> {}",
+                lang,
+                lines.len(),
+                lang_path.display()
+            );
         }
 
         Some(counts)
@@ -1797,9 +1830,20 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     } else {
         DatasetCounts::default()
     };
-    let readme = generate_readme(&args, &stats, &dist, &diff_dist, lang_counts.as_ref(), &observed);
+    let readme = generate_readme(
+        &args,
+        &stats,
+        &dist,
+        &diff_dist,
+        lang_counts.as_ref(),
+        &observed,
+    );
     let out_dir = args.output.parent().unwrap_or(std::path::Path::new("."));
-    let stem = args.output.file_stem().unwrap_or_default().to_string_lossy();
+    let stem = args
+        .output
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy();
     let readme_path = out_dir.join(format!("{}.README.md", stem));
     let mut rf = File::create(&readme_path).context("failed to create dataset README")?;
     rf.write_all(readme.as_bytes())?;
@@ -1814,10 +1858,13 @@ mod tests {
 
     #[test]
     fn extracts_openai_string_content() {
-        let v: serde_json::Value = serde_json::from_str(r#"{
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{
             "choices": [{"message": {"role": "assistant", "content": "hello"}}],
             "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         assert_eq!(extract_completion(&v).unwrap(), "hello");
         assert_eq!(extract_usage(&v), (1, 2));
     }
@@ -1834,7 +1881,8 @@ mod tests {
 
     #[test]
     fn surfaces_error_payload() {
-        let v: serde_json::Value = serde_json::from_str(r#"{"error": {"message": "max_tokens not supported"}}"#).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(r#"{"error": {"message": "max_tokens not supported"}}"#).unwrap();
         let err = extract_completion(&v).unwrap_err().to_string();
         assert!(err.contains("max_tokens not supported"), "{err}");
     }
@@ -1860,24 +1908,34 @@ mod tests {
 
     #[test]
     fn default_distribution_sums_to_one() {
-        let sum: f64 = DEFAULT_DISTRIBUTION.iter().map(|(_, w)| *w).sum();
+        let catalog = taxonomy::TaxonomyCatalog::embedded_itops().unwrap();
+        let distribution = catalog.default_distribution();
+        let sum: f64 = distribution.values().sum();
         assert!((sum - 1.0).abs() < 1e-9, "{sum}");
-        assert!(DEFAULT_DISTRIBUTION.iter().any(|(k, _)| *k == "oem"));
+        assert!(distribution.contains_key("oem"));
     }
 
     #[test]
     fn oem_catalog_includes_named_vendors_and_product_lines() {
-        let fortinet = DOMAINS.iter().find(|d| d.category == "oem" && d.name == "Fortinet").unwrap();
-        assert!(fortinet.subdomains.contains(&"fortigate"));
-        let linux = DOMAINS.iter().find(|d| d.category == "oem" && d.name == "Linux Distros").unwrap();
-        assert!(linux.subdomains.contains(&"debian"));
-        let oem_domains = DOMAINS.iter().filter(|d| d.category == "oem").count();
+        let catalog = taxonomy::TaxonomyCatalog::embedded_itops().unwrap();
+        assert!(catalog.contains_hierarchical_subdomain("oem", "Fortinet", "fortigate"));
+        assert!(catalog.contains_hierarchical_subdomain("oem", "Linux Distros", "debian"));
+        let oem_domains = catalog.hierarchical_domain_count("oem");
         assert!(oem_domains >= 40, "{oem_domains}");
     }
 
     #[test]
     fn oem_user_message_asks_for_product_voice() {
-        let msg = task_user_message("oem", "oem::Fortinet", "fortigate", 6, None);
+        let sample = taxonomy::SampledTask {
+            taxonomy_id: "scogo-itops-v3".into(),
+            category_id: "oem".into(),
+            domain_id: "fortinet".into(),
+            domain_label: "Fortinet".into(),
+            subdomain_id: "fortigate".into(),
+            coordinates: None,
+            difficulty: 6,
+        };
+        let msg = task_user_message(&sample, None);
         assert!(msg.contains("Vendor/platform: oem::Fortinet"));
         assert!(msg.contains("Product: fortigate"));
         assert!(msg.contains("SKU"));
@@ -1886,7 +1944,16 @@ mod tests {
 
     #[test]
     fn capability_user_message_keeps_failure_mode_wording() {
-        let msg = task_user_message("network", "network::Firewall", "unused_rule", 4, None);
+        let sample = taxonomy::SampledTask {
+            taxonomy_id: "scogo-itops-v3".into(),
+            category_id: "network".into(),
+            domain_id: "firewall".into(),
+            domain_label: "Firewall".into(),
+            subdomain_id: "unused_rule".into(),
+            coordinates: None,
+            difficulty: 4,
+        };
+        let msg = task_user_message(&sample, None);
         assert!(msg.contains("Domain: network::Firewall"));
         assert!(msg.contains("Subdomain: unused_rule"));
     }
@@ -1937,5 +2004,134 @@ mod tests {
                 command: TaxonomyCommand::Validate { .. }
             }
         ));
+    }
+
+    #[test]
+    fn rejects_inexact_or_negative_cli_distributions() {
+        assert!(parse_distribution("network=0.99").is_err());
+        assert!(parse_distribution("network=1.1,oem=-0.1").is_err());
+        assert!(parse_difficulty("d1=0.5,d2=0.49").is_err());
+        assert!(parse_difficulty("d1=1.1,d2=-0.1").is_err());
+    }
+
+    #[test]
+    fn inline_system_prompt_precedes_taxonomy_default() {
+        let cli = Cli::parse_from([
+            "taskgen",
+            "generate",
+            "--api-key",
+            "test-key",
+            "--taxonomy",
+            "docs/netops-taxonomy.yaml",
+            "--system-prompt",
+            "inline prompt",
+        ]);
+        let Command::Generate(args) = cli.command else {
+            panic!("expected generate command");
+        };
+        let catalog =
+            taxonomy::TaxonomyCatalog::from_path(std::path::Path::new("docs/netops-taxonomy.yaml"))
+                .unwrap();
+        assert_eq!(
+            resolve_system_prompt(&args, &catalog).unwrap(),
+            "inline prompt"
+        );
+    }
+
+    #[test]
+    fn system_prompt_flags_conflict() {
+        assert!(
+            Cli::try_parse_from([
+                "taskgen",
+                "generate",
+                "--api-key",
+                "test-key",
+                "--system-prompt",
+                "inline",
+                "--system-prompt-file",
+                "prompt.txt",
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn netops_task_message_contains_every_sampled_coordinate() {
+        let sample = taxonomy::SampledTask {
+            taxonomy_id: "scogo-enterprise-netops-v1".into(),
+            category_id: "enterprise_netops".into(),
+            domain_id: "layer3_routing".into(),
+            domain_label: "Layer 3 Routing".into(),
+            subdomain_id: "bgp_route_leak".into(),
+            difficulty: 8,
+            coordinates: Some(taxonomy::TaskCoordinates {
+                taxonomy_id: "scogo-enterprise-netops-v1".into(),
+                task_family: "troubleshooting_rca".into(),
+                environment: "hybrid".into(),
+                vendor_scope: "multi_vendor".into(),
+                vendors: vec!["cisco_ios_xe".into(), "juniper_junos".into()],
+                incident_mechanism: "misconfiguration".into(),
+                evidence_condition: "contradictory".into(),
+                evidence_bundle: "routing_tables".into(),
+                action_risk: "read_only_investigation".into(),
+                presentation: "war_room".into(),
+            }),
+        };
+
+        let message = task_user_message(&sample, None);
+        for expected in [
+            "layer3_routing",
+            "bgp_route_leak",
+            "troubleshooting_rca",
+            "hybrid",
+            "multi_vendor",
+            "cisco_ios_xe",
+            "juniper_junos",
+            "misconfiguration",
+            "contradictory",
+            "routing_tables",
+            "read_only_investigation",
+            "war_room",
+            "8/10",
+        ] {
+            assert!(message.contains(expected), "missing {expected}: {message}");
+        }
+        assert!(message.contains("mandatory constraints"));
+        assert!(message.ends_with("Output only the task prompt, nothing else."));
+    }
+
+    #[test]
+    fn netops_task_record_serializes_schema_and_coordinates() {
+        let entry = TaskEntry {
+            schema_version: Some("scogo.netops.task.v1".into()),
+            prompt: "Investigate the route leak safely.".into(),
+            domain: "enterprise_netops::layer3_routing".into(),
+            subdomain: "bgp_route_leak".into(),
+            difficulty: 8,
+            coordinates: Some(taxonomy::TaskCoordinates {
+                taxonomy_id: "scogo-enterprise-netops-v1".into(),
+                task_family: "troubleshooting_rca".into(),
+                environment: "hybrid".into(),
+                vendor_scope: "multi_vendor".into(),
+                vendors: vec!["cisco_ios_xe".into(), "juniper_junos".into()],
+                incident_mechanism: "misconfiguration".into(),
+                evidence_condition: "contradictory".into(),
+                evidence_bundle: "routing_tables".into(),
+                action_risk: "read_only_investigation".into(),
+                presentation: "war_room".into(),
+            }),
+            language: None,
+            taskgen_model: "teacher".into(),
+            temperature: 0.9,
+        };
+
+        let value = serde_json::to_value(entry).unwrap();
+        assert_eq!(value["schema_version"], "scogo.netops.task.v1");
+        assert_eq!(value["domain"], "enterprise_netops::layer3_routing");
+        assert_eq!(value["subdomain"], "bgp_route_leak");
+        assert_eq!(
+            value["coordinates"]["action_risk"],
+            "read_only_investigation"
+        );
     }
 }

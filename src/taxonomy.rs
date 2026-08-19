@@ -236,17 +236,26 @@ impl TaxonomyCatalog {
         if self.raw.categories.is_empty() {
             bail!("hierarchical taxonomy requires categories");
         }
-        validate_unique_ids("category", self.raw.categories.iter().map(|item| item.id.as_str()))?;
+        validate_unique_ids(
+            "category",
+            self.raw.categories.iter().map(|item| item.id.as_str()),
+        )?;
         validate_complete_weights(
             "category distribution",
-            self.raw.categories.iter().map(|item| (item.id.as_str(), item.weight)),
+            self.raw
+                .categories
+                .iter()
+                .map(|item| (item.id.as_str(), item.weight)),
         )?;
         for category in &self.raw.categories {
             if category.label.trim().is_empty() {
                 bail!("category '{}' label must not be empty", category.id);
             }
             if category.domains.is_empty() {
-                bail!("category '{}' must contain at least one domain", category.id);
+                bail!(
+                    "category '{}' must contain at least one domain",
+                    category.id
+                );
             }
             validate_unique_ids(
                 &format!("domain in category '{}'", category.id),
@@ -281,7 +290,9 @@ impl TaxonomyCatalog {
         validate_unique_ids("domain", axes.domains.iter().map(|item| item.id.as_str()))?;
         validate_complete_weights(
             "domain distribution",
-            axes.domains.iter().map(|item| (item.id.as_str(), item.weight)),
+            axes.domains
+                .iter()
+                .map(|item| (item.id.as_str(), item.weight)),
         )?;
 
         let option_axes = [
@@ -302,7 +313,10 @@ impl TaxonomyCatalog {
             self.raw.vendor_groups.iter().map(|item| item.id.as_str()),
         )?;
         for group in &self.raw.vendor_groups {
-            validate_finite_weight(&format!("vendor group '{}': weight", group.id), group.weight)?;
+            validate_finite_weight(
+                &format!("vendor group '{}': weight", group.id),
+                group.weight,
+            )?;
             if group.vendors.is_empty() {
                 bail!("vendor group '{}' must contain vendors", group.id);
             }
@@ -310,17 +324,33 @@ impl TaxonomyCatalog {
                 &format!("vendor in group '{}'", group.id),
                 group.vendors.iter().map(|item| item.id.as_str()),
             )?;
+            for vendor in &group.vendors {
+                if vendor.label.trim().is_empty() {
+                    bail!(
+                        "vendor '{}' in group '{}' label must not be empty",
+                        vendor.id,
+                        group.id
+                    );
+                }
+            }
             validate_complete_weights(
                 &format!("vendor distribution in group '{}'", group.id),
-                group.vendors.iter().map(|item| (item.id.as_str(), item.weight)),
+                group
+                    .vendors
+                    .iter()
+                    .map(|item| (item.id.as_str(), item.weight)),
             )?;
         }
 
         let environment_ids = enabled_ids(&axes.environments);
         let mechanism_ids = enabled_ids(&axes.incident_mechanisms);
         let evidence_ids = enabled_ids(&axes.evidence_bundles);
-        let vendor_group_ids: HashSet<&str> =
-            self.raw.vendor_groups.iter().map(|item| item.id.as_str()).collect();
+        let vendor_group_ids: HashSet<&str> = self
+            .raw
+            .vendor_groups
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect();
         for domain in &axes.domains {
             validate_nonempty_id("domain", &domain.id)?;
             if domain.label.trim().is_empty() {
@@ -392,9 +422,12 @@ impl TaxonomyCatalog {
 
     pub fn available_distribution_ids(&self) -> Vec<&str> {
         match self.kind {
-            TaxonomyKind::Hierarchical => {
-                self.raw.categories.iter().map(|item| item.id.as_str()).collect()
-            }
+            TaxonomyKind::Hierarchical => self
+                .raw
+                .categories
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect(),
             TaxonomyKind::Compositional => self
                 .raw
                 .axes
@@ -417,8 +450,7 @@ impl TaxonomyCatalog {
                 .axes
                 .as_ref()
                 .map(|axes| {
-                    axes
-                        .domains
+                    axes.domains
                         .iter()
                         .map(|item| (item.id.clone(), item.weight))
                         .collect()
@@ -448,6 +480,37 @@ impl TaxonomyCatalog {
         }
     }
 
+    pub fn contains_hierarchical_subdomain(
+        &self,
+        category_id: &str,
+        domain_name: &str,
+        subdomain_id: &str,
+    ) -> bool {
+        self.kind == TaxonomyKind::Hierarchical
+            && self.raw.categories.iter().any(|category| {
+                category.id == category_id
+                    && category.domains.iter().any(|domain| {
+                        domain.name == domain_name
+                            && domain
+                                .subdomains
+                                .iter()
+                                .any(|subdomain| subdomain.id() == subdomain_id)
+                    })
+            })
+    }
+
+    pub fn hierarchical_domain_count(&self, category_id: &str) -> usize {
+        if self.kind != TaxonomyKind::Hierarchical {
+            return 0;
+        }
+        self.raw
+            .categories
+            .iter()
+            .find(|category| category.id == category_id)
+            .map(|category| category.domains.len())
+            .unwrap_or(0)
+    }
+
     pub fn subdomain_count(&self) -> usize {
         match self.kind {
             TaxonomyKind::Hierarchical => self
@@ -461,7 +524,12 @@ impl TaxonomyCatalog {
                 .raw
                 .axes
                 .as_ref()
-                .map(|axes| axes.domains.iter().map(|domain| domain.subdomains.len()).sum())
+                .map(|axes| {
+                    axes.domains
+                        .iter()
+                        .map(|domain| domain.subdomains.len())
+                        .sum()
+                })
                 .unwrap_or(0),
         }
     }
@@ -471,7 +539,11 @@ impl TaxonomyCatalog {
     }
 
     pub fn sample_defaults<R: Rng + ?Sized>(&self, rng: &mut R) -> Result<SampledTask> {
-        self.sample(rng, &self.default_distribution(), &self.default_difficulty())
+        self.sample(
+            rng,
+            &self.default_distribution(),
+            &self.default_difficulty(),
+        )
     }
 
     pub fn sample<R: Rng + ?Sized>(
@@ -526,11 +598,20 @@ impl TaxonomyCatalog {
         distribution: &HashMap<String, f64>,
         difficulty: &HashMap<u8, f64>,
     ) -> Result<SampledTask> {
-        let axes = self.raw.axes.as_ref().context("missing compositional axes")?;
-        let domain_weights: Vec<f64> = axes.domains.iter().map(|item| distribution[&item.id]).collect();
+        let axes = self
+            .raw
+            .axes
+            .as_ref()
+            .context("missing compositional axes")?;
+        let domain_weights: Vec<f64> = axes
+            .domains
+            .iter()
+            .map(|item| distribution[&item.id])
+            .collect();
         let domain = &axes.domains[sample_index(rng, &domain_weights, "domain distribution")?];
         let sub_weights: Vec<f64> = domain.subdomains.iter().map(RawSubdomain::weight).collect();
-        let subdomain = &domain.subdomains[sample_index(rng, &sub_weights, "subdomain distribution")?];
+        let subdomain =
+            &domain.subdomains[sample_index(rng, &sub_weights, "subdomain distribution")?];
 
         let task_family = sample_option(rng, &axes.task_families, None, "task family")?;
         let environment = sample_option(
@@ -559,8 +640,13 @@ impl TaxonomyCatalog {
         let vendors = self.sample_vendors(rng, domain, &vendor_scope.id)?;
         let min = task_family.difficulty_min.unwrap_or(1);
         let max = task_family.difficulty_max.unwrap_or(10);
-        let selected_difficulty =
-            sample_difficulty(rng, difficulty, min, max, &task_family.difficulty_multiplier)?;
+        let selected_difficulty = sample_difficulty(
+            rng,
+            difficulty,
+            min,
+            max,
+            &task_family.difficulty_multiplier,
+        )?;
 
         Ok(SampledTask {
             taxonomy_id: self.raw.id.clone(),
@@ -612,7 +698,10 @@ impl TaxonomyCatalog {
             }
         }
         if vendors.len() < count {
-            bail!("domain '{}' cannot satisfy vendor scope '{scope}'", domain.id);
+            bail!(
+                "domain '{}' cannot satisfy vendor scope '{scope}'",
+                domain.id
+            );
         }
         let mut selected = Vec::new();
         for _ in 0..count {
@@ -677,7 +766,9 @@ fn validate_difficulty(weights: &HashMap<u8, f64>) -> Result<()> {
     }
     validate_complete_weights(
         "difficulty distribution",
-        weights.iter().map(|(level, weight)| ("difficulty", *weight + (*level as f64 * 0.0))),
+        weights
+            .iter()
+            .map(|(level, weight)| ("difficulty", *weight + (*level as f64 * 0.0))),
     )
 }
 
@@ -696,10 +787,15 @@ fn validate_subdomains(category: &str, domain: &str, subdomains: &[RawSubdomain]
             subdomain.weight(),
         )?;
         total_weight += subdomain.weight();
-        if let RawSubdomain::Definition { label: Some(label), .. } = subdomain
+        if let RawSubdomain::Definition {
+            label: Some(label), ..
+        } = subdomain
             && label.trim().is_empty()
         {
-            bail!("subdomain '{category}/{domain}/{}' label must not be empty", subdomain.id());
+            bail!(
+                "subdomain '{category}/{domain}/{}' label must not be empty",
+                subdomain.id()
+            );
         }
     }
     if total_weight <= 0.0 {
@@ -730,11 +826,17 @@ fn validate_options(name: &str, options: &[RawWeightedOption]) -> Result<()> {
             bail!("{name} option '{}' difficulty_max must be 1-10", option.id);
         }
         if option.difficulty_min.unwrap_or(1) > option.difficulty_max.unwrap_or(10) {
-            bail!("{name} option '{}' has inverted difficulty bounds", option.id);
+            bail!(
+                "{name} option '{}' has inverted difficulty bounds",
+                option.id
+            );
         }
         for (level, multiplier) in &option.difficulty_multiplier {
             if !(1..=10).contains(level) {
-                bail!("{name} option '{}' has invalid difficulty multiplier level {level}", option.id);
+                bail!(
+                    "{name} option '{}' has invalid difficulty multiplier level {level}",
+                    option.id
+                );
             }
             validate_finite_weight(
                 &format!("{name} option '{}' difficulty multiplier", option.id),
@@ -746,14 +848,14 @@ fn validate_options(name: &str, options: &[RawWeightedOption]) -> Result<()> {
 }
 
 fn enabled_ids(options: &[RawWeightedOption]) -> HashSet<&str> {
-    options.iter().filter(|item| item.enabled).map(|item| item.id.as_str()).collect()
+    options
+        .iter()
+        .filter(|item| item.enabled)
+        .map(|item| item.id.as_str())
+        .collect()
 }
 
-fn validate_references(
-    name: &str,
-    references: &[String],
-    valid: &HashSet<&str>,
-) -> Result<()> {
+fn validate_references(name: &str, references: &[String], valid: &HashSet<&str>) -> Result<()> {
     let mut seen = HashSet::new();
     for reference in references {
         if !seen.insert(reference) {
@@ -778,13 +880,15 @@ fn validate_override_distribution(
     }
     validate_complete_weights(
         "distribution",
-        distribution.iter().map(|(id, weight)| (id.as_str(), *weight)),
+        distribution
+            .iter()
+            .map(|(id, weight)| (id.as_str(), *weight)),
     )
 }
 
 fn sample_index<R: Rng + ?Sized>(rng: &mut R, weights: &[f64], name: &str) -> Result<usize> {
-    let distribution = WeightedIndex::new(weights)
-        .with_context(|| format!("invalid or empty {name}"))?;
+    let distribution =
+        WeightedIndex::new(weights).with_context(|| format!("invalid or empty {name}"))?;
     Ok(distribution.sample(rng))
 }
 
@@ -850,15 +954,15 @@ mod tests {
 
     #[test]
     fn loads_and_validates_embedded_itops_taxonomy() {
-        let catalog = TaxonomyCatalog::from_yaml(
-            include_str!("../docs/it-ops-taxonomy.yaml"),
-            None,
-        )
-        .expect("embedded IT Ops taxonomy should parse");
+        let catalog =
+            TaxonomyCatalog::from_yaml(include_str!("../docs/it-ops-taxonomy.yaml"), None)
+                .expect("embedded IT Ops taxonomy should parse");
 
         assert_eq!(catalog.id(), "scogo-itops-v3");
         assert_eq!(catalog.kind(), TaxonomyKind::Hierarchical);
-        catalog.validate().expect("embedded taxonomy should validate");
+        catalog
+            .validate()
+            .expect("embedded taxonomy should validate");
     }
 
     #[test]
@@ -904,7 +1008,10 @@ categories:
 "#;
 
         let error = TaxonomyCatalog::from_yaml(yaml, None).unwrap_err();
-        assert!(error.to_string().contains("positive subdomain weight"), "{error:#}");
+        assert!(
+            error.to_string().contains("positive subdomain weight"),
+            "{error:#}"
+        );
     }
 
     #[test]
@@ -929,7 +1036,14 @@ categories:
     fn netops_prompts_preserve_scope_and_harness_boundary() {
         let taskgen = include_str!("../prompts/netops-taskgen-system-v1.txt");
         let teacher = include_str!("../prompts/netops-teacher-system-v1.txt");
-        for excluded in ["3GPP", "EPC", "5GC", "IMS", "OSS/BSS", "service-provider core"] {
+        for excluded in [
+            "3GPP",
+            "EPC",
+            "5GC",
+            "IMS",
+            "OSS/BSS",
+            "service-provider core",
+        ] {
             assert!(taskgen.contains(excluded), "missing exclusion {excluded}");
         }
         assert!(taskgen.contains("operational behavior, not certification recall"));
