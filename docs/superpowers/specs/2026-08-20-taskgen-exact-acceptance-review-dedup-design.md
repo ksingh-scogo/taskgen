@@ -44,7 +44,7 @@ Included:
 - preserve the requested taxonomy distribution by retrying the same sampled coordinate;
 - publish the final output atomically only after the exact accepted count is reached;
 - retain accepted-review, rejection, and run-summary audit artifacts;
-- apply the same architecture to hierarchical IT Ops and compositional NetOps taxonomies.
+- apply the same architecture to the unified compositional IT Ops and NetOps taxonomy schema.
 
 Excluded in this increment:
 
@@ -281,21 +281,20 @@ The standalone command does not top up the file. Exact-count replacement belongs
 
 ## 5. Taxonomy contract
 
-Both existing taxonomies already conform to `scogo.taskgen.taxonomy.v1`:
+Both taxonomies move to `scogo.taskgen.taxonomy.v2` and `kind: compositional` under the separate [Unified Compositional IT Ops and NetOps Taxonomy Design](2026-08-20-unified-compositional-itops-netops-taxonomy-design.md).
 
-- `docs/it-ops-taxonomy.yaml` is `kind: hierarchical`;
-- `docs/netops-taxonomy.yaml` is `kind: compositional`.
+IT Ops retains its 14-category, 129-domain, 884-subdomain subject hierarchy and adds cross-cutting operational coordinates. NetOps retains its 25 domains and 531 subdomains under one `enterprise_netops` category. Both are sampled and validated through one generalized compositional code path.
 
-The IT Ops taxonomy must not be converted to the compositional NetOps axes. The shared schema intentionally supports both kinds. This increment updates the stale IT Ops header and adds reviewer defaults to both taxonomies:
+Both taxonomies configure taxonomy-specific generation and reviewer prompts:
 
 ```yaml
 defaults:
-  system_prompt_file: ../prompts/netops-taskgen-system-v1.txt
-  review_system_prompt_file: ../prompts/netops-prompt-review-system-v1.txt
+  system_prompt_file: ../prompts/netops-taskgen-system-v2.txt
+  review_system_prompt_file: ../prompts/netops-prompt-review-system-v2.txt
   difficulty_distribution: {...}
 ```
 
-IT Ops uses `../prompts/itops-prompt-review-system-v1.txt`. NetOps uses `../prompts/netops-prompt-review-system-v1.txt`.
+IT Ops uses `../prompts/itops-taskgen-system-v2.txt` and `../prompts/itops-prompt-review-system-v2.txt`. NetOps uses `../prompts/netops-taskgen-system-v2.txt` and `../prompts/netops-prompt-review-system-v2.txt`.
 
 Taxonomy validation must resolve and read both configured prompt files. A missing, unreadable, empty, or invalid UTF-8 prompt is a preflight error before any API call or output mutation.
 
@@ -359,7 +358,7 @@ Reason codes:
 
 ```text
 technical_inaccuracy
-invented_vendor_feature
+invented_platform_feature
 invalid_command_or_syntax
 protocol_or_architecture_error
 unsupported_causality
@@ -551,14 +550,14 @@ src/
   dedup.rs                exact, bucketed Jaccard, embeddings, standalone command
   acceptance.rs           coordinate-slot scheduler and acceptance coordinator
   artifacts.rs            working journals and atomic publication
-  taxonomy.rs             shared hierarchical/compositional taxonomy loader
+  taxonomy.rs             unified compositional taxonomy v2 loader
   schema.rs               task/review/rejection schema validation
 schemas/
   prompt-review-v1.schema.json
   task-rejection-v1.schema.json
 prompts/
-  itops-prompt-review-system-v1.txt
-  netops-prompt-review-system-v1.txt
+  itops-prompt-review-system-v2.txt
+  netops-prompt-review-system-v2.txt
 ```
 
 The exact file split may be adjusted to keep modules cohesive, but quality review, dedup, acceptance scheduling, and atomic publication must not remain as one post-generation block in `main.rs`.
@@ -637,7 +636,7 @@ README and data-contract documentation will explain:
 - how to pre-populate the cache for an air-gapped machine;
 - the accepted, reviews, rejected, and run-report artifacts;
 - incomplete-run and append behavior;
-- why the IT Ops taxonomy remains hierarchical under the shared schema.
+- how the IT Ops hierarchy is preserved inside the shared compositional v2 schema.
 
 The old advice to generate first and manually run the Python dedup script is removed.
 
