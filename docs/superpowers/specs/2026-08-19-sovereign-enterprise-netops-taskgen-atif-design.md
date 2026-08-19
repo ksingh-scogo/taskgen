@@ -733,7 +733,7 @@ task
   prompt: string
   taxonomy_id: string
   coordinates: same coordinate object as scogo.netops.task.v1
-  difficulty: integer 1..10
+  difficulty: integer 1..10; null only when record_kind is imported
   action_risk: taxonomy action-risk ID
   split_group_id: string
 
