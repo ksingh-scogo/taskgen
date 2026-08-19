@@ -1,0 +1,210 @@
+name: Release ARM64 binaries
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Bump the latest GitHub release when Cargo.toml is not already ahead
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      version:
+        description: Optional exact version (e.g. 0.6.0). Overrides auto bump.
+        required: false
+        type: string
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: Next version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      tag: ${{ steps.next.outputs.tag }}
+      skip: ${{ steps.next.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve next version
+        id: next
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUMP: ${{ github.event.inputs.bump || 'patch' }}
+          VERSION_OVERRIDE: ${{ github.event.inputs.version || '' }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: python3 .github/scripts/next_version.py
+
+  build-linux:
+    name: Linux ARM64 (DGX Spark)
+    needs: version
+    if: needs.version.outputs.skip != 'true'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-arm64
+
+      - name: Set crate version
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: python3 .github/scripts/set_version.py "$VERSION"
+
+      - name: Build
+        run: cargo build --release --target aarch64-unknown-linux-gnu
+
+      - name: Package
+        run: |
+          src=target/aarch64-unknown-linux-gnu/release/taskgen
+          install -m 0755 "$src" taskgen-linux-arm64
+          file taskgen-linux-arm64
+          ./taskgen-linux-arm64 --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: taskgen-linux-arm64
+          path: taskgen-linux-arm64
+          if-no-files-found: error
+
+  build-macos:
+    name: macOS ARM64 (Apple Silicon)
+    needs: version
+    if: needs.version.outputs.skip != 'true'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: darwin-arm64
+
+      - name: Set crate version
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: python3 .github/scripts/set_version.py "$VERSION"
+
+      - name: Build
+        run: cargo build --release --target aarch64-apple-darwin
+
+      - name: Package
+        run: |
+          src=target/aarch64-apple-darwin/release/taskgen
+          install -m 0755 "$src" taskgen-darwin-arm64
+          file taskgen-darwin-arm64
+          ./taskgen-darwin-arm64 --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: taskgen-darwin-arm64
+          path: taskgen-darwin-arm64
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    needs: [version, build-linux, build-macos]
+    if: always() && needs.version.outputs.skip != 'true' && needs.build-linux.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          ls -l
+          sha256sum taskgen-* | tee SHA256SUMS
+          chmod 0755 taskgen-linux-arm64
+          if [ -f taskgen-darwin-arm64 ]; then chmod 0755 taskgen-darwin-arm64; fi
+
+      - name: Tag and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+          TAG: ${{ needs.version.outputs.tag }}
+          MACOS_STATUS: ${{ needs.build-macos.result }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/set_version.py "$VERSION"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if ! git diff --quiet -- Cargo.toml Cargo.lock; then
+            git add Cargo.toml Cargo.lock
+            git commit -m "chore: release ${TAG}"
+            git push origin HEAD:master
+          fi
+
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "tag ${TAG} already exists locally"
+          else
+            git tag -a "${TAG}" -m "${TAG}"
+          fi
+          git push origin "${TAG}"
+
+          notes="$(mktemp)"
+          {
+            echo "## taskgen ${TAG}"
+            echo
+            echo "ARM64-only release. Linux binary targets NVIDIA DGX Spark / aarch64 Linux (glibc). Darwin binary targets Apple Silicon. They are not interchangeable."
+            echo
+            echo "### Linux ARM64 (DGX Spark)"
+            echo
+            echo '```bash'
+            echo "curl -fsSL -o taskgen https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/taskgen-linux-arm64"
+            echo "chmod +x taskgen"
+            echo "./taskgen --api-key \"\$OPENAI_API_KEY\" -c 50000 -w 20 --append -o /data/itops.jsonl"
+            echo '```'
+            if [ "$MACOS_STATUS" = "success" ]; then
+              echo
+              echo "### macOS ARM64 (Apple Silicon)"
+              echo
+              echo '```bash'
+              echo "curl -fsSL -o taskgen https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/taskgen-darwin-arm64"
+              echo "chmod +x taskgen"
+              echo '```'
+            else
+              echo
+              echo "macOS ARM64 build did not succeed this run (\`${MACOS_STATUS}\`)."
+            fi
+          } > "$notes"
+
+          assets=(dist/taskgen-linux-arm64 dist/SHA256SUMS)
+          if [ -f dist/taskgen-darwin-arm64 ]; then
+            assets+=(dist/taskgen-darwin-arm64)
+          fi
+
+          gh release create "${TAG}" "${assets[@]}" \
+            --title "${TAG}" \
+            --notes-file "$notes" \
+            --verify-tag
