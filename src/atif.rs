@@ -926,6 +926,10 @@ mod tests {
             "../tests/fixtures/atif-v1.7/valid-copied-context.json"
         ));
         validate_trajectory(&context).unwrap();
+        let scogo = atif_fixture(include_str!(
+            "../tests/fixtures/atif-v1.7/valid-scogo-roundtrip.json"
+        ));
+        validate_trajectory(&scogo).unwrap();
     }
 
     #[test]

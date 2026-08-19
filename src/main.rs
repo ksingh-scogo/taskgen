@@ -1153,6 +1153,7 @@ fn share(count: usize, total: usize) -> f64 {
 fn generate_readme(
     args: &GenerateArgs,
     stats: &RunStats,
+    taxonomy_kind: taxonomy::TaxonomyKind,
     dist: &HashMap<String, f64>,
     diff_dist: &HashMap<u8, f64>,
     lang_counts: Option<&HashMap<String, usize>>,
@@ -1192,6 +1193,16 @@ fn generate_readme(
     md.push_str(&format!("| Concurrency | {} workers |\n", args.workers));
     md.push_str(&format!("| API Base | `{}` |\n", args.api_base));
     md.push_str(&format!(
+        "| Taxonomy | `{}` |\n",
+        args.taxonomy
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "embedded docs/it-ops-taxonomy.yaml".into())
+    ));
+    if let Some(seed) = args.seed {
+        md.push_str(&format!("| Coordinate Seed | `{seed}` |\n"));
+    }
+    md.push_str(&format!(
         "| Generated | {} |\n",
         Local::now().format("%Y-%m-%d %H:%M:%S")
     ));
@@ -1219,13 +1230,30 @@ fn generate_readme(
         md.push('\n');
     }
 
-    md.push_str("## Category Distribution\n\n");
+    let compositional = taxonomy_kind == taxonomy::TaxonomyKind::Compositional;
+    md.push_str(if compositional {
+        "## Sampling Domain Distribution\n\n"
+    } else {
+        "## Category Distribution\n\n"
+    });
     md.push_str("Target sampling weights vs counts in this JSONL.\n\n");
-    md.push_str("| Category | Tasks | Share | Target |\n|---|---:|---:|---:|\n");
+    md.push_str(if compositional {
+        "| Domain | Tasks | Share | Target |\n|---|---:|---:|---:|\n"
+    } else {
+        "| Category | Tasks | Share | Target |\n|---|---:|---:|---:|\n"
+    });
     let mut sorted_cats: Vec<_> = dist.iter().collect();
     sorted_cats.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap().then_with(|| a.0.cmp(b.0)));
     for (cat, w) in &sorted_cats {
-        let count = observed.categories.get(*cat).copied().unwrap_or(0);
+        let count = if compositional {
+            observed
+                .domains
+                .get(&format!("enterprise_netops::{cat}"))
+                .copied()
+                .unwrap_or(0)
+        } else {
+            observed.categories.get(*cat).copied().unwrap_or(0)
+        };
         md.push_str(&format!(
             "| {} | {} | {:.1}% | {:.1}% |\n",
             cat,
@@ -1234,8 +1262,11 @@ fn generate_readme(
             **w * 100.0
         ));
     }
-    for (cat, count) in sorted_count_rows(&observed.categories) {
-        if !dist.contains_key(cat) {
+    if !compositional {
+        for (cat, count) in sorted_count_rows(&observed.categories) {
+            if dist.contains_key(cat) {
+                continue;
+            }
             md.push_str(&format!(
                 "| {} | {} | {:.1}% | — |\n",
                 cat,
@@ -1345,10 +1376,21 @@ fn generate_readme(
     md.push_str("Each line in the JSONL file contains:\n\n");
     md.push_str("```json\n");
     md.push_str("{\n");
+    if compositional {
+        md.push_str("  \"schema_version\": \"scogo.netops.task.v1\",\n");
+    }
     md.push_str("  \"prompt\": \"...\",\n");
-    md.push_str("  \"domain\": \"oem::Fortinet\",\n");
-    md.push_str("  \"subdomain\": \"fortigate\",\n");
+    if compositional {
+        md.push_str("  \"domain\": \"enterprise_netops::layer3_routing\",\n");
+        md.push_str("  \"subdomain\": \"bgp_route_leak\",\n");
+    } else {
+        md.push_str("  \"domain\": \"oem::Fortinet\",\n");
+        md.push_str("  \"subdomain\": \"fortigate\",\n");
+    }
     md.push_str("  \"difficulty\": 5,\n");
+    if compositional {
+        md.push_str("  \"coordinates\": { \"taxonomy_id\": \"scogo-enterprise-netops-v1\", \"...\": \"...\" },\n");
+    }
     if args.multilingual {
         md.push_str("  \"language\": \"en\",\n");
     }
@@ -1414,6 +1456,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         None => taxonomy.default_difficulty(),
     };
     let system_prompt = resolve_system_prompt(&args, &taxonomy)?;
+    taxonomy.validate_sampling_distributions(&dist, &diff_dist)?;
 
     let api_keys: Arc<Vec<String>> = Arc::new(match &args.keyfile {
         Some(path) => {
@@ -1664,10 +1707,15 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                                 return;
                             }
                         };
-                        {
+                        let write_result = {
                             let mut f = file.lock().unwrap();
-                            let _ = f.write_all(line.as_bytes());
-                            let _ = f.flush();
+                            f.write_all(line.as_bytes()).and_then(|_| f.flush())
+                        };
+                        if let Err(error) = write_result {
+                            stats.errors.fetch_add(1, Ordering::Relaxed);
+                            pb.suspend(|| eprintln!("[WRITE] task rejected: {error}"));
+                            pb.inc(1);
+                            return;
                         }
                         stats.input_tokens.fetch_add(in_tok, Ordering::Relaxed);
                         stats.output_tokens.fetch_add(out_tok, Ordering::Relaxed);
@@ -1910,6 +1958,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     let readme = generate_readme(
         &args,
         &stats,
+        taxonomy.kind(),
         &dist,
         &diff_dist,
         lang_counts.as_ref(),
@@ -2053,7 +2102,15 @@ mod tests {
         observed.add("oem::Fortinet", "fortigate", 6);
         observed.add("oem::Fortinet", "fortigate", 6);
         observed.add("oem::AWS", "eks", 6);
-        let md = generate_readme(&args, &stats, &dist, &diff, None, &observed);
+        let md = generate_readme(
+            &args,
+            &stats,
+            taxonomy::TaxonomyKind::Hierarchical,
+            &dist,
+            &diff,
+            None,
+            &observed,
+        );
         assert!(!md.contains("Support / Donate"), "{md}");
         assert!(!md.contains("bc1q"), "{md}");
         assert!(md.contains("## Subdomain Distribution"), "{md}");
@@ -2062,6 +2119,50 @@ mod tests {
         assert!(md.contains("`eks`"), "{md}");
         assert!(md.contains("| Unique Domains | 2 |"), "{md}");
         assert!(md.contains("| Unique Subdomains | 2 |"), "{md}");
+    }
+
+    #[test]
+    fn netops_dataset_readme_describes_compositional_records() {
+        let cli = Cli::parse_from([
+            "taskgen",
+            "generate",
+            "--api-key",
+            "x",
+            "--taxonomy",
+            "docs/netops-taxonomy.yaml",
+            "--seed",
+            "42",
+        ]);
+        let Command::Generate(args) = cli.command else {
+            panic!("expected generate command");
+        };
+        let stats = RunStats {
+            total_input_tokens: 10,
+            total_output_tokens: 20,
+            total_tasks: 1,
+            errors: 0,
+        };
+        let dist = HashMap::from([("layer3_routing".to_string(), 1.0)]);
+        let diff = HashMap::from([(8u8, 1.0)]);
+        let mut observed = DatasetCounts::default();
+        observed.add("enterprise_netops::layer3_routing", "bgp_route_leak", 8);
+        let md = generate_readme(
+            &args,
+            &stats,
+            taxonomy::TaxonomyKind::Compositional,
+            &dist,
+            &diff,
+            None,
+            &observed,
+        );
+        assert!(md.contains("scogo.netops.task.v1"), "{md}");
+        assert!(md.contains("enterprise_netops::layer3_routing"), "{md}");
+        assert!(md.contains("coordinates"), "{md}");
+        assert!(md.contains("Coordinate Seed | `42`"), "{md}");
+        assert!(
+            md.contains("| layer3_routing | 1 | 100.0% | 100.0% |"),
+            "{md}"
+        );
     }
 
     #[test]
@@ -2097,6 +2198,24 @@ mod tests {
             ])
             .unwrap();
             assert!(matches!(cli.command, Command::Atif { .. }));
+        }
+    }
+
+    #[test]
+    fn readme_documents_netops_and_atif_contracts() {
+        let readme = include_str!("../README.md");
+        for required in [
+            "taskgen generate",
+            "docs/it-ops-taxonomy.yaml",
+            "docs/netops-taxonomy.yaml",
+            "--system-prompt-file",
+            "taskgen atif export",
+            "taskgen atif import",
+            "ATIF-v1.7",
+            "external_atif_unverified",
+            "prompt seeds",
+        ] {
+            assert!(readme.contains(required), "README missing {required}");
         }
     }
 

@@ -552,12 +552,20 @@ impl TaxonomyCatalog {
         distribution: &HashMap<String, f64>,
         difficulty: &HashMap<u8, f64>,
     ) -> Result<SampledTask> {
-        validate_override_distribution(self, distribution)?;
-        validate_difficulty(difficulty)?;
+        self.validate_sampling_distributions(distribution, difficulty)?;
         match self.kind {
             TaxonomyKind::Hierarchical => self.sample_hierarchical(rng, distribution, difficulty),
             TaxonomyKind::Compositional => self.sample_compositional(rng, distribution, difficulty),
         }
+    }
+
+    pub fn validate_sampling_distributions(
+        &self,
+        distribution: &HashMap<String, f64>,
+        difficulty: &HashMap<u8, f64>,
+    ) -> Result<()> {
+        validate_override_distribution(self, distribution)?;
+        validate_difficulty(difficulty)
     }
 
     fn sample_hierarchical<R: Rng + ?Sized>(
