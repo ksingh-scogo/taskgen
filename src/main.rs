@@ -240,6 +240,9 @@ struct GenerateArgs {
     #[arg(short, long, default_value_t = 0.9)]
     temperature: f64,
 
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    max_output_tokens: Option<u64>,
+
     #[arg(short, long, default_value_t = 5)]
     workers: usize,
 
@@ -319,6 +322,12 @@ struct ChatRequest {
     max_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_completion_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    enable_thinking: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking_budget: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<String>,
     /// Omniroute/GPT-5 default to SSE unless this is explicit.
     stream: bool,
 }
@@ -341,6 +350,9 @@ fn chat_request(
     temperature: f64,
     max_out: u64,
 ) -> ChatRequest {
+    let enable_thinking = model.to_ascii_lowercase().contains("qwen").then_some(false);
+    let thinking_budget = enable_thinking.map(|_| 0);
+    let reasoning_effort = enable_thinking.map(|_| "low".to_string());
     if restricted_sampling(model) {
         ChatRequest {
             model: model.to_string(),
@@ -348,6 +360,9 @@ fn chat_request(
             temperature: None,
             max_tokens: None,
             max_completion_tokens: Some(max_out),
+            enable_thinking,
+            thinking_budget,
+            reasoning_effort,
             stream: false,
         }
     } else {
@@ -357,6 +372,9 @@ fn chat_request(
             temperature: Some(temperature),
             max_tokens: Some(max_out),
             max_completion_tokens: None,
+            enable_thinking,
+            thinking_budget,
+            reasoning_effort,
             stream: false,
         }
     }
@@ -427,21 +445,16 @@ fn append_choice_text(buf: &mut String, v: &serde_json::Value) {
         return;
     };
     let Some(c0) = choices.first() else { return };
-    if let Some(delta) = c0.get("delta") {
-        for key in ["content", "reasoning_content", "reasoning"] {
-            if let Some(s) = delta.get(key).and_then(content_from_value) {
-                buf.push_str(&s);
-            }
-        }
+    if let Some(delta) = c0.get("delta")
+        && let Some(s) = delta.get("content").and_then(content_from_value)
+    {
+        buf.push_str(&s);
     }
-    if let Some(msg) = c0.get("message") {
-        for key in ["content", "reasoning_content", "reasoning"] {
-            if let Some(s) = msg.get(key).and_then(content_from_value)
-                && buf.is_empty()
-            {
-                buf.push_str(&s);
-            }
-        }
+    if let Some(msg) = c0.get("message")
+        && let Some(s) = msg.get("content").and_then(content_from_value)
+        && buf.is_empty()
+    {
+        buf.push_str(&s);
     }
     if buf.is_empty()
         && let Some(s) = c0.get("text").and_then(content_from_value)
@@ -450,11 +463,75 @@ fn append_choice_text(buf: &mut String, v: &serde_json::Value) {
     }
 }
 
+fn finish_reason(value: &serde_json::Value) -> Option<&str> {
+    value
+        .get("choices")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("finish_reason"))
+        .and_then(serde_json::Value::as_str)
+}
+
+fn validate_finish_reason(reason: Option<&str>) -> Result<()> {
+    match reason {
+        None | Some("stop") => Ok(()),
+        Some("length") => bail!("completion truncated (finish_reason=length)"),
+        Some(other) => bail!("completion did not finish normally (finish_reason={other})"),
+    }
+}
+
+fn validate_generated_prompt(prompt: &str) -> Result<()> {
+    let trimmed = prompt.trim();
+    if trimmed.is_empty() {
+        bail!("generated prompt is empty");
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    let leaked_planning = [
+        "we need answer user's request",
+        "we need to answer the user's request",
+        "we need craft a prompt",
+        "need output only final",
+        "task enterprise_netops::",
+    ];
+    if leaked_planning
+        .iter()
+        .any(|marker| lower.starts_with(marker))
+    {
+        bail!("generated content contains model planning instead of a standalone prompt");
+    }
+    let word_count = trimmed.split_whitespace().count();
+    if word_count > 800 {
+        bail!("generated prompt exceeds the 800-word limit ({word_count} words)");
+    }
+    Ok(())
+}
+
+fn model_user_message(model: &str, message: &str) -> String {
+    if model.to_ascii_lowercase().contains("qwen") {
+        format!(
+            "{message}\n\nKeep the final task prompt focused and under 800 words. Silently verify vendor authenticity and causal consistency. Output no analysis, planning, or constraint labels.\n/no_think"
+        )
+    } else {
+        message.to_string()
+    }
+}
+
+fn generation_max_output_tokens(model: &str, requested: Option<u64>) -> u64 {
+    if let Some(requested) = requested {
+        requested
+    } else if model.to_ascii_lowercase().contains("qwen") {
+        4096
+    } else {
+        2048
+    }
+}
+
 fn parse_chat_payload(raw: &str) -> Result<(String, u64, u64)> {
     let t = raw.trim_start();
     if t.starts_with("data:") {
         let mut text = String::new();
         let mut usage = (0u64, 0u64);
+        let mut final_reason = None;
         for line in t.lines() {
             let Some(payload) = line.trim().strip_prefix("data:") else {
                 continue;
@@ -471,11 +548,15 @@ fn parse_chat_payload(raw: &str) -> Result<(String, u64, u64)> {
                 bail!("API error payload: {}", err);
             }
             append_choice_text(&mut text, &v);
+            if let Some(reason) = finish_reason(&v) {
+                final_reason = Some(reason.to_string());
+            }
             let u = extract_usage(&v);
             if u != (0, 0) {
                 usage = u;
             }
         }
+        validate_finish_reason(final_reason.as_deref())?;
         let text = text.trim().to_string();
         if text.is_empty() {
             bail!("no completion text in streamed API response");
@@ -484,6 +565,7 @@ fn parse_chat_payload(raw: &str) -> Result<(String, u64, u64)> {
     }
 
     let value: serde_json::Value = serde_json::from_str(raw)?;
+    validate_finish_reason(finish_reason(&value))?;
     let mut text = String::new();
     append_choice_text(&mut text, &value);
     if text.trim().is_empty() {
@@ -499,6 +581,7 @@ fn extract_completion(v: &serde_json::Value) -> Result<String> {
     {
         bail!("API error payload: {}", err);
     }
+    validate_finish_reason(finish_reason(v))?;
     let mut buf = String::new();
     append_choice_text(&mut buf, v);
     if !buf.trim().is_empty() {
@@ -938,6 +1021,8 @@ async fn test_model(client: &reqwest::Client, api_key: &str, model: &str) -> Res
 
 enum ApiError {
     RateLimit(Option<u64>),
+    Transient(reqwest::StatusCode, String),
+    InvalidCompletion(String),
     Billing(String),
     Timeout,
     Other(anyhow::Error),
@@ -947,11 +1032,21 @@ impl std::fmt::Display for ApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ApiError::RateLimit(s) => write!(f, "rate limited (retry after {:?}s)", s),
+            ApiError::Transient(status, body) => {
+                write!(f, "transient API error {status}: {body}")
+            }
+            ApiError::InvalidCompletion(message) => {
+                write!(f, "invalid model completion: {message}")
+            }
             ApiError::Billing(msg) => write!(f, "billing error: {}", msg),
             ApiError::Timeout => write!(f, "request timed out"),
             ApiError::Other(e) => write!(f, "{}", e),
         }
     }
+}
+
+fn is_transient_http_status(status: reqwest::StatusCode) -> bool {
+    status.is_server_error() || status == reqwest::StatusCode::REQUEST_TIMEOUT
 }
 
 fn is_billing_error(status: reqwest::StatusCode, body: &str) -> bool {
@@ -1009,6 +1104,9 @@ async fn api_request(
         if is_billing_error(status, &text) {
             return Err(ApiError::Billing(text));
         }
+        if is_transient_http_status(status) {
+            return Err(ApiError::Transient(status, truncate_body(&text, 500)));
+        }
         return Err(ApiError::Other(anyhow::anyhow!(
             "API error {}: {}",
             status,
@@ -1020,12 +1118,8 @@ async fn api_request(
         .text()
         .await
         .map_err(|e| ApiError::Other(anyhow::anyhow!("failed to read API response: {}", e)))?;
-    parse_chat_payload(&raw).map_err(|e| {
-        ApiError::Other(anyhow::anyhow!(
-            "{} | body: {}",
-            e,
-            truncate_body(&raw, 500)
-        ))
+    parse_chat_payload(&raw).map_err(|error| {
+        ApiError::InvalidCompletion(format!("{error} | body: {}", truncate_body(&raw, 500)))
     })
 }
 
@@ -1039,6 +1133,7 @@ struct GenerateTaskRequest<'a> {
     system_prompt: &'a str,
     sample: &'a taxonomy::SampledTask,
     temperature: f64,
+    max_output_tokens: Option<u64>,
     language: Option<&'a str>,
     cancel: &'a AtomicBool,
     consecutive_timeouts: &'a AtomicUsize,
@@ -1056,12 +1151,13 @@ async fn generate_task(
         system_prompt,
         sample,
         temperature,
+        max_output_tokens,
         language,
         cancel,
         consecutive_timeouts,
         progress,
     } = request;
-    let user_msg = task_user_message(sample, language);
+    let user_msg = model_user_message(model, &task_user_message(sample, language));
     let system = if sample.coordinates.is_none() && sample.category_id == "oem" {
         format!("{system_prompt}{OEM_SYSTEM_ADDENDUM}")
     } else {
@@ -1081,7 +1177,7 @@ async fn generate_task(
             },
         ],
         temperature,
-        2048,
+        generation_max_output_tokens(model, max_output_tokens),
     );
 
     let url = format!("{}/chat/completions", api_base.trim_end_matches('/'));
@@ -1095,6 +1191,18 @@ async fn generate_task(
         match api_request(client, &url, api_key, &body).await {
             Ok(result) => {
                 consecutive_timeouts.store(0, Ordering::Relaxed);
+                if let Err(error) = validate_generated_prompt(&result.0) {
+                    retries += 1;
+                    if retries > MAX_RETRIES {
+                        return Err(ApiError::InvalidCompletion(error.to_string()));
+                    }
+                    progress.suspend(|| {
+                        eprintln!(
+                            "[CONTENT] invalid completion, retrying ({retries}/{MAX_RETRIES}): {error}"
+                        );
+                    });
+                    continue;
+                }
                 return Ok(result);
             }
             Err(ApiError::RateLimit(retry_after)) => {
@@ -1135,6 +1243,30 @@ async fn generate_task(
                     );
                 });
                 tokio::time::sleep(tokio::time::Duration::from_secs(wait)).await;
+            }
+            Err(ApiError::Transient(status, body)) => {
+                retries += 1;
+                if retries > MAX_RETRIES {
+                    return Err(ApiError::Transient(status, body));
+                }
+                let wait = 2u64.pow(retries).min(30);
+                progress.suspend(|| {
+                    eprintln!(
+                        "[TRANSIENT] {status}, waiting {wait}s (retry {retries}/{MAX_RETRIES})"
+                    );
+                });
+                tokio::time::sleep(tokio::time::Duration::from_secs(wait)).await;
+            }
+            Err(ApiError::InvalidCompletion(message)) => {
+                retries += 1;
+                if retries > MAX_RETRIES {
+                    return Err(ApiError::InvalidCompletion(message));
+                }
+                progress.suspend(|| {
+                    eprintln!(
+                        "[CONTENT] invalid completion, retrying ({retries}/{MAX_RETRIES}): {message}"
+                    );
+                });
             }
             Err(ApiError::Billing(msg)) => {
                 progress.suspend(|| {
@@ -1648,6 +1780,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             let system_prompt = system_prompt.clone();
             let presampled = presampled.clone();
             let temperature = args.temperature;
+            let max_output_tokens = args.max_output_tokens;
             let pb = pb.clone();
 
             async move {
@@ -1691,6 +1824,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                     system_prompt: &system_prompt,
                     sample,
                     temperature,
+                    max_output_tokens,
                     language: lang.as_deref(),
                     cancel: &cancel,
                     consecutive_timeouts: &consecutive_timeouts,
@@ -2017,6 +2151,39 @@ mod tests {
     }
 
     #[test]
+    fn excludes_provider_reasoning_from_completion_content() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{
+                "choices": [{
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": "final prompt only",
+                        "reasoning_content": "private planning that must not enter the dataset"
+                    }
+                }]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(extract_completion(&v).unwrap(), "final prompt only");
+    }
+
+    #[test]
+    fn rejects_length_truncated_completions() {
+        let payload = r#"{
+            "choices": [{
+                "finish_reason": "length",
+                "message": {"content": "unfinished prompt"}
+            }]
+        }"#;
+        assert!(
+            parse_chat_payload(payload)
+                .unwrap_err()
+                .to_string()
+                .contains("truncated")
+        );
+    }
+
+    #[test]
     fn extracts_content_parts_and_null_usage_fields() {
         let v: serde_json::Value = serde_json::from_str(r#"{
             "choices": [{"message": {"content": [{"type": "text", "text": "part a"}, {"type": "text", "text": "part b"}]}}],
@@ -2032,6 +2199,19 @@ mod tests {
             serde_json::from_str(r#"{"error": {"message": "max_tokens not supported"}}"#).unwrap();
         let err = extract_completion(&v).unwrap_err().to_string();
         assert!(err.contains("max_tokens not supported"), "{err}");
+    }
+
+    #[test]
+    fn classifies_retryable_gateway_statuses() {
+        assert!(is_transient_http_status(reqwest::StatusCode::BAD_GATEWAY));
+        assert!(is_transient_http_status(
+            reqwest::StatusCode::GATEWAY_TIMEOUT
+        ));
+        assert!(is_transient_http_status(
+            reqwest::StatusCode::REQUEST_TIMEOUT
+        ));
+        assert!(!is_transient_http_status(reqwest::StatusCode::BAD_REQUEST));
+        assert!(!is_transient_http_status(reqwest::StatusCode::UNAUTHORIZED));
     }
 
     #[test]
@@ -2051,6 +2231,62 @@ mod tests {
         assert!(v.get("max_tokens").is_none());
         assert_eq!(v.get("max_completion_tokens").unwrap(), 2048);
         assert_eq!(v.get("stream").unwrap(), false);
+    }
+
+    #[test]
+    fn qwen_request_disables_thinking_without_affecting_other_models() {
+        let qwen =
+            serde_json::to_value(chat_request("qwen/qwen3.8-max-free", vec![], 0.9, 2048)).unwrap();
+        assert_eq!(qwen["enable_thinking"], false);
+        assert_eq!(qwen["thinking_budget"], 0);
+        assert_eq!(qwen["reasoning_effort"], "low");
+
+        let other = serde_json::to_value(chat_request("gpt-4o-mini", vec![], 0.9, 2048)).unwrap();
+        assert!(other.get("enable_thinking").is_none());
+        assert!(other.get("thinking_budget").is_none());
+        assert!(other.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn generation_output_budget_is_larger_for_qwen() {
+        assert_eq!(
+            generation_max_output_tokens("qwen/qwen3.8-max-free", None),
+            4096
+        );
+        assert_eq!(generation_max_output_tokens("gpt-4o-mini", None), 2048);
+    }
+
+    #[test]
+    fn explicit_generation_output_budget_overrides_model_default() {
+        assert_eq!(
+            generation_max_output_tokens("qwen/qwen3.8-max-free", Some(3072)),
+            3072
+        );
+        assert_eq!(
+            generation_max_output_tokens("gpt-4o-mini", Some(3072)),
+            3072
+        );
+    }
+
+    #[test]
+    fn rejects_obvious_model_planning_as_a_prompt() {
+        let leaked = "We need answer user's request: generate one task prompt using constraints.";
+        assert!(validate_generated_prompt(leaked).is_err());
+        assert!(
+            validate_generated_prompt("TASK enterprise_netops::layer3_routing/bgp_session")
+                .is_err()
+        );
+        assert!(validate_generated_prompt(&vec!["word"; 801].join(" ")).is_err());
+        assert!(validate_generated_prompt("Investigate why the BGP session is flapping.").is_ok());
+    }
+
+    #[test]
+    fn qwen_user_message_uses_no_think_soft_switch() {
+        let qwen = model_user_message("qwen/qwen3.8-max-free", "task");
+        assert!(qwen.contains("800 words"));
+        assert!(qwen.contains("vendor authenticity and causal consistency"));
+        assert!(qwen.ends_with("/no_think"));
+        assert_eq!(model_user_message("gpt-4o-mini", "task"), "task");
     }
 
     #[test]
@@ -2220,6 +2456,21 @@ mod tests {
             .unwrap();
             assert!(matches!(cli.command, Command::Atif { .. }));
         }
+    }
+
+    #[test]
+    fn parses_generation_output_budget_override() {
+        assert!(
+            Cli::try_parse_from([
+                "taskgen",
+                "generate",
+                "--api-key",
+                "test-key",
+                "--max-output-tokens",
+                "3072",
+            ])
+            .is_ok()
+        );
     }
 
     #[test]

@@ -1055,6 +1055,8 @@ categories:
             assert!(taskgen.contains(excluded), "missing exclusion {excluded}");
         }
         assert!(taskgen.contains("operational behavior, not certification recall"));
+        assert!(taskgen.contains("internally and causally consistent"));
+        assert!(taskgen.contains("Never disguise pseudocode as captured production output"));
         assert!(taskgen.contains("Output only the final user task prompt."));
         assert!(teacher.contains("ATIF serialization"));
         assert!(teacher.contains("The harness, not you"));

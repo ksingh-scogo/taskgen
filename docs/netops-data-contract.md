@@ -8,6 +8,8 @@ This document defines the boundary between prompt-seed generation, teacher behav
 
 ```text
 Taskgen prompt seed
+  -> independent NetOps prompt-quality review
+  -> accepted prompt seed
   -> teacher candidate messages and tool-call requests
   -> harness executes tools and captures returned state
   -> policy gate supplies approval decisions
@@ -18,6 +20,8 @@ Taskgen prompt seed
 ```
 
 Taskgen produces only a prompt and sampled coordinates. A teacher produces candidate assistant messages and tool-call requests. Neither component owns live tool results, approval, ground truth, state hashes, verification results, safety grades, rewards, or acceptance.
+
+A schema-valid Taskgen record is still only a candidate prompt seed. Before teacher submission, an independent NetOps prompt-quality review must check vendor and protocol authenticity, causal and numerical consistency, coordinate realization, solvability under the declared evidence condition, and safety posture. Taskgen cannot self-award semantic acceptance, and this review decision belongs in a separate manifest rather than the prompt-seed record.
 
 ## Normative files
 

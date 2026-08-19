@@ -145,6 +145,8 @@ Every NetOps JSONL line is validated against `schemas/netops-task-v1.schema.json
 }
 ```
 
+Schema acceptance is not semantic acceptance. The write gate proves record shape, coordinate membership, vendor cardinality, difficulty bounds, completion integrity, and basic leakage/length rules; it cannot prove that a generated vendor command exists or that supplied evidence really supports the scenario's causal claim. Before prompt seeds are submitted to a teacher, an independent NetOps prompt-quality review must reject vendor or protocol inventions, arithmetic and condition errors, unsupported root causes, coordinate mismatches, unsafe change framing, and internally inconsistent evidence. Keep that decision in a separate review manifest; the prompt-seed schema deliberately does not let Taskgen mark its own output accepted.
+
 `language` is present only for multilingual generation. The seed controls coordinate and language sampling; it cannot make a remote model response deterministic.
 
 ## Validate taxonomies
@@ -191,6 +193,7 @@ taskgen generate \
 | `-w, --workers <N>` | `5` | Concurrent requests |
 | `-o, --output <FILE>` | `output.jsonl` | Output JSONL |
 | `-t, --temperature <F>` | `0.9` | Sampling temperature when supported |
+| `--max-output-tokens <N>` | `2048` (`4096` for Qwen) | Provider completion-token budget; must be positive |
 | `--append` | off | Append to an existing generation JSONL |
 | `--multilingual` | off | Sample one of eight supported languages |
 | `--dedup` | off | Exact and trigram-Jaccard deduplication |
@@ -203,6 +206,8 @@ taskgen generate \
 | `--budget <F>` | none | Stop at the configured USD budget |
 
 For GPT-5, o-series, and model names containing `luna`, Taskgen omits unsupported `temperature` and `max_tokens` request fields and uses `max_completion_tokens`. It still records the requested temperature as generation metadata.
+
+For Qwen models, Taskgen requests low/no-thinking behavior, discards provider `reasoning` and `reasoning_content`, and uses a 4096-token completion budget by default because some OpenAI-compatible routes count private reasoning against that budget. `--max-output-tokens` overrides the model default. The saved prompt remains independently capped at 800 words. Empty output, exposed planning, non-stop finish reasons such as `length`, and overlong prompts are rejected and retried rather than written to the dataset. Retryable HTTP 408 and 5xx responses use bounded exponential backoff.
 
 ## Teacher trajectory contracts
 

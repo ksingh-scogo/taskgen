@@ -14,6 +14,8 @@ The pipeline boundary is:
 
 ```text
 Taskgen prompt seeds
+  -> independent NetOps prompt-quality review
+  -> accepted prompt seeds
   -> teacher rollout generation
   -> harness-owned tool execution and state capture
   -> independent verification and safety grading
@@ -23,6 +25,8 @@ Taskgen prompt seeds
 ```
 
 Taskgen remains a prompt-seed generator. It must not fabricate tool results, live state, approvals, ground truth, state hashes, verification outcomes, rewards, or grader decisions.
+
+Schema-valid prompt seeds remain candidates until an independent NetOps prompt-quality review checks vendor and protocol authenticity, causal and numerical consistency, coordinate realization, solvability under the declared evidence condition, and safety posture. The review result is stored outside the prompt-seed record so Taskgen cannot mark its own output semantically accepted.
 
 ## 2. Scope
 
@@ -110,6 +114,7 @@ New generation flags:
 | `--taxonomy <FILE>` | Load and validate a runtime taxonomy. When omitted, use the embedded general IT Ops taxonomy. |
 | `--system-prompt-file <FILE>` | Read the complete system prompt as UTF-8. Mutually exclusive with `--system-prompt`. |
 | `--seed <U64>` | Optional reproducible coordinate sampling seed. It does not make remote model output deterministic. |
+| `--max-output-tokens <N>` | Optional positive provider completion-token budget. Defaults to 2048, or 4096 for Qwen models whose private reasoning may consume this budget. |
 
 System-prompt precedence is:
 
@@ -609,6 +614,10 @@ Machine data may be included when useful: short configuration excerpts, CLI outp
 
 For vendor-neutral tasks, use standards and generic operational language. For single-vendor tasks, use only real product concepts and syntax appropriate to the selected platform. For multi-vendor tasks, make the interoperability boundary operationally relevant. Do not invent commands, features, SKUs, or version behavior.
 
+Every supplied artifact must be internally and causally consistent. A condition, policy, route, counter, timeline, or configuration excerpt must be capable of producing the stated symptom. Recheck subnet arithmetic, boolean conditions, units, protocol states, object references, and before/after values. Do not assert a predetermined root cause that the evidence does not support. When evidence is partial, missing, stale, or contradictory, preserve that uncertainty and ask the operator to discriminate among plausible hypotheses.
+
+Use exact vendor syntax only when confident it is real for the selected platform. Otherwise describe a normalized observation or request a named class of read-only evidence without fabricating a command, API field, log mnemonic, feature, or version-specific behavior. Never disguise pseudocode as captured production output.
+
 For any possible state-changing action, establish investigation first. Require a bounded and reversible change, approval when the supplied action risk requires it, prechecks, post-change verification, retained reachability, blast-radius awareness, and rollback. Production mutation must never be unrestricted.
 
 Difficulty controls causal depth, ambiguity, number of devices and layers, evidence quality, vendor interactions, operational constraints, and safety risk:
@@ -620,6 +629,8 @@ Difficulty controls causal depth, ambiguity, number of devices and layers, evide
 Match the supplied presentation: incident ticket, on-call chat, CLI or SSH session, configuration review, change request, war room, audit review, architecture review, or API/automation brief. Do not force every task into casual 2am chat.
 
 Avoid multiple-choice questions, generic definitions, broad requests such as "troubleshoot the network," obvious answers, unrestricted production changes, and tasks that are only documentation memorization.
+
+Before emitting the prompt, silently check vendor authenticity, arithmetic, internal consistency, causal solvability, coordinate coverage, and safety posture. Keep the final task prompt focused and under 800 words. Do not expose analysis, planning, hidden reasoning, or the supplied constraint labels.
 
 Output only the final user task prompt.
 ```
