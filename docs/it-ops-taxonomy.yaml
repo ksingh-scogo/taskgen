@@ -20,6 +20,7 @@ kind: compositional
 label: Scogo IT Operations
 defaults:
   system_prompt_file: ../prompts/itops-taskgen-system-v2.txt
+  review_system_prompt_file: ../prompts/itops-prompt-review-system-v2.txt
   difficulty_distribution:
     1: 0.05
     2: 0.05

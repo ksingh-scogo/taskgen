@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scogo.ai/schemas/taskgen-prompt-review-v1.schema.json",
+  "title": "Scogo Taskgen Prompt Review v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "verdict", "reason_codes", "summary", "retry_guidance"],
+  "properties": {
+    "schema_version": {"const": "scogo.taskgen.prompt-review.v1"},
+    "verdict": {"enum": ["accept", "reject"]},
+    "reason_codes": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 8,
+      "items": {
+        "enum": [
+          "technical_inaccuracy",
+          "invented_platform_feature",
+          "invalid_command_or_syntax",
+          "protocol_or_architecture_error",
+          "unsupported_causality",
+          "numerical_or_temporal_inconsistency",
+          "internal_contradiction",
+          "coordinate_mismatch",
+          "insufficient_or_invalid_evidence",
+          "not_operational",
+          "unsafe_or_unapproved_change",
+          "hidden_answer_or_solution_leakage",
+          "scope_violation",
+          "ambiguous_or_unanswerable"
+        ]
+      }
+    },
+    "summary": {"type": "string", "minLength": 1, "maxLength": 800},
+    "retry_guidance": {"type": "string", "maxLength": 800}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"verdict": {"const": "accept"}}},
+      "then": {
+        "properties": {
+          "reason_codes": {"maxItems": 0},
+          "retry_guidance": {"maxLength": 0}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"verdict": {"const": "reject"}}},
+      "then": {
+        "properties": {
+          "reason_codes": {"minItems": 1},
+          "retry_guidance": {"minLength": 1}
+        }
+      }
+    }
+  ]
+}

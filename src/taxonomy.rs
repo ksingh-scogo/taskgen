@@ -1247,4 +1247,18 @@ categories:
         assert!(teacher.contains("ATIF serialization"));
         assert!(teacher.contains("The harness, not you"));
     }
+
+    #[test]
+    fn both_taxonomies_resolve_specific_review_prompts() {
+        let itops = TaxonomyCatalog::from_path(Path::new("docs/it-ops-taxonomy.yaml")).unwrap();
+        let netops = TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml")).unwrap();
+        assert_eq!(
+            itops.default_review_system_prompt_path().unwrap(),
+            PathBuf::from("docs/../prompts/itops-prompt-review-system-v2.txt")
+        );
+        assert_eq!(
+            netops.default_review_system_prompt_path().unwrap(),
+            PathBuf::from("docs/../prompts/netops-prompt-review-system-v2.txt")
+        );
+    }
 }

@@ -4,6 +4,7 @@ use serde_json::Value;
 #[derive(Debug, Clone, Copy)]
 pub enum SchemaKind {
     Task,
+    PromptReview,
     AuditTrajectory,
     SftTrajectory,
 }
@@ -11,6 +12,7 @@ pub enum SchemaKind {
 fn schema_source(kind: SchemaKind) -> &'static str {
     match kind {
         SchemaKind::Task => include_str!("../schemas/task-v2.schema.json"),
+        SchemaKind::PromptReview => include_str!("../schemas/prompt-review-v1.schema.json"),
         SchemaKind::AuditTrajectory => {
             include_str!("../schemas/netops-teacher-trajectory-audit-v1.schema.json")
         }
