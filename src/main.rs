@@ -185,19 +185,19 @@ static DOMAINS: &[DomainDef] = &[
 
 // BEGIN GENERATED DISTRIBUTION
 const DEFAULT_DISTRIBUTION: &[(&str, f64)] = &[
-    ("infra", 0.15),
-    ("observe", 0.11),
-    ("network", 0.11),
+    ("infra", 0.12),
+    ("endpoint", 0.11),
+    ("itsm", 0.10),
+    ("identity", 0.10),
     ("oem", 0.10),
-    ("secops", 0.09),
-    ("secure_edge", 0.07),
-    ("identity", 0.07),
-    ("endpoint", 0.07),
+    ("workplace", 0.08),
+    ("network", 0.08),
+    ("secops", 0.07),
+    ("observe", 0.06),
     ("delivery", 0.06),
     ("data", 0.05),
-    ("itsm", 0.05),
-    ("workplace", 0.03),
     ("agentic", 0.03),
+    ("secure_edge", 0.03),
     ("enterprise", 0.01),
 ];
 // END GENERATED DISTRIBUTION

@@ -20,19 +20,27 @@ A fast, concurrent SFT (Supervised Fine-Tuning) task generator for distillation 
 - JSONL output with metadata per task, flushed to disk after each write
 - Optional budget cap with per-token cost tracking
 - Append mode to resume interrupted runs
-- Auto-generated dataset README next to the JSONL (`{stem}.README.md`)
+- Auto-generated dataset README next to the JSONL (`{stem}.README.md`) with **observed** category / domain / subdomain / difficulty counts vs target weights
+- Filter existing Hub tasklists to selected categories (`filter_tasklist.py`)
 - GPT-5 / o-series / luna sampling: omit `temperature` and `max_tokens`, send `max_completion_tokens`
 - Always request `stream: false`; if a gateway still returns SSE, assemble `delta.content` across chunks
 
 ## Install
 
 ```bash
-git clone https://github.com/empero-org/taskgen.git
+git clone https://github.com/ksingh-scogo/taskgen.git
 cd taskgen
 cargo build --release
 ```
 
-Binary will be at `target/release/taskgen`.
+Binary will be at `target/release/taskgen`. Fork of [empero-org/taskgen](https://github.com/empero-org/taskgen), retargeted at IT Ops / SRE prompts.
+
+Python tooling (taxonomy codegen + Hub filter):
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
 
 ## Usage
 
@@ -255,18 +263,44 @@ Capability categories use failure-mode subdomains (`raid_degrade`). `oem` uses p
 
 The `language` field is only present when `--multilingual` is used.
 
-A dataset README summarising run parameters, token usage, and cost is written next to the JSONL as `{stem}.README.md` (for `-o data/itops.jsonl` that is `data/itops.README.md`). It does not overwrite the project `README.md`.
+A dataset README is written next to the JSONL as `{stem}.README.md` (for `-o data/itops.jsonl` that is `data/itops.README.md`). It does **not** overwrite this project `README.md`. The card reports run parameters, token usage, cost, and **observed** mix (category / `category::domain` / subdomain / difficulty counts vs the sampling targets). JSONL and `{stem}.README.md` under `data/` are gitignored.
+
+## Filter Hub datasets
+
+`filter_tasklist.py` keeps rows whose `domain` prefix (or full cell) matches `--keep-categories` and writes UTF-8 JSONL. Auth via `HF_TOKEN` or `hf auth login` (`huggingface-cli` is deprecated).
+
+```bash
+.venv/bin/python filter_tasklist.py \
+  --dataset empero-ai/tasklist-haiku4.5-6000x-unfiltered \
+  --keep-categories coding,cs,Conversation \
+  --output ./data/tasklist-haiku45
+```
+
+Optional: `--category-column domain`, `--split all`, `--max-rows N`, `--push-to-hub ORG/REPO --private`.
+
+Current filtered mix (coding / cs / conversation, `language` backfilled to `en` on non-Grok shards) is the private Hub dataset [ScogoAI/synthetic-sft-prompts-coding-cs-conversation](https://huggingface.co/datasets/ScogoAI/synthetic-sft-prompts-coding-cs-conversation) (34,209 rows). Card lives with the JSONL on the Hub.
+
+```python
+from datasets import load_dataset
+ds = load_dataset("ScogoAI/synthetic-sft-prompts-coding-cs-conversation", token=True)
+```
+
+Publish a local `data/` folder (needs the `hf` CLI from `huggingface_hub`, not `huggingface-cli`):
+
+```bash
+.venv/bin/hf upload ScogoAI/synthetic-sft-prompts-coding-cs-conversation data/ . \
+  --repo-type dataset --private
+```
 
 ## Domains
 
 Source of truth: `docs/it-ops-taxonomy.yaml`. Regenerates both the Rust `DOMAINS` catalog and `DEFAULT_DISTRIBUTION`:
 
 ```bash
-pip install pyyaml   # or use the project venv
-python scripts/codegen_domains.py --write
+.venv/bin/python scripts/codegen_domains.py --write
 ```
 
-Default `--distribution` is biased toward autonomous infra ops (signal → decision → action → validation), not CRM/HR/ESM. Weights sum to 1.0.
+Default `--distribution` is biased toward the Scogo desk (tickets, endpoints, identity, workplace), not APM/SASE volume and not CRM/HR/ESM. Weights sum to 1.0.
 
 Two sampling axes share the same 3-level schema (`category` → `domain` → `subdomain`):
 
@@ -279,19 +313,19 @@ Overlap is intentional. A generic firewall ticket and a FortiGate TAC ticket tra
 
 | Category | Weight | Domains |
 |---|---|---|
-| `infra` | 0.15 | Cloud Infrastructure, FinOps, CNAPP, Virtualization, Storage, Backup, BCDR Continuity, DCIM Facilities |
-| `observe` | 0.11 | Monitoring, Observability APM, AIOps, Synthetics DEM, AI Agent Observability |
-| `network` | 0.11 | Networking, DNS CDN, Firewall, Load Balancer, Network Management, Routers, SD-WAN, Wireless, NAC |
+| `infra` | 0.12 | Cloud Infrastructure, FinOps, CNAPP, Virtualization, Storage, Backup, BCDR Continuity, DCIM Facilities |
+| `endpoint` | 0.11 | RMM, UEM MDM, VDI DaaS, Endpoint Health |
+| `itsm` | 0.10 | Service Desk, Incident Management, Problem Management, Change Enablement, Request Catalog, CMDB Configuration, Knowledge Management, Task Project Management, SLA Measurement |
+| `identity` | 0.10 | Identity Access, Privileged Access, Identity Governance, Directory Services |
 | `oem` | 0.10 | 33 named vendors + 14 long-tail buckets (see below) |
-| `secops` | 0.09 | SIEM, SOAR, EDR XDR, Vulnerability Management, Threat Intel NDR, GRC Audit, Forensics IR |
-| `secure_edge` | 0.07 | SASE SSE, CASB, Data Loss Prevention, Email Security, Web Security, WAF DDoS, DSPM, SSPM |
-| `identity` | 0.07 | Identity Access, Privileged Access, Identity Governance, Directory Services |
-| `endpoint` | 0.07 | RMM, UEM MDM, VDI DaaS, Endpoint Health |
+| `workplace` | 0.08 | Collaboration Messaging, Email Communication, Calendar Scheduling, Document Management, Content Website, Print Workplace Devices, UCaaS Voice, Digital Experience |
+| `network` | 0.08 | Networking, DNS CDN, Firewall, Load Balancer, Network Management, Routers, SD-WAN, Wireless, NAC |
+| `secops` | 0.07 | SIEM, SOAR, EDR XDR, Vulnerability Management, Threat Intel NDR, GRC Audit, Forensics IR |
+| `observe` | 0.06 | Monitoring, Observability APM, AIOps, Synthetics DEM, AI Agent Observability |
 | `delivery` | 0.06 | DevOps, Kubernetes, IaC GitOps, Release Orchestration, AppSec ASPM, Mainframe Midrange |
 | `data` | 0.05 | Database, Analytics, Messaging Streaming, iPaaS API, Data Governance |
-| `itsm` | 0.05 | Service Desk, Incident Management, Problem Management, Change Enablement, Request Catalog, CMDB Configuration, Knowledge Management, Task Project Management, SLA Measurement |
-| `workplace` | 0.03 | Collaboration Messaging, Email Communication, Calendar Scheduling, Document Management, Content Website, Print Workplace Devices, UCaaS Voice, Digital Experience |
 | `agentic` | 0.03 | Agent Fabric, SIA Guardrails, Knowledge Graph, Channels Knowledge, Platform Deploy |
+| `secure_edge` | 0.03 | SASE SSE, CASB, Data Loss Prevention, Email Security, Web Security, WAF DDoS, DSPM, SSPM |
 | `enterprise` | 0.01 | CRM Sales, HR Payroll, ERP Finance, Supplier Contract |
 
 ### OEM / ISV / Platform
