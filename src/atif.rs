@@ -232,10 +232,11 @@ fn validate_step(
         }
         _ => unreachable!(),
     }
-    if step.source == "agent" && step.llm_call_count == Some(0) {
-        if step.metrics.is_some() || step.reasoning_content.is_some() {
-            bail!("{step_location} with llm_call_count=0 must omit metrics and reasoning_content");
-        }
+    if step.source == "agent"
+        && step.llm_call_count == Some(0)
+        && (step.metrics.is_some() || step.reasoning_content.is_some())
+    {
+        bail!("{step_location} with llm_call_count=0 must omit metrics and reasoning_content");
     }
 
     let step_call_ids: HashSet<&str> = step

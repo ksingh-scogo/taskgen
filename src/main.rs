@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -149,7 +150,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    Generate(GenerateArgs),
+    Generate(Box<GenerateArgs>),
     Atif {
         #[command(subcommand)]
         command: AtifCommand,
@@ -435,17 +436,17 @@ fn append_choice_text(buf: &mut String, v: &serde_json::Value) {
     }
     if let Some(msg) = c0.get("message") {
         for key in ["content", "reasoning_content", "reasoning"] {
-            if let Some(s) = msg.get(key).and_then(content_from_value) {
-                if buf.is_empty() {
-                    buf.push_str(&s);
-                }
+            if let Some(s) = msg.get(key).and_then(content_from_value)
+                && buf.is_empty()
+            {
+                buf.push_str(&s);
             }
         }
     }
-    if buf.is_empty() {
-        if let Some(s) = c0.get("text").and_then(content_from_value) {
-            buf.push_str(&s);
-        }
+    if buf.is_empty()
+        && let Some(s) = c0.get("text").and_then(content_from_value)
+    {
+        buf.push_str(&s);
     }
 }
 
@@ -464,10 +465,10 @@ fn parse_chat_payload(raw: &str) -> Result<(String, u64, u64)> {
             }
             let v: serde_json::Value = serde_json::from_str(payload)
                 .with_context(|| format!("bad SSE chunk: {}", truncate_body(payload, 200)))?;
-            if let Some(err) = v.get("error") {
-                if !err.is_null() {
-                    bail!("API error payload: {}", err);
-                }
+            if let Some(err) = v.get("error")
+                && !err.is_null()
+            {
+                bail!("API error payload: {}", err);
             }
             append_choice_text(&mut text, &v);
             let u = extract_usage(&v);
@@ -493,10 +494,10 @@ fn parse_chat_payload(raw: &str) -> Result<(String, u64, u64)> {
 }
 
 fn extract_completion(v: &serde_json::Value) -> Result<String> {
-    if let Some(err) = v.get("error") {
-        if !err.is_null() {
-            bail!("API error payload: {}", err);
-        }
+    if let Some(err) = v.get("error")
+        && !err.is_null()
+    {
+        bail!("API error payload: {}", err);
     }
     let mut buf = String::new();
     append_choice_text(&mut buf, v);
@@ -606,7 +607,10 @@ fn tally_jsonl(path: &std::path::Path) -> DatasetCounts {
     let Ok(file) = File::open(path) else {
         return counts;
     };
-    for line in BufReader::new(file).lines().flatten() {
+    for line in BufReader::new(file)
+        .lines()
+        .map_while(std::result::Result::ok)
+    {
         let Ok(entry) = serde_json::from_str::<TaskEntry>(&line) else {
             continue;
         };
@@ -653,8 +657,8 @@ fn parse_difficulty(input: &str) -> Result<HashMap<u8, f64>> {
             .split_once('=')
             .context(format!("invalid difficulty pair: {}", pair))?;
         let key: String = key.trim().to_lowercase();
-        let d: u8 = if key.starts_with('d') {
-            key[1..]
+        let d: u8 = if let Some(stripped) = key.strip_prefix('d') {
+            stripped
                 .parse()
                 .context(format!("invalid difficulty level: {}", key))?
         } else {
@@ -856,7 +860,7 @@ async fn fetch_free_models(client: &reqwest::Client, api_key: &str) -> Result<Ve
         .collect();
 
     // sort by context length descending so best models are first
-    free.sort_by(|a, b| b.2.cmp(&a.2));
+    free.sort_by_key(|item| Reverse(item.2));
 
     if free.is_empty() {
         bail!(
@@ -1027,19 +1031,36 @@ async fn api_request(
 
 const MAX_RETRIES: u32 = 5;
 
-async fn generate_task(
-    client: &reqwest::Client,
-    api_base: &str,
-    api_key: &str,
-    model: &str,
-    system_prompt: &str,
-    sample: &taxonomy::SampledTask,
+struct GenerateTaskRequest<'a> {
+    client: &'a reqwest::Client,
+    api_base: &'a str,
+    api_key: &'a str,
+    model: &'a str,
+    system_prompt: &'a str,
+    sample: &'a taxonomy::SampledTask,
     temperature: f64,
-    language: Option<&str>,
-    cancel: &AtomicBool,
-    consecutive_timeouts: &AtomicUsize,
-    pb: &ProgressBar,
+    language: Option<&'a str>,
+    cancel: &'a AtomicBool,
+    consecutive_timeouts: &'a AtomicUsize,
+    progress: &'a ProgressBar,
+}
+
+async fn generate_task(
+    request: GenerateTaskRequest<'_>,
 ) -> std::result::Result<(String, u64, u64), ApiError> {
+    let GenerateTaskRequest {
+        client,
+        api_base,
+        api_key,
+        model,
+        system_prompt,
+        sample,
+        temperature,
+        language,
+        cancel,
+        consecutive_timeouts,
+        progress,
+    } = request;
     let user_msg = task_user_message(sample, language);
     let system = if sample.coordinates.is_none() && sample.category_id == "oem" {
         format!("{system_prompt}{OEM_SYSTEM_ADDENDUM}")
@@ -1082,7 +1103,7 @@ async fn generate_task(
                     return Err(ApiError::RateLimit(retry_after));
                 }
                 let wait = retry_after.unwrap_or_else(|| 2u64.pow(retries).min(60));
-                pb.suspend(|| {
+                progress.suspend(|| {
                     eprintln!(
                         "[RATE] 429 hit, waiting {}s (retry {}/{})",
                         wait, retries, MAX_RETRIES
@@ -1093,7 +1114,7 @@ async fn generate_task(
             Err(ApiError::Timeout) => {
                 let count = consecutive_timeouts.fetch_add(1, Ordering::Relaxed) + 1;
                 if count >= 5 {
-                    pb.suspend(|| {
+                    progress.suspend(|| {
                         eprintln!(
                             "[FATAL] {} consecutive timeouts, shutting down gracefully...",
                             count
@@ -1107,7 +1128,7 @@ async fn generate_task(
                     return Err(ApiError::Timeout);
                 }
                 let wait = 2u64.pow(retries).min(30);
-                pb.suspend(|| {
+                progress.suspend(|| {
                     eprintln!(
                         "[TIMEOUT] request timed out, waiting {}s (retry {}/{}, {} consecutive)",
                         wait, retries, MAX_RETRIES, count
@@ -1116,7 +1137,7 @@ async fn generate_task(
                 tokio::time::sleep(tokio::time::Duration::from_secs(wait)).await;
             }
             Err(ApiError::Billing(msg)) => {
-                pb.suspend(|| {
+                progress.suspend(|| {
                     eprintln!("[FATAL] billing error, shutting down gracefully: {}", msg);
                 });
                 cancel.store(true, Ordering::Relaxed);
@@ -1135,7 +1156,7 @@ fn count_existing_tasks(path: &PathBuf) -> usize {
     match file {
         Some(f) => BufReader::new(f)
             .lines()
-            .filter_map(|l| l.ok())
+            .map_while(std::result::Result::ok)
             .filter(|l| !l.trim().is_empty())
             .count(),
         None => 0,
@@ -1406,7 +1427,7 @@ fn generate_readme(
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Generate(args) => run_generate(args).await,
+        Command::Generate(args) => run_generate(*args).await,
         Command::Atif { command } => {
             let (direction, args) = match command {
                 AtifCommand::Export(args) => (atif::ConversionDirection::Export, args),
@@ -1662,19 +1683,19 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                 let key_idx = key_counter.fetch_add(1, Ordering::Relaxed) % api_keys.len();
                 let api_key = &api_keys[key_idx];
 
-                match generate_task(
+                match generate_task(GenerateTaskRequest {
                     client,
-                    &api_base,
+                    api_base: &api_base,
                     api_key,
-                    &use_model,
-                    &system_prompt,
+                    model: &use_model,
+                    system_prompt: &system_prompt,
                     sample,
                     temperature,
-                    lang.as_deref(),
-                    &cancel,
-                    &consecutive_timeouts,
-                    &pb,
-                )
+                    language: lang.as_deref(),
+                    cancel: &cancel,
+                    consecutive_timeouts: &consecutive_timeouts,
+                    progress: &pb,
+                })
                 .await
                 {
                     Ok((prompt, in_tok, out_tok)) => {
@@ -1727,10 +1748,10 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                         let cost_str = match (input_price, output_price) {
                             (Some(ip), Some(op)) => {
                                 let cost = (ip * cur_in / 1_000_000.0) + (op * cur_out / 1_000_000.0);
-                                if let Some(b) = budget {
-                                    if cost >= b {
-                                        cancel.store(true, Ordering::Relaxed);
-                                    }
+                                if let Some(b) = budget
+                                    && cost >= b
+                                {
+                                    cancel.store(true, Ordering::Relaxed);
                                 }
                                 format!(" | ${:.4}", cost)
                             }
@@ -1809,7 +1830,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         let mut lines: Vec<String> = Vec::new();
         let mut entries: Vec<Option<TaskEntry>> = Vec::new();
 
-        for line in reader.lines().flatten() {
+        for line in reader.lines().map_while(std::result::Result::ok) {
             let entry = serde_json::from_str::<TaskEntry>(&line).ok();
             entries.push(entry);
             lines.push(line);
@@ -1902,7 +1923,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         let reader = BufReader::new(File::open(&args.output)?);
         let mut lang_buckets: HashMap<String, Vec<String>> = HashMap::new();
 
-        for line in reader.lines().flatten() {
+        for line in reader.lines().map_while(std::result::Result::ok) {
             let lang_code = serde_json::from_str::<serde_json::Value>(&line)
                 .ok()
                 .and_then(|v| {
