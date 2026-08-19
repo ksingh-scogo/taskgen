@@ -17,6 +17,7 @@ use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 
 pub mod atif;
+pub mod provider;
 pub mod schema;
 pub mod taxonomy;
 

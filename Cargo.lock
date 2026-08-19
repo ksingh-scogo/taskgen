@@ -1643,6 +1643,7 @@ dependencies = [
  "serde_yaml_ng",
  "sha2",
  "tokio",
+ "url",
 ]
 
 [[package]]
