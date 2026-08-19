@@ -845,6 +845,8 @@ fn slugify(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     #[test]
     fn loads_and_validates_embedded_itops_taxonomy() {
@@ -903,5 +905,36 @@ categories:
 
         let error = TaxonomyCatalog::from_yaml(yaml, None).unwrap_err();
         assert!(error.to_string().contains("positive subdomain weight"), "{error:#}");
+    }
+
+    #[test]
+    fn netops_taxonomy_has_exact_inventory_and_seeded_sampling() {
+        let catalog = TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml"))
+            .expect("checked-in NetOps taxonomy should parse");
+        assert_eq!(catalog.id(), "scogo-enterprise-netops-v1");
+        assert_eq!(catalog.kind(), TaxonomyKind::Compositional);
+        assert_eq!(catalog.domain_count(), 25);
+        assert_eq!(catalog.subdomain_count(), 531);
+        assert!((catalog.default_domain_weight_sum() - 1.0).abs() < WEIGHT_TOLERANCE);
+
+        let mut first = StdRng::seed_from_u64(42);
+        let mut second = StdRng::seed_from_u64(42);
+        assert_eq!(
+            catalog.sample_defaults(&mut first).expect("first sample"),
+            catalog.sample_defaults(&mut second).expect("second sample")
+        );
+    }
+
+    #[test]
+    fn netops_prompts_preserve_scope_and_harness_boundary() {
+        let taskgen = include_str!("../prompts/netops-taskgen-system-v1.txt");
+        let teacher = include_str!("../prompts/netops-teacher-system-v1.txt");
+        for excluded in ["3GPP", "EPC", "5GC", "IMS", "OSS/BSS", "service-provider core"] {
+            assert!(taskgen.contains(excluded), "missing exclusion {excluded}");
+        }
+        assert!(taskgen.contains("operational behavior, not certification recall"));
+        assert!(taskgen.contains("Output only the final user task prompt."));
+        assert!(teacher.contains("ATIF serialization"));
+        assert!(teacher.contains("The harness, not you"));
     }
 }

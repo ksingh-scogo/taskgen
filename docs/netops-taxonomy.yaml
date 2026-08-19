@@ -1,0 +1,459 @@
+# Scogo Sovereign Enterprise NetOps prompt-seed taxonomy.
+# Enterprise networking only; telecom-provider network operations are excluded.
+schema_version: scogo.taskgen.taxonomy.v1
+id: scogo-enterprise-netops-v1
+kind: compositional
+label: Scogo Sovereign Enterprise NetOps
+
+scope:
+  include:
+    - enterprise campus branch data-center cloud hybrid and multicloud networking
+    - Kubernetes edge OT IoT AI HPC and enterprise real-time networking
+    - read-only investigation evidence interpretation safe change verification rollback abstention and escalation
+  exclude:
+    - 3GPP RAN EPC 5GC IMS and mobile spectrum planning
+    - carrier OSS/BSS carrier optical backbone and service-provider core operations
+    - certification-question generation as the primary task objective
+
+defaults:
+  system_prompt_file: ../prompts/netops-taskgen-system-v1.txt
+  difficulty_distribution:
+    1: 0.02
+    2: 0.03
+    3: 0.08
+    4: 0.12
+    5: 0.18
+    6: 0.18
+    7: 0.15
+    8: 0.12
+    9: 0.07
+    10: 0.05
+
+vendor_groups:
+  - id: routing_switching
+    weight: 1.0
+    vendors:
+      - {id: cisco_ios_xe, label: Cisco IOS XE, weight: 0.20}
+      - {id: juniper_junos, label: Juniper Junos, weight: 0.15}
+      - {id: arista_eos, label: Arista EOS, weight: 0.15}
+      - {id: hpe_aruba_cx, label: HPE Aruba CX, weight: 0.12}
+      - {id: cisco_nx_os, label: Cisco NX-OS, weight: 0.10}
+      - {id: extreme_exos, label: Extreme EXOS, weight: 0.10}
+      - {id: huawei_vrp, label: Huawei VRP, weight: 0.10}
+      - {id: nokia_srlinux, label: Nokia SR Linux, weight: 0.08}
+  - id: open_networking
+    weight: 1.0
+    vendors:
+      - {id: frrouting, label: FRRouting, weight: 0.22}
+      - {id: sonic, label: SONiC, weight: 0.20}
+      - {id: cumulus_linux, label: NVIDIA Cumulus Linux, weight: 0.16}
+      - {id: vyos, label: VyOS, weight: 0.16}
+      - {id: opnsense, label: OPNsense, weight: 0.14}
+      - {id: pfsense, label: pfSense, weight: 0.12}
+  - id: wireless
+    weight: 1.0
+    vendors:
+      - {id: cisco_catalyst_wireless, label: Cisco Catalyst Wireless, weight: 0.22}
+      - {id: hpe_aruba_wireless, label: HPE Aruba Wireless, weight: 0.20}
+      - {id: juniper_mist, label: Juniper Mist, weight: 0.18}
+      - {id: ruckus, label: Ruckus, weight: 0.15}
+      - {id: extreme_wireless, label: Extreme Wireless, weight: 0.15}
+      - {id: ubiquiti_unifi, label: Ubiquiti UniFi, weight: 0.10}
+  - id: sdwan
+    weight: 1.0
+    vendors:
+      - {id: cisco_catalyst_sdwan, label: Cisco Catalyst SD-WAN, weight: 0.18}
+      - {id: fortinet_secure_sdwan, label: Fortinet Secure SD-WAN, weight: 0.16}
+      - {id: vmware_velocloud, label: VMware VeloCloud, weight: 0.15}
+      - {id: versa_networks, label: Versa Networks, weight: 0.14}
+      - {id: aruba_edgeconnect, label: Aruba EdgeConnect, weight: 0.13}
+      - {id: palo_alto_prisma_sdwan, label: Palo Alto Prisma SD-WAN, weight: 0.12}
+      - {id: juniper_session_smart, label: Juniper Session Smart, weight: 0.12}
+  - id: security
+    weight: 1.0
+    vendors:
+      - {id: palo_alto_panos, label: Palo Alto PAN-OS, weight: 0.18}
+      - {id: fortinet_fortios, label: Fortinet FortiOS, weight: 0.18}
+      - {id: checkpoint_gaia, label: Check Point Gaia, weight: 0.14}
+      - {id: cisco_secure_firewall, label: Cisco Secure Firewall, weight: 0.12}
+      - {id: juniper_srx, label: Juniper SRX, weight: 0.10}
+      - {id: sophos_firewall, label: Sophos Firewall, weight: 0.10}
+      - {id: pfsense, label: pfSense, weight: 0.10}
+      - {id: opnsense, label: OPNsense, weight: 0.08}
+  - id: nac
+    weight: 1.0
+    vendors:
+      - {id: cisco_ise, label: Cisco ISE, weight: 0.24}
+      - {id: aruba_clearpass, label: Aruba ClearPass, weight: 0.20}
+      - {id: forescout, label: Forescout, weight: 0.16}
+      - {id: fortinac, label: FortiNAC, weight: 0.15}
+      - {id: portnox, label: Portnox, weight: 0.15}
+      - {id: packetfence, label: PacketFence, weight: 0.10}
+  - id: application_delivery
+    weight: 1.0
+    vendors:
+      - {id: f5_bigip, label: F5 BIG-IP, weight: 0.20}
+      - {id: nginx, label: NGINX, weight: 0.16}
+      - {id: haproxy, label: HAProxy, weight: 0.14}
+      - {id: envoy, label: Envoy, weight: 0.12}
+      - {id: citrix_netscaler, label: Citrix NetScaler, weight: 0.12}
+      - {id: a10_thunder, label: A10 Thunder, weight: 0.10}
+      - {id: traefik, label: Traefik, weight: 0.08}
+      - {id: cloudflare, label: Cloudflare, weight: 0.08}
+  - id: cloud
+    weight: 1.0
+    vendors:
+      - {id: aws, label: Amazon Web Services, weight: 0.24}
+      - {id: azure, label: Microsoft Azure, weight: 0.24}
+      - {id: google_cloud, label: Google Cloud, weight: 0.20}
+      - {id: alibaba_cloud, label: Alibaba Cloud, weight: 0.12}
+      - {id: oracle_cloud, label: Oracle Cloud Infrastructure, weight: 0.12}
+      - {id: cloudflare, label: Cloudflare, weight: 0.08}
+  - id: kubernetes
+    weight: 1.0
+    vendors:
+      - {id: cilium, label: Cilium, weight: 0.18}
+      - {id: calico, label: Calico, weight: 0.16}
+      - {id: aws_vpc_cni, label: AWS VPC CNI, weight: 0.14}
+      - {id: azure_cni, label: Azure CNI, weight: 0.12}
+      - {id: gke_dataplane_v2, label: GKE Dataplane V2, weight: 0.12}
+      - {id: ovn_kubernetes, label: OVN-Kubernetes, weight: 0.10}
+      - {id: antrea, label: Antrea, weight: 0.10}
+      - {id: flannel, label: Flannel, weight: 0.08}
+  - id: automation_observability
+    weight: 1.0
+    vendors:
+      - {id: ansible, label: Ansible, weight: 0.14}
+      - {id: terraform, label: Terraform, weight: 0.12}
+      - {id: netbox, label: NetBox, weight: 0.11}
+      - {id: nautobot, label: Nautobot, weight: 0.11}
+      - {id: solarwinds, label: SolarWinds, weight: 0.10}
+      - {id: zabbix, label: Zabbix, weight: 0.10}
+      - {id: datadog, label: Datadog, weight: 0.09}
+      - {id: splunk, label: Splunk, weight: 0.09}
+      - {id: thousandeyes, label: Cisco ThousandEyes, weight: 0.07}
+      - {id: kentik, label: Kentik, weight: 0.07}
+  - id: network_services
+    weight: 1.0
+    vendors:
+      - {id: infoblox, label: Infoblox, weight: 0.20}
+      - {id: bluecat, label: BlueCat, weight: 0.16}
+      - {id: windows_dns_dhcp, label: Windows DNS and DHCP, weight: 0.14}
+      - {id: bind, label: BIND, weight: 0.12}
+      - {id: kea_dhcp, label: Kea DHCP, weight: 0.12}
+      - {id: powerdns, label: PowerDNS, weight: 0.10}
+      - {id: freeradius, label: FreeRADIUS, weight: 0.08}
+      - {id: chrony, label: Chrony, weight: 0.08}
+  - id: ot
+    weight: 1.0
+    vendors:
+      - {id: cisco_industrial_ethernet, label: Cisco Industrial Ethernet, weight: 0.22}
+      - {id: hirschmann, label: Hirschmann, weight: 0.20}
+      - {id: moxa, label: Moxa, weight: 0.18}
+      - {id: claroty, label: Claroty, weight: 0.15}
+      - {id: nozomi, label: Nozomi Networks, weight: 0.15}
+      - {id: fortinet_ot, label: Fortinet OT Security, weight: 0.10}
+  - id: ai_hpc
+    weight: 1.0
+    vendors:
+      - {id: nvidia_spectrum_x, label: NVIDIA Spectrum-X, weight: 0.18}
+      - {id: nvidia_infiniband, label: NVIDIA InfiniBand, weight: 0.16}
+      - {id: arista_ai_fabric, label: Arista AI Fabric, weight: 0.14}
+      - {id: cisco_nexus, label: Cisco Nexus, weight: 0.12}
+      - {id: juniper_apstra, label: Juniper Apstra, weight: 0.12}
+      - {id: broadcom_tomahawk, label: Broadcom Tomahawk, weight: 0.10}
+      - {id: sonic, label: SONiC, weight: 0.10}
+      - {id: roce, label: RoCE Ecosystem, weight: 0.08}
+  - id: realtime
+    weight: 1.0
+    vendors:
+      - {id: cisco_cucm_webex, label: Cisco CUCM and Webex, weight: 0.20}
+      - {id: microsoft_teams_phone, label: Microsoft Teams Phone, weight: 0.18}
+      - {id: zoom_phone, label: Zoom Phone, weight: 0.14}
+      - {id: avaya, label: Avaya, weight: 0.12}
+      - {id: genesys_cloud, label: Genesys Cloud, weight: 0.10}
+      - {id: audiocodes, label: AudioCodes, weight: 0.10}
+      - {id: ribbon, label: Ribbon, weight: 0.08}
+      - {id: asterisk, label: Asterisk, weight: 0.08}
+
+axes:
+  task_families:
+    - {id: troubleshooting_rca, label: Troubleshooting and root-cause analysis, weight: 0.25, difficulty_min: 2, difficulty_max: 10}
+    - {id: telemetry_config_log_interpretation, label: Telemetry configuration and log interpretation, weight: 0.20, difficulty_min: 1, difficulty_max: 10}
+    - {id: tool_selection_next_best_action, label: Tool selection and next best action, weight: 0.15, difficulty_min: 2, difficulty_max: 10}
+    - {id: config_iac_review_repair, label: Configuration and infrastructure-as-code review, weight: 0.15, difficulty_min: 3, difficulty_max: 10}
+    - {id: change_approval_verification_rollback, label: Approval change verification and rollback, weight: 0.10, difficulty_min: 4, difficulty_max: 10}
+    - {id: abstention_uncertainty_escalation, label: Abstention uncertainty and escalation, weight: 0.10, difficulty_min: 3, difficulty_max: 10}
+    - {id: architecture_capacity_migration_optimization, label: Architecture capacity migration and optimization, weight: 0.05, difficulty_min: 5, difficulty_max: 10}
+  environments:
+    - {id: campus, label: Enterprise campus, weight: 0.14}
+    - {id: branch, label: Enterprise branch, weight: 0.10}
+    - {id: data_center, label: Data center, weight: 0.12}
+    - {id: hybrid, label: Hybrid enterprise, weight: 0.12}
+    - {id: cloud, label: Public cloud, weight: 0.10}
+    - {id: multicloud, label: Multicloud, weight: 0.06}
+    - {id: kubernetes, label: Kubernetes platform, weight: 0.08}
+    - {id: remote_access, label: Remote access estate, weight: 0.06}
+    - {id: enterprise_wireless, label: Enterprise wireless, weight: 0.07}
+    - {id: ot, label: Operational technology, weight: 0.04}
+    - {id: ai_hpc, label: AI and HPC fabric, weight: 0.03}
+    - {id: edge, label: Enterprise edge, weight: 0.04}
+    - {id: lab_staging, label: Lab or staging, weight: 0.04}
+  vendor_scopes:
+    - {id: vendor_neutral, label: Vendor neutral, weight: 0.35}
+    - {id: single_vendor, label: Single vendor, weight: 0.45}
+    - {id: multi_vendor, label: Multi vendor, weight: 0.20}
+  incident_mechanisms:
+    - {id: physical_degradation, label: Physical degradation, weight: 0.05}
+    - {id: misconfiguration, label: Misconfiguration, weight: 0.15}
+    - {id: configuration_drift, label: Configuration drift, weight: 0.07}
+    - {id: resource_exhaustion, label: Resource exhaustion, weight: 0.05}
+    - {id: protocol_state_failure, label: Protocol state failure, weight: 0.09}
+    - {id: policy_conflict, label: Policy conflict, weight: 0.07}
+    - {id: dependency_failure, label: Dependency failure, weight: 0.06}
+    - {id: control_plane_failure, label: Control-plane failure, weight: 0.06}
+    - {id: data_plane_failure, label: Data-plane failure, weight: 0.06}
+    - {id: asymmetric_path, label: Asymmetric path, weight: 0.05}
+    - {id: convergence_failure, label: Convergence failure, weight: 0.05}
+    - {id: software_defect, label: Software defect, weight: 0.05}
+    - {id: certificate_identity_failure, label: Certificate or identity failure, weight: 0.04}
+    - {id: capacity_oversubscription, label: Capacity or oversubscription, weight: 0.05}
+    - {id: rf_interference, label: RF interference, weight: 0.03}
+    - {id: external_provider_failure, label: External provider failure, weight: 0.03}
+    - {id: observability_gap, label: Observability gap, weight: 0.02}
+    - {id: multi_fault, label: Multiple interacting faults, weight: 0.02}
+  evidence_conditions:
+    - {id: sufficient, label: Sufficient evidence, weight: 0.45}
+    - {id: partial, label: Partial evidence, weight: 0.30}
+    - {id: contradictory, label: Contradictory evidence, weight: 0.10}
+    - {id: stale, label: Stale evidence, weight: 0.05}
+    - {id: missing_live_state, label: Missing required live state, weight: 0.10}
+  evidence_bundles:
+    - {id: config_only, label: Configuration excerpt, weight: 0.10}
+    - {id: telemetry_timeseries, label: Telemetry time series, weight: 0.10}
+    - {id: logs_events, label: Logs and events, weight: 0.10}
+    - {id: packet_capture, label: Packet capture or packet summary, weight: 0.08}
+    - {id: routing_tables, label: Routing and forwarding tables, weight: 0.08}
+    - {id: config_oper_state, label: Configuration plus operational state, weight: 0.15}
+    - {id: topology_state, label: Topology plus state, weight: 0.10}
+    - {id: multi_source, label: Multiple evidence sources, weight: 0.15}
+    - {id: ticket_runbook, label: Incident ticket and runbook, weight: 0.06}
+    - {id: iac_diff_plan, label: Infrastructure-as-code diff and plan, weight: 0.05}
+    - {id: intentionally_missing, label: Intentionally missing required evidence, weight: 0.03}
+  action_risks:
+    - {id: read_only_investigation, label: Read-only investigation, weight: 0.55}
+    - {id: advisory_plan_only, label: Advisory plan only, weight: 0.20}
+    - {id: approval_gated_change, label: Approval-gated change, weight: 0.15}
+    - {id: staging_or_simulation, label: Staging or simulation, weight: 0.07}
+    - {id: emergency_change_decision, label: Emergency change decision, weight: 0.03}
+  presentations:
+    - {id: incident_ticket, label: Incident ticket, weight: 0.18}
+    - {id: oncall_chat, label: On-call chat, weight: 0.18}
+    - {id: cli_ssh_session, label: CLI or SSH session, weight: 0.16}
+    - {id: config_review, label: Configuration review, weight: 0.12}
+    - {id: change_request, label: Change request, weight: 0.10}
+    - {id: war_room, label: War room, weight: 0.10}
+    - {id: audit_review, label: Audit review, weight: 0.06}
+    - {id: architecture_review, label: Architecture review, weight: 0.06}
+    - {id: api_automation_brief, label: API or automation brief, weight: 0.04}
+  domains:
+    - id: physical_link_hardware
+      label: Physical Link and Hardware
+      weight: 0.02
+      vendor_groups: [routing_switching, ai_hpc]
+      environments: [campus, branch, data_center, hybrid, enterprise_wireless, ot, ai_hpc, edge, lab_staging]
+      incident_mechanisms: [physical_degradation, misconfiguration, resource_exhaustion, data_plane_failure, software_defect, capacity_oversubscription, multi_fault]
+      evidence_bundles: [telemetry_timeseries, logs_events, config_oper_state, topology_state, multi_source, ticket_runbook, intentionally_missing]
+      subdomains: [copper_cabling, fiber_cabling, optics_transceivers, dac_aoc, patch_panels, interface_errors, crc_fcs_errors, duplex_speed_mismatch, autonegotiation, link_flap, signal_levels_dom, poe_power_budget, port_channel_member_physical, breakout_ports, hardware_asic_failure, environmental_thermal_power, smartnic_dpu, cabling_documentation]
+    - id: packet_protocol_foundations
+      label: Packet and Protocol Foundations
+      weight: 0.01
+      vendor_groups: [routing_switching, open_networking]
+      environments: [campus, branch, data_center, hybrid, cloud, multicloud, kubernetes, remote_access, enterprise_wireless, ot, ai_hpc, edge, lab_staging]
+      incident_mechanisms: [misconfiguration, protocol_state_failure, data_plane_failure, asymmetric_path, software_defect, observability_gap, multi_fault]
+      evidence_bundles: [packet_capture, config_oper_state, topology_state, multi_source, intentionally_missing]
+      subdomains: [ethernet_frames, arp, ndp, icmp, tcp_handshake_reset_retransmission, udp, mtu_fragmentation_pmtud, mss_clamping, ttl_hop_limit, checksums, encapsulation_overhead, multicast_broadcast_unknown_unicast, qos_markings_dscp_ecn, packet_ordering_duplication, socket_flow_five_tuple]
+    - id: layer2_switching
+      label: Layer 2 Switching
+      weight: 0.05
+      vendor_groups: [routing_switching, open_networking]
+      environments: [campus, branch, data_center, hybrid, enterprise_wireless, ot, ai_hpc, edge, lab_staging]
+      incident_mechanisms: [physical_degradation, misconfiguration, configuration_drift, protocol_state_failure, policy_conflict, data_plane_failure, convergence_failure, software_defect, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, config_oper_state, topology_state, multi_source, iac_diff_plan, intentionally_missing]
+      subdomains: [vlans, access_ports, trunks, native_vlan, qinq, stp_rstp_mstp, loop_guard_root_guard_bpdu_guard, mac_address_table, mac_flap, lacp_port_channels, mlag_vpc, storm_control, dhcp_snooping, dynamic_arp_inspection, ip_source_guard, private_vlan]
+    - id: ip_addressing_ipam
+      label: IP Addressing and IPAM
+      weight: 0.03
+      vendor_groups: [network_services, cloud, automation_observability]
+      environments: [campus, branch, data_center, hybrid, cloud, multicloud, kubernetes, remote_access, enterprise_wireless, ot, edge, lab_staging]
+      incident_mechanisms: [misconfiguration, configuration_drift, resource_exhaustion, policy_conflict, dependency_failure, data_plane_failure, observability_gap, multi_fault]
+      evidence_bundles: [config_only, logs_events, config_oper_state, topology_state, multi_source, ticket_runbook, iac_diff_plan, intentionally_missing]
+      subdomains: [ipv4_subnetting, ipv6_addressing, dual_stack, ipam_allocation, prefix_utilization, duplicate_ip, anycast_ip, loopback_addressing, vrf_address_spaces, rfc1918_overlap, nat_address_planning, dhcp_reservations, slaac_router_advertisement, renumbering, address_discovery_reconciliation, dns_ipam_source_of_truth]
+    - id: layer3_routing
+      label: Layer 3 Routing
+      weight: 0.07
+      vendor_groups: [routing_switching, open_networking]
+      environments: [campus, branch, data_center, hybrid, cloud, multicloud, kubernetes, ot, ai_hpc, edge, lab_staging]
+      incident_mechanisms: [misconfiguration, configuration_drift, protocol_state_failure, policy_conflict, control_plane_failure, data_plane_failure, asymmetric_path, convergence_failure, software_defect, external_provider_failure, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, routing_tables, config_oper_state, topology_state, multi_source, iac_diff_plan, intentionally_missing]
+      subdomains: [static_routes, policy_based_routing, ospf_adjacency, ospf_lsa_area, isis_adjacency_database, bgp_session, bgp_best_path, route_redistribution, route_filtering_prefix_lists, route_maps_policy_statements, bgp_communities, localpref_med_aspath, bgp_route_leak, default_route_blackhole, ecmp, vrf_lite, route_recursion, routing_convergence_graceful_restart, bfd, multicast_routing_pim_igmp, rpki_origin_validation]
+    - id: wan_internet_edge
+      label: WAN and Internet Edge
+      weight: 0.05
+      vendor_groups: [routing_switching, open_networking, cloud]
+      environments: [branch, data_center, hybrid, cloud, multicloud, remote_access, edge, lab_staging]
+      incident_mechanisms: [physical_degradation, misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, data_plane_failure, asymmetric_path, convergence_failure, capacity_oversubscription, external_provider_failure, observability_gap, multi_fault]
+      evidence_bundles: [telemetry_timeseries, logs_events, packet_capture, routing_tables, config_oper_state, topology_state, multi_source, ticket_runbook, intentionally_missing]
+      subdomains: [isp_peering_transit, dedicated_internet_access, mpls_l3vpn, leased_lines, broadband_underlay, lte_5g_backup_underlay, pppoe, bgp_multihoming, nat_pat, carrier_handoff, wan_brownout, last_mile_latency_loss, asymmetric_internet_path, cgnat_impact, public_ip_asn, internet_ddos_handoff, wan_capacity, circuit_failover]
+    - id: sdwan
+      label: SD-WAN
+      weight: 0.04
+      vendor_groups: [sdwan, security]
+      environments: [branch, data_center, hybrid, cloud, multicloud, remote_access, edge, lab_staging]
+      incident_mechanisms: [misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, control_plane_failure, data_plane_failure, asymmetric_path, convergence_failure, software_defect, capacity_oversubscription, external_provider_failure, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, routing_tables, config_oper_state, topology_state, multi_source, ticket_runbook, iac_diff_plan, intentionally_missing]
+      subdomains: [overlay_tunnels, underlay_health, control_connections, orchestration, application_aware_routing, sla_classes, path_selection, segmentation_vrf, policy_conflicts, direct_internet_local_breakout, service_chaining, high_availability, site_onboarding_ztp, nat_traversal, qos, brownout_remediation, controller_upgrades, telemetry, cloud_onramps]
+    - id: wireless_lan
+      label: Wireless LAN
+      weight: 0.05
+      vendor_groups: [wireless, nac]
+      environments: [campus, branch, hybrid, enterprise_wireless, ot, edge, lab_staging]
+      incident_mechanisms: [physical_degradation, misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, data_plane_failure, software_defect, capacity_oversubscription, rf_interference, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, config_oper_state, topology_state, multi_source, ticket_runbook, intentionally_missing]
+      subdomains: [rf_planning, coverage_capacity, channel_power_rrm, cochannel_adjacent_interference, dfs_events, roaming_80211kvr, association_authentication, wpa2_wpa3_enterprise, eap_radius_certificates, ssid_vlan_mapping, controller_ap_join, capwap, wireless_mesh, captive_portal_guest, band_steering, airtime_fairness, client_isolation, wireless_iot, location_rtls, spectrum_analysis, wifi_6_6e_7, multicast_broadcast_optimization]
+    - id: network_services
+      label: Network Services
+      weight: 0.06
+      vendor_groups: [network_services, cloud]
+      environments: [campus, branch, data_center, hybrid, cloud, multicloud, kubernetes, remote_access, enterprise_wireless, ot, edge, lab_staging]
+      incident_mechanisms: [misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, control_plane_failure, data_plane_failure, software_defect, certificate_identity_failure, external_provider_failure, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, config_oper_state, topology_state, multi_source, ticket_runbook, iac_diff_plan, intentionally_missing]
+      subdomains: [dns_authoritative, dns_recursive, dns_forwarding, dns_split_horizon, dnssec, dns_ttl_cache, doh_dot, ipam, dhcp_dora, dhcp_relay, dhcp_failover, dhcp_options, ntp_ptp, radius_tacacs, ldap_active_directory_dependency, pki_certificate_lifecycle, proxy_pac, cdn_edge_dns, service_discovery, anycast_service_ip]
+    - id: vpn_remote_access
+      label: VPN and Remote Access
+      weight: 0.04
+      vendor_groups: [security, open_networking, cloud]
+      environments: [branch, data_center, hybrid, cloud, multicloud, remote_access, edge, lab_staging]
+      incident_mechanisms: [misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, control_plane_failure, data_plane_failure, asymmetric_path, software_defect, certificate_identity_failure, external_provider_failure, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, routing_tables, config_oper_state, topology_state, multi_source, ticket_runbook, intentionally_missing]
+      subdomains: [ipsec_ikev1_ikev2, phase1_phase2_selectors, route_based_vpn, policy_based_vpn, site_to_site_vpn, remote_access_vpn, ssl_vpn, wireguard, dmvpn, gre_tunnels, ztna_private_access, client_posture, split_tunnel, full_tunnel, nat_t, rekey_lifetime, certificate_auth, mfa_saml, overlapping_networks, vpn_mtu_mss, vpn_ha, vpn_routing]
+    - id: firewall_network_security
+      label: Firewall and Network Security
+      weight: 0.07
+      vendor_groups: [security, cloud]
+      environments: [campus, branch, data_center, hybrid, cloud, multicloud, kubernetes, remote_access, enterprise_wireless, ot, edge, lab_staging]
+      incident_mechanisms: [misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, control_plane_failure, data_plane_failure, asymmetric_path, software_defect, certificate_identity_failure, capacity_oversubscription, external_provider_failure, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, routing_tables, config_oper_state, topology_state, multi_source, ticket_runbook, iac_diff_plan, intentionally_missing]
+      subdomains: [policy_matching_order, address_service_objects, state_tables, snat_dnat, application_identification, url_filtering, tls_inspection, ips_ids, zone_based_policy, vrf_vdom_vsys, ha_session_sync, asymmetric_routing, rule_shadowing, any_any_rules, east_west_segmentation, north_south_policy, egress_filtering, geo_ip_reputation, firewall_logging, policy_hit_counts, virtual_patching, ddos_policy, cloud_firewall_policy, config_change_rollback]
+    - id: nac_zero_trust
+      label: NAC and Zero Trust
+      weight: 0.04
+      vendor_groups: [nac, wireless, security]
+      environments: [campus, branch, hybrid, remote_access, enterprise_wireless, ot, edge, lab_staging]
+      incident_mechanisms: [misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, control_plane_failure, software_defect, certificate_identity_failure, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, config_oper_state, topology_state, multi_source, ticket_runbook, iac_diff_plan, intentionally_missing]
+      subdomains: [dot1x, mac_auth_bypass, eap_methods, radius, nac_certificates, posture, profiling, guest_byod, dynamic_vlan_assignment, downloadable_acl, quarantine, change_of_authorization, supplicant, switch_ap_integration, identity_sources, fail_open_fail_closed, tacacs_device_admin, security_group_tags, microsegmentation, iot_onboarding, nac_policy_drift, nac_high_availability]
+    - id: application_delivery
+      label: Application Delivery
+      weight: 0.04
+      vendor_groups: [application_delivery, cloud, kubernetes]
+      environments: [data_center, hybrid, cloud, multicloud, kubernetes, edge, lab_staging]
+      incident_mechanisms: [misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, control_plane_failure, data_plane_failure, asymmetric_path, convergence_failure, software_defect, certificate_identity_failure, capacity_oversubscription, external_provider_failure, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, config_oper_state, topology_state, multi_source, ticket_runbook, iac_diff_plan, intentionally_missing]
+      subdomains: [l4_l7_load_balancing, pools_members, health_monitors, balancing_algorithms, persistence_stickiness, tls_termination_reencrypt, certificate_chain_sni, http2_http3, reverse_proxy, waf_integration, gslb, dns_load_balancing, anycast_delivery, ingress_api_gateway, connection_draining, rate_limiting, header_rewriting, source_ip_proxy_protocol, websocket, grpc, content_switching, autoscaling_capacity, adc_high_availability, config_sync]
+    - id: datacenter_fabric
+      label: Data Center Fabric
+      weight: 0.03
+      vendor_groups: [routing_switching, open_networking, ai_hpc]
+      environments: [data_center, hybrid, cloud, multicloud, ai_hpc, lab_staging]
+      incident_mechanisms: [physical_degradation, misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, control_plane_failure, data_plane_failure, asymmetric_path, convergence_failure, software_defect, capacity_oversubscription, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, routing_tables, config_oper_state, topology_state, multi_source, iac_diff_plan, intentionally_missing]
+      subdomains: [leaf_spine, evpn_vxlan_control_plane, l2_l3_vni, anycast_gateway, bgp_underlay, evpn_route_types, evpn_multihoming_esi, mlag_vpc, fabric_mtu, fabric_ecmp, border_leaf, data_center_interconnect, vrf_route_leaking, multicast_replication, arp_suppression, endpoint_mobility, fabric_automation_controller, aci_policy, storage_fabric_integration, fabric_convergence, fabric_maintenance_upgrade]
+    - id: cloud_hybrid_networking
+      label: Cloud and Hybrid Networking
+      weight: 0.07
+      vendor_groups: [cloud, security, routing_switching]
+      environments: [data_center, hybrid, cloud, multicloud, kubernetes, remote_access, edge, lab_staging]
+      incident_mechanisms: [misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, control_plane_failure, data_plane_failure, asymmetric_path, convergence_failure, software_defect, certificate_identity_failure, capacity_oversubscription, external_provider_failure, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, routing_tables, config_oper_state, topology_state, multi_source, ticket_runbook, iac_diff_plan, intentionally_missing]
+      subdomains: [vpc_vnet_architecture, cloud_subnets_route_tables, security_groups_nsg_nacl, cloud_firewall, internet_nat_gateway, vpc_vnet_peering, transit_gateway_vwan_hub_spoke, private_link_private_endpoints, cloud_dns, cloud_load_balancer, cloud_vpn_gateway, direct_connect_expressroute_interconnect_cen, cloud_bgp_route_exchange, overlapping_cloud_cidr, multi_account_subscription_project, multicloud_connectivity, cloud_egress, network_appliance_insertion, udr_gateway_route_tables, cloud_flow_logs, cloud_ipv6, cloud_kubernetes_networking, landing_zone_network_policy, multi_region_network_ha]
+    - id: container_kubernetes_networking
+      label: Container and Kubernetes Networking
+      weight: 0.05
+      vendor_groups: [kubernetes, cloud, application_delivery]
+      environments: [data_center, hybrid, cloud, multicloud, kubernetes, edge, lab_staging]
+      incident_mechanisms: [misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, control_plane_failure, data_plane_failure, asymmetric_path, convergence_failure, software_defect, certificate_identity_failure, capacity_oversubscription, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, routing_tables, config_oper_state, topology_state, multi_source, ticket_runbook, iac_diff_plan, intentionally_missing]
+      subdomains: [cni_lifecycle, pod_ipam, clusterip_services, kube_proxy_iptables_ipvs_nft, networkpolicy, ingress, gateway_api, service_loadbalancer, coredns, overlay_underlay, kubernetes_mtu, node_to_pod, pod_to_pod, kubernetes_egress_nat, kubernetes_dual_stack, service_mesh, sidecar_ambient_mesh, mesh_mtls, multicluster_networking, bgp_service_advertisement, cilium_ebpf, calico, cloud_cni_prefix_delegation, endpoint_slices, hairpin_hostnetwork, kubernetes_network_observability]
+    - id: sdn_network_virtualization
+      label: SDN and Network Virtualization
+      weight: 0.03
+      vendor_groups: [routing_switching, open_networking, cloud, automation_observability]
+      environments: [campus, branch, data_center, hybrid, cloud, multicloud, kubernetes, edge, lab_staging]
+      incident_mechanisms: [misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, control_plane_failure, data_plane_failure, asymmetric_path, convergence_failure, software_defect, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, routing_tables, config_oper_state, topology_state, multi_source, iac_diff_plan, intentionally_missing]
+      subdomains: [controller_availability, northbound_southbound_apis, openflow, netconf_yang, gnmi, sdn_overlays, vmware_nsx, aci_controller, intent_policy, network_virtualization, distributed_routing, overlay_gateways, vtep, tenant_isolation, controller_state_reconciliation, policy_compilation, service_insertion, virtual_switches_ovs, sdn_upgrades, controller_telemetry]
+    - id: network_performance_qos
+      label: Network Performance and QoS
+      weight: 0.04
+      vendor_groups: [routing_switching, sdwan, automation_observability, realtime]
+      environments: [campus, branch, data_center, hybrid, cloud, multicloud, kubernetes, remote_access, enterprise_wireless, ot, ai_hpc, edge, lab_staging]
+      incident_mechanisms: [physical_degradation, misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, data_plane_failure, asymmetric_path, software_defect, capacity_oversubscription, rf_interference, external_provider_failure, observability_gap, multi_fault]
+      evidence_bundles: [telemetry_timeseries, logs_events, packet_capture, routing_tables, config_oper_state, topology_state, multi_source, ticket_runbook, intentionally_missing]
+      subdomains: [latency_jitter_loss, throughput_goodput, microbursts, queue_drops, bufferbloat, qos_classification_marking, policing, shaping, queuing_llq_wfq, congestion_avoidance_wred_ecn, trust_boundaries, application_slas, synthetic_probing, tcp_performance, udp_realtime_performance, bandwidth_delay_product, capacity_planning, oversubscription, elephant_mice_flows, path_mtu_performance, wan_optimization, packet_duplication_fec]
+    - id: network_resilience
+      label: Network Resilience
+      weight: 0.03
+      vendor_groups: [routing_switching, security, cloud, application_delivery]
+      environments: [campus, branch, data_center, hybrid, cloud, multicloud, kubernetes, remote_access, enterprise_wireless, ot, ai_hpc, edge, lab_staging]
+      incident_mechanisms: [physical_degradation, misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, control_plane_failure, data_plane_failure, asymmetric_path, convergence_failure, software_defect, capacity_oversubscription, external_provider_failure, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, routing_tables, config_oper_state, topology_state, multi_source, ticket_runbook, iac_diff_plan, intentionally_missing]
+      subdomains: [ha_pairs, hsrp_vrrp, ecmp_redundancy, link_node_site_failure, convergence, graceful_restart_nsf, bfd_failover, stateful_failover, split_brain, route_dampening, maintenance_drain, change_rollback, chaos_failure_injection, config_backup_restore, redundant_power_supervisor, control_plane_quorum, disaster_recovery_connectivity, multi_region_failover, dependency_mapping, network_slo_error_budget]
+    - id: network_observability
+      label: Network Observability
+      weight: 0.06
+      vendor_groups: [automation_observability, routing_switching, cloud]
+      environments: [campus, branch, data_center, hybrid, cloud, multicloud, kubernetes, remote_access, enterprise_wireless, ot, ai_hpc, edge, lab_staging]
+      incident_mechanisms: [misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, control_plane_failure, software_defect, capacity_oversubscription, external_provider_failure, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, routing_tables, config_oper_state, topology_state, multi_source, ticket_runbook, iac_diff_plan, intentionally_missing]
+      subdomains: [snmp, streaming_telemetry, gnmi_telemetry, syslog, netflow_sflow_ipfix, packet_capture, span_tap, synthetic_tests, traceroute_path_analysis, twamp, log_event_correlation, lldp_cdp_topology, config_state_diff, baseline_anomaly, alert_tuning, event_deduplication, time_sync, network_dashboards, network_slo, digital_experience, wireless_telemetry, cloud_flow_logs, ebpf_network_observability, telemetry_data_quality, multi_source_evidence_correlation]
+    - id: network_automation
+      label: Network Automation
+      weight: 0.05
+      vendor_groups: [automation_observability, routing_switching, open_networking, cloud]
+      environments: [campus, branch, data_center, hybrid, cloud, multicloud, kubernetes, remote_access, enterprise_wireless, ot, ai_hpc, edge, lab_staging]
+      incident_mechanisms: [misconfiguration, configuration_drift, resource_exhaustion, policy_conflict, dependency_failure, control_plane_failure, software_defect, certificate_identity_failure, external_provider_failure, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, config_oper_state, topology_state, multi_source, ticket_runbook, iac_diff_plan, intentionally_missing]
+      subdomains: [ansible, terraform, nornir_netmiko_napalm, python_api, netconf_restconf_gnmi, yang_models, network_gitops, network_cicd, netbox_nautobot_source_of_truth, intent_validation, prechecks_postchecks, dry_run_diff, config_templates, idempotency, transactional_change, config_backup_rollback, secrets_management, rbac_approvals, drift_detection, compliance_automation, ztp, inventory_automation, batfish_containerlab_pyats, workflow_orchestration, automation_retry_failure, rate_limit_concurrency, machine_readable_evidence]
+    - id: network_lifecycle_governance
+      label: Network Lifecycle and Governance
+      weight: 0.02
+      vendor_groups: [automation_observability, routing_switching, security]
+      environments: [campus, branch, data_center, hybrid, cloud, multicloud, kubernetes, remote_access, enterprise_wireless, ot, ai_hpc, edge, lab_staging]
+      incident_mechanisms: [misconfiguration, configuration_drift, resource_exhaustion, policy_conflict, dependency_failure, software_defect, certificate_identity_failure, capacity_oversubscription, external_provider_failure, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, config_oper_state, topology_state, multi_source, ticket_runbook, iac_diff_plan, intentionally_missing]
+      subdomains: [inventory_cmdb, eol_eos, software_firmware_lifecycle, vulnerability_advisories, patch_upgrade, licensing_support, configuration_standards, golden_config, compliance_audit, change_management_cab, maintenance_windows, backup_restore, capacity_forecast, vendor_tac_escalation, rma_spares, documentation_diagrams, asset_ownership, segmentation_policy_governance, certificate_lifecycle, runbook_disaster_readiness]
+    - id: storage_hpc_ai_networking
+      label: Storage HPC and AI Networking
+      weight: 0.02
+      vendor_groups: [ai_hpc, routing_switching, open_networking]
+      environments: [data_center, hybrid, cloud, ai_hpc, edge, lab_staging]
+      incident_mechanisms: [physical_degradation, misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, control_plane_failure, data_plane_failure, asymmetric_path, convergence_failure, software_defect, capacity_oversubscription, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, routing_tables, config_oper_state, topology_state, multi_source, iac_diff_plan, intentionally_missing]
+      subdomains: [iscsi, nvme_tcp, fibre_channel, lossless_ethernet, pfc_ets_dcqcn_ecn, roce_v2, rdma, jumbo_frames, storage_multipathing, storage_vlan_vrf, ai_leaf_spine, gpu_east_west, rail_optimized_fabric, nccl_collectives, infiniband, ai_fabric_latency_loss, adaptive_routing, smartnic_dpu, gpudirect, ai_fabric_telemetry, benchmark_validation, ai_fabric_failure_isolation]
+    - id: ot_iot_networking
+      label: OT and IoT Networking
+      weight: 0.02
+      vendor_groups: [ot, security, routing_switching]
+      environments: [campus, branch, hybrid, enterprise_wireless, ot, edge, lab_staging]
+      incident_mechanisms: [physical_degradation, misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, control_plane_failure, data_plane_failure, software_defect, certificate_identity_failure, capacity_oversubscription, rf_interference, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, config_oper_state, topology_state, multi_source, ticket_runbook, intentionally_missing]
+      subdomains: [purdue_segmentation, it_ot_dmz, modbus, dnp3, profinet, ethernet_ip, bacnet, unmanaged_industrial_switches, deterministic_industrial_traffic, legacy_ot_devices, serial_gateways, ot_nac_profiling, passive_asset_discovery, safety_availability_constraints, remote_vendor_access, industrial_firewalls, iot_onboarding, device_identity_certificates, mqtt, edge_gateways, ptp_time_sync, industrial_redundancy_rings, ot_monitoring, constrained_firmware_change, ot_incident_containment, data_diode_air_gap]
+    - id: enterprise_realtime_networking
+      label: Enterprise Real-Time Networking
+      weight: 0.01
+      vendor_groups: [realtime, routing_switching, application_delivery]
+      environments: [campus, branch, data_center, hybrid, cloud, multicloud, remote_access, enterprise_wireless, edge, lab_staging]
+      incident_mechanisms: [physical_degradation, misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, control_plane_failure, data_plane_failure, asymmetric_path, convergence_failure, software_defect, certificate_identity_failure, capacity_oversubscription, external_provider_failure, observability_gap, multi_fault]
+      evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, routing_tables, config_oper_state, topology_state, multi_source, ticket_runbook, intentionally_missing]
+      subdomains: [voice_vlan, sip_signaling, rtp_media, session_border_controller, call_routing, dial_plans, voice_video_qos, jitter_loss_mos, enterprise_conferencing, teams_webex_zoom_media_paths, contact_center_networking, multicast_video, digital_signage, realtime_nat_traversal, emergency_calling, call_recording_compliance, webrtc, endpoint_registration, codec_transcoding, call_admission_bandwidth, site_survivability]
