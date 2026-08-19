@@ -7,12 +7,14 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use anyhow::{Context, Result, bail};
 use chrono::Local;
-use clap::Parser;
+use clap::{Args as ClapArgs, Parser, Subcommand};
 use futures::stream::{self, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::distributions::WeightedIndex;
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
+
+mod taxonomy;
 
 const DEFAULT_SYSTEM_PROMPT: &str = r#"Write prompts as if a competent on-call asked a question at 2am — Slack, PagerDuty, a war-room thread, or an SSH session. They might be tired or frustrated, but they're competent. They state symptoms, what they already checked, and what they're afraid of. Don't be a child. Don't be a robot. Don't write a formal runbook. Be a human who forgot to be formal.
 Good casual: "zabbix is paging every 30s on the same host, I already restarted the agent, still flapping—mute or real disk?", "canary's eating error budget and CAB's frozen till Monday, rollback or ride it?", "BGP to DR flapped twice, underlay looks fine, overlay SLA class is red"
@@ -265,9 +267,32 @@ fn task_user_message(
     }
 }
 
-#[derive(Parser, Debug, Clone)]
-#[command(name = "taskgen", version, about = "SFT task generator for distillation datasets by empero-org")]
-struct Args {
+#[derive(Parser, Debug)]
+#[command(name = "taskgen", version, about = "SFT task generator for distillation datasets")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    Generate(GenerateArgs),
+    Taxonomy {
+        #[command(subcommand)]
+        command: TaxonomyCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum TaxonomyCommand {
+    Validate {
+        #[arg(long)]
+        taxonomy: PathBuf,
+    },
+}
+
+#[derive(ClapArgs, Debug, Clone)]
+struct GenerateArgs {
     #[arg(long, default_value = "https://api.openai.com/v1")]
     api_base: String,
 
@@ -277,8 +302,17 @@ struct Args {
     #[arg(short, long, default_value = "gpt-4o-mini")]
     model: String,
 
-    #[arg(long)]
+    #[arg(long, conflicts_with = "system_prompt_file")]
     system_prompt: Option<String>,
+
+    #[arg(long, conflicts_with = "system_prompt")]
+    system_prompt_file: Option<PathBuf>,
+
+    #[arg(long)]
+    taxonomy: Option<PathBuf>,
+
+    #[arg(long)]
+    seed: Option<u64>,
 
     #[arg(short, long, default_value_t = 250)]
     count: usize,
@@ -1128,7 +1162,7 @@ fn share(count: usize, total: usize) -> f64 {
 }
 
 fn generate_readme(
-    args: &Args,
+    args: &GenerateArgs,
     stats: &RunStats,
     dist: &HashMap<String, f64>,
     diff_dist: &HashMap<u8, f64>,
@@ -1286,7 +1320,26 @@ fn generate_readme(
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = Args::parse();
+    let cli = Cli::parse();
+    match cli.command {
+        Command::Generate(args) => run_generate(args).await,
+        Command::Taxonomy {
+            command: TaxonomyCommand::Validate { taxonomy },
+        } => {
+            let catalog = taxonomy::TaxonomyCatalog::from_path(&taxonomy)?;
+            println!(
+                "valid taxonomy: {} ({:?}, {} domains, {} subdomains)",
+                catalog.id(),
+                catalog.kind(),
+                catalog.domain_count(),
+                catalog.subdomain_count()
+            );
+            Ok(())
+        }
+    }
+}
+
+async fn run_generate(args: GenerateArgs) -> Result<()> {
 
     let api_keys: Arc<Vec<String>> = Arc::new(match &args.keyfile {
         Some(path) => {
@@ -1840,7 +1893,10 @@ mod tests {
 
     #[test]
     fn dataset_readme_lists_subdomains_and_omits_donate() {
-        let args = Args::parse_from(["taskgen", "--api-key", "x"]);
+        let cli = Cli::parse_from(["taskgen", "generate", "--api-key", "x"]);
+        let Command::Generate(args) = cli.command else {
+            panic!("expected generate command");
+        };
         let stats = RunStats {
             total_input_tokens: 10,
             total_output_tokens: 20,
@@ -1862,5 +1918,24 @@ mod tests {
         assert!(md.contains("`eks`"), "{md}");
         assert!(md.contains("| Unique Domains | 2 |"), "{md}");
         assert!(md.contains("| Unique Subdomains | 2 |"), "{md}");
+    }
+
+    #[test]
+    fn parses_taxonomy_validate_subcommand_without_api_key() {
+        let cli = Cli::try_parse_from([
+            "taskgen",
+            "taxonomy",
+            "validate",
+            "--taxonomy",
+            "docs/it-ops-taxonomy.yaml",
+        ])
+        .expect("taxonomy validation command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Command::Taxonomy {
+                command: TaxonomyCommand::Validate { .. }
+            }
+        ));
     }
 }

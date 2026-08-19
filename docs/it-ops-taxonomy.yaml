@@ -14,28 +14,26 @@
 #   catalogue  — Scogo use-case catalogue / scogo.ai, no connector bucket
 #   fill       — ITIL / NIST / Gartner / market gap; needed for full-estate SFT
 
-version: 3
-# Default mix for Scogo copilot SFT (matches src/main.rs DEFAULT_DISTRIBUTION).
-# Biased toward the desk: tickets, endpoints, identity, workplace.
-# Observe / SASE stay in the mix but are not the volume path. Not CRM/HR/ESM.
-default_distribution:
-  infra: 0.12
-  endpoint: 0.11
-  itsm: 0.10
-  identity: 0.10
-  oem: 0.10
-  workplace: 0.08
-  network: 0.08
-  secops: 0.07
-  observe: 0.06
-  delivery: 0.06
-  data: 0.05
-  agentic: 0.03
-  secure_edge: 0.03
-  enterprise: 0.01
+schema_version: scogo.taskgen.taxonomy.v1
+id: scogo-itops-v3
+kind: hierarchical
+label: Scogo IT Operations
+defaults:
+  difficulty_distribution:
+    1: 0.05
+    2: 0.05
+    3: 0.10
+    4: 0.15
+    5: 0.20
+    6: 0.15
+    7: 0.10
+    8: 0.08
+    9: 0.07
+    10: 0.05
 
 categories:
   - id: itsm
+    weight: 0.10
     label: ITSM & Service Management
     pillar: Gartner ITSM · ITIL service practices
     blurb: System of record for request, incident, problem, change, knowledge, CMDB, SLA.
@@ -82,6 +80,7 @@ categories:
         subdomains: [sla_clock, ola_breach, kpi_drift, report_pack, under_reporting]
 
   - id: workplace
+    weight: 0.08
     label: Digital Workplace
     pillar: Employee-facing collab, email, content, voice, DEX
     blurb: How work happens in browser/SaaS. Highest L1 volume after the desk.
@@ -119,6 +118,7 @@ categories:
         subdomains: [login_slowness, saas_apdex, rum_error, last_mile, crash_free]
 
   - id: endpoint
+    weight: 0.11
     label: Endpoint & Device
     pillar: RMM · UEM/MDM · VDI · fleet health
     blurb: Device as the control plane. Scogo RMM is 1 connector; UEM/VDI still generate most of the work.
@@ -140,6 +140,7 @@ categories:
         subdomains: [health_score, disk_pressure, encryption_bitlocker, edr_presence, baseline_drift, service_failures]
 
   - id: identity
+    weight: 0.10
     label: Identity & Access
     pillar: IAM · PAM · IGA · directory
     blurb: Identity is the new perimeter. Screenshot has IAM only; PAM/IGA are distinct failure modes.
@@ -161,6 +162,7 @@ categories:
         subdomains: [ad_replication, fsmo, gpo_drift, aad_connect, ldap_bind, dns_srv]
 
   - id: secops
+    weight: 0.07
     label: Security Operations
     pillar: NIST Detect/Respond · SIEM SOAR EDR
     blurb: Split the screenshot's three SecOps buckets; add vuln, intel, GRC, forensics.
@@ -197,6 +199,7 @@ categories:
         subdomains: [disk_image, chain_of_custody, timeline, malware_sandbox, legal_hold, memory_capture]
 
   - id: secure_edge
+    weight: 0.03
     label: Secure Access & Data
     pillar: SASE/SSE · CASB · DLP · email/web/WAF
     blurb: CSOH SSE = SWG+CASB+ZTNA+FWaaS+DLP. SASE = SSE+SD-WAN. Keep screenshot names.
@@ -236,6 +239,7 @@ categories:
         subdomains: [saas_posture, third_party_app, oauth_grant, m365_hardening, salesforce_perm]
 
   - id: network
+    weight: 0.08
     label: Network
     pillar: Screenshot Networking* split kept as domains
     blurb: Do not collapse firewall/SD-WAN/wireless — connector counts prove they are operated separately.
@@ -277,6 +281,7 @@ categories:
         subdomains: [dot1x, posture, quarantine_vlan, guest_ssid, eap_cert]
 
   - id: infra
+    weight: 0.12
     label: Infra Cloud Storage
     pillar: Gartner ITOM infrastructure · Scogo Pillar C
     blurb: Storage (29) and Virtualization (28) are the densest connector buckets — keep first-class.
@@ -318,6 +323,7 @@ categories:
         subdomains: [pdu, cooling, rack, generator, environmental, colo]
 
   - id: observe
+    weight: 0.06
     label: Monitoring & Observability
     pillar: Gartner Observability Platforms 2026 · Scogo D13
     blurb: Screenshot Monitoring (28) is infra/NOC. APM/AIOps/DEM are different jobs — do not merge.
@@ -345,6 +351,7 @@ categories:
         subdomains: [tool_fail, hallucination, token_cost, loop, policy_break, eval_regress]
 
   - id: data
+    weight: 0.05
     label: Data Platform
     pillar: Database · analytics · streaming · iPaaS
     blurb: Screenshot Database (21) and Analytics (24) are huge; streaming/iPaaS were missing.
@@ -368,6 +375,7 @@ categories:
         subdomains: [catalog_stale, lineage, quality_rule, pii_tag, retention, mdq]
 
   - id: delivery
+    weight: 0.06
     label: Delivery & Platform Eng
     pillar: Gartner ARO · DevOps (23) · k8s · IaC · ASPM
     blurb: Screenshot has DevOps as one bucket; split runtime (k8s) and supply-chain (ASPM).
@@ -397,6 +405,7 @@ categories:
         subdomains: [batch_abend, racf, cics, capacity, tape, lpar]
 
   - id: enterprise
+    weight: 0.01
     label: Enterprise Systems IT Operates
     pillar: CRM · HR · ERP · supplier — IT owns the integration, not the process
     blurb: Screenshot already has CRM (9) and HR (5). ERP/supplier are the usual next tickets.
@@ -419,6 +428,7 @@ categories:
         subdomains: [vendor_sla, license_trueup, sow, offboarding_vendor, saas_renewal]
 
   - id: agentic
+    weight: 0.03
     label: Agentic Platform
     pillar: Scogo-specific — unique distillation signal
     blurb: How SIA actually acts. Not in the connector list; required so the model learns guardrails not just tools.
@@ -440,6 +450,7 @@ categories:
         subdomains: [saas_india, byoc, on_prem, airgap, rmm_agent, browser_intel]
 
   - id: oem
+    weight: 0.10
     label: OEM / ISV / Platform
     pillar: Vendor-first axis — complementary to capability categories
     blurb: Product the operator is staring at. Named vendors for specialist portfolios; buckets for long-tail brands. Kubernetes and Linux distros count as platforms.
