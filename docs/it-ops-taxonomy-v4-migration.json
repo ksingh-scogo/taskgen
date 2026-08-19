@@ -1,0 +1,17 @@
+{
+  "source_taxonomy": "scogo-itops-v3",
+  "target_taxonomy": "scogo-itops-v4",
+  "source_counts": {
+    "categories": 14,
+    "domains": 129,
+    "subdomains": 884
+  },
+  "target_counts": {
+    "categories": 14,
+    "domains": 129,
+    "subdomains": 884
+  },
+  "missing_domains": [],
+  "missing_subdomains": [],
+  "duplicate_target_ids": []
+}

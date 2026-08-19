@@ -228,9 +228,10 @@
           "incident_mechanism": "misconfiguration",
           "presentation": "war_room",
           "task_family": "troubleshooting_rca",
-          "taxonomy_id": "scogo-enterprise-netops-v1",
-          "vendor_scope": "multi_vendor",
-          "vendors": [
+          "taxonomy_id": "scogo-enterprise-netops-v2",
+          "category_id": "enterprise_netops",
+          "platform_scope": "multi_platform",
+          "platforms": [
             "cisco_ios_xe",
             "juniper_junos"
           ]
@@ -240,7 +241,7 @@
         "prompt_id": "prompt-bgp-001",
         "prompt_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
         "split_group_id": "bgp-route-leak-family-001",
-        "taxonomy_id": "scogo-enterprise-netops-v1"
+        "taxonomy_id": "scogo-enterprise-netops-v2"
       },
       "tools": [
         {

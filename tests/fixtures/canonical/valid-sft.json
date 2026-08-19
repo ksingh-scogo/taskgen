@@ -54,7 +54,7 @@
     }
   ],
   "metadata": {
-    "taxonomy_id": "scogo-enterprise-netops-v1",
+    "taxonomy_id": "scogo-enterprise-netops-v2",
     "domain": "layer3_routing",
     "subdomain": "bgp_route_leak",
     "task_family": "troubleshooting_rca",

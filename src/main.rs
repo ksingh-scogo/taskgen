@@ -33,10 +33,6 @@ For difficulty 6+: Include genuine constraint conflicts—error budget, approval
 Skip boilerplate. Don't include commands, code blocks, or versions unless the operator would realistically paste them. "postgres is lagging" is better than "PostgreSQL 15.4 on Ubuntu 22.04 with Patroni." But "pg 15 replica lag hit 40s after the vacuum, WAL keep is 2GB" is fine if it's real context.
 Keep it short. Say the problem, not the life story. Output only the prompt itself. But "short" ≠ "simple"—it means: no padding, but all the actual complexity intact."#;
 
-const OEM_SYSTEM_ADDENDUM: &str = r#"
-
-When the domain is a vendor, ISV, or platform, the subdomain is a product line — not a generic failure mode. Write as an operator of THAT product. Use real SKU, firmware, CLI, console, TAC, and license language an operator would actually type in Slack. Do not write a generic capability ticket (no "firewall HA" if the product is FortiGate). Kubernetes and Linux distros count as platforms. Product names and versions are in play when an operator would mention them."#;
-
 const LANGUAGES: &[(&str, &str)] = &[
     ("en", "English"),
     ("de", "German"),
@@ -84,21 +80,22 @@ fn language_instruction(language: Option<&str>) -> String {
 fn task_user_message(sample: &taxonomy::SampledTask, language: Option<&str>) -> String {
     let lang_instruction = language_instruction(language);
     if let Some(coordinates) = &sample.coordinates {
-        let vendors = if coordinates.vendors.is_empty() {
-            "none; stay vendor-neutral".to_string()
+        let platforms = if coordinates.platforms.is_empty() {
+            "none; stay platform-neutral".to_string()
         } else {
-            coordinates.vendors.join(", ")
+            coordinates.platforms.join(", ")
         };
         format!(
-            "Generate one task prompt using all of these mandatory constraints:\n\nTaxonomy: {}\nDomain: {} ({})\nSubdomain: {}\nTask family: {}\nEnvironment: {}\nVendor scope: {}\nVendors/platforms: {}\nIncident mechanism: {}\nEvidence condition: {}\nEvidence bundle: {}\nAction risk: {}\nPresentation: {}\nDifficulty: {}/10 ({})\n\nMake every coordinate materially affect the scenario. Do not merely list these labels in the generated prompt. Output only the task prompt, nothing else.{}",
+            "Generate one task prompt using all of these mandatory constraints:\n\nTaxonomy: {}\nCategory: {}\nDomain: {} ({})\nSubdomain: {}\nTask family: {}\nEnvironment: {}\nPlatform scope: {}\nPlatforms: {}\nIncident mechanism: {}\nEvidence condition: {}\nEvidence bundle: {}\nAction risk: {}\nPresentation: {}\nDifficulty: {}/10 ({})\n\nMake every coordinate materially affect the scenario. Do not merely list these labels in the generated prompt. Output only the task prompt, nothing else.{}",
             sample.taxonomy_id,
+            sample.category_id,
             sample.domain_id,
             sample.domain_label,
             sample.subdomain_id,
             coordinates.task_family,
             coordinates.environment,
-            coordinates.vendor_scope,
-            vendors,
+            coordinates.platform_scope,
+            platforms,
             coordinates.incident_mechanism,
             coordinates.evidence_condition,
             coordinates.evidence_bundle,
@@ -293,6 +290,7 @@ struct TaskEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     schema_version: Option<String>,
     prompt: String,
+    category: String,
     domain: String,
     subdomain: String,
     difficulty: u8,
@@ -306,8 +304,8 @@ struct TaskEntry {
 
 fn serialize_task_entry(entry: &TaskEntry) -> Result<String> {
     let value = serde_json::to_value(entry)?;
-    if entry.schema_version.as_deref() == Some("scogo.netops.task.v1") {
-        schema::validate_instance(schema::SchemaKind::NetOpsTask, &value)?;
+    if entry.schema_version.as_deref() == Some("scogo.taskgen.task.v2") {
+        schema::validate_instance(schema::SchemaKind::Task, &value)?;
     }
     serde_json::to_string(&value).map_err(Into::into)
 }
@@ -1158,11 +1156,7 @@ async fn generate_task(
         progress,
     } = request;
     let user_msg = model_user_message(model, &task_user_message(sample, language));
-    let system = if sample.coordinates.is_none() && sample.category_id == "oem" {
-        format!("{system_prompt}{OEM_SYSTEM_ADDENDUM}")
-    } else {
-        system_prompt.to_string()
-    };
+    let system = system_prompt.to_string();
 
     let body = chat_request(
         model,
@@ -1839,13 +1833,10 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                             return;
                         }
                         let entry = TaskEntry {
-                            schema_version: sample.coordinates.as_ref().map(|_| "scogo.netops.task.v1".to_string()),
+                            schema_version: Some("scogo.taskgen.task.v2".to_string()),
                             prompt,
-                            domain: if sample.coordinates.is_some() {
-                                format!("enterprise_netops::{}", sample.domain_id)
-                            } else {
-                                format!("{}::{}", sample.category_id, sample.domain_label)
-                            },
+                            category: sample.category_id.clone(),
+                            domain: sample.domain_id.clone(),
                             subdomain: sample.subdomain_id.clone(),
                             difficulty: sample.difficulty,
                             coordinates: sample.coordinates.clone(),
@@ -2551,10 +2542,11 @@ mod tests {
             difficulty: 8,
             coordinates: Some(taxonomy::TaskCoordinates {
                 taxonomy_id: "scogo-enterprise-netops-v1".into(),
+                category_id: "enterprise_netops".into(),
                 task_family: "troubleshooting_rca".into(),
                 environment: "hybrid".into(),
-                vendor_scope: "multi_vendor".into(),
-                vendors: vec!["cisco_ios_xe".into(), "juniper_junos".into()],
+                platform_scope: "multi_platform".into(),
+                platforms: vec!["cisco_ios_xe".into(), "juniper_junos".into()],
                 incident_mechanism: "misconfiguration".into(),
                 evidence_condition: "contradictory".into(),
                 evidence_bundle: "routing_tables".into(),
@@ -2569,7 +2561,7 @@ mod tests {
             "bgp_route_leak",
             "troubleshooting_rca",
             "hybrid",
-            "multi_vendor",
+            "multi_platform",
             "cisco_ios_xe",
             "juniper_junos",
             "misconfiguration",
@@ -2588,17 +2580,19 @@ mod tests {
     #[test]
     fn netops_task_record_serializes_schema_and_coordinates() {
         let entry = TaskEntry {
-            schema_version: Some("scogo.netops.task.v1".into()),
+            schema_version: Some("scogo.taskgen.task.v2".into()),
             prompt: "Investigate the route leak safely.".into(),
-            domain: "enterprise_netops::layer3_routing".into(),
+            category: "enterprise_netops".into(),
+            domain: "layer3_routing".into(),
             subdomain: "bgp_route_leak".into(),
             difficulty: 8,
             coordinates: Some(taxonomy::TaskCoordinates {
-                taxonomy_id: "scogo-enterprise-netops-v1".into(),
+                taxonomy_id: "scogo-enterprise-netops-v2".into(),
+                category_id: "enterprise_netops".into(),
                 task_family: "troubleshooting_rca".into(),
                 environment: "hybrid".into(),
-                vendor_scope: "multi_vendor".into(),
-                vendors: vec!["cisco_ios_xe".into(), "juniper_junos".into()],
+                platform_scope: "multi_platform".into(),
+                platforms: vec!["cisco_ios_xe".into(), "juniper_junos".into()],
                 incident_mechanism: "misconfiguration".into(),
                 evidence_condition: "contradictory".into(),
                 evidence_bundle: "routing_tables".into(),
@@ -2611,8 +2605,9 @@ mod tests {
         };
 
         let value = serde_json::to_value(&entry).unwrap();
-        assert_eq!(value["schema_version"], "scogo.netops.task.v1");
-        assert_eq!(value["domain"], "enterprise_netops::layer3_routing");
+        assert_eq!(value["schema_version"], "scogo.taskgen.task.v2");
+        assert_eq!(value["category"], "enterprise_netops");
+        assert_eq!(value["domain"], "layer3_routing");
         assert_eq!(value["subdomain"], "bgp_route_leak");
         assert_eq!(
             value["coordinates"]["action_risk"],
@@ -2624,9 +2619,10 @@ mod tests {
     #[test]
     fn netops_task_record_requires_coordinates_before_write() {
         let entry = TaskEntry {
-            schema_version: Some("scogo.netops.task.v1".into()),
+            schema_version: Some("scogo.taskgen.task.v2".into()),
             prompt: "Investigate safely.".into(),
-            domain: "enterprise_netops::layer3_routing".into(),
+            category: "enterprise_netops".into(),
+            domain: "layer3_routing".into(),
             subdomain: "bgp_route_leak".into(),
             difficulty: 8,
             coordinates: None,

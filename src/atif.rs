@@ -523,10 +523,11 @@ pub fn import_trajectory(trajectory: &AtifTrajectory) -> Result<Value> {
             "taxonomy_id": "external_atif_unverified",
             "coordinates": {
                 "taxonomy_id": "external_atif_unverified",
+                "category_id": "external_atif_unverified",
                 "task_family": "external_atif_unverified",
                 "environment": "external_atif_unverified",
-                "vendor_scope": "external_atif_unverified",
-                "vendors": [],
+                "platform_scope": "platform_neutral",
+                "platforms": [],
                 "incident_mechanism": "external_atif_unverified",
                 "evidence_condition": "external_atif_unverified",
                 "evidence_bundle": "external_atif_unverified",
@@ -962,6 +963,18 @@ mod tests {
         assert_eq!(imported["trajectory_id"], audit["trajectory_id"]);
         assert_eq!(imported["approval"], audit["approval"]);
         assert_eq!(imported["verification"], audit["verification"]);
+        assert_eq!(
+            imported["task"]["coordinates"]["category_id"],
+            "enterprise_netops"
+        );
+        assert_eq!(
+            imported["task"]["coordinates"]["platform_scope"],
+            "multi_platform"
+        );
+        assert_eq!(
+            imported["task"]["coordinates"]["platforms"],
+            json!(["cisco_ios_xe", "juniper_junos"])
+        );
     }
 
     #[test]

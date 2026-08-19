@@ -3,14 +3,14 @@ use serde_json::Value;
 
 #[derive(Debug, Clone, Copy)]
 pub enum SchemaKind {
-    NetOpsTask,
+    Task,
     AuditTrajectory,
     SftTrajectory,
 }
 
 fn schema_source(kind: SchemaKind) -> &'static str {
     match kind {
-        SchemaKind::NetOpsTask => include_str!("../schemas/netops-task-v1.schema.json"),
+        SchemaKind::Task => include_str!("../schemas/task-v2.schema.json"),
         SchemaKind::AuditTrajectory => {
             include_str!("../schemas/netops-teacher-trajectory-audit-v1.schema.json")
         }
@@ -42,7 +42,7 @@ mod tests {
     fn schemas_are_valid_draft_2020_12_and_accept_fixtures() {
         let cases = [
             (
-                SchemaKind::NetOpsTask,
+                SchemaKind::Task,
                 include_str!("../tests/fixtures/canonical/valid-task.json"),
             ),
             (
@@ -66,12 +66,24 @@ mod tests {
     fn schemas_reject_missing_coordinates_and_hidden_sft_fields() {
         let mut task = fixture(include_str!("../tests/fixtures/canonical/valid-task.json"));
         task.as_object_mut().unwrap().remove("coordinates");
-        assert!(validate_instance(SchemaKind::NetOpsTask, &task).is_err());
+        assert!(validate_instance(SchemaKind::Task, &task).is_err());
 
         let mut sft = fixture(include_str!("../tests/fixtures/canonical/valid-sft.json"));
         sft.as_object_mut()
             .unwrap()
             .insert("grader_output".into(), serde_json::json!({"reward": 1}));
         assert!(validate_instance(SchemaKind::SftTrajectory, &sft).is_err());
+    }
+
+    #[test]
+    fn universal_task_schema_rejects_v1_vendor_coordinate_names() {
+        let mut task = fixture(include_str!("../tests/fixtures/canonical/valid-task.json"));
+        let coordinates = task["coordinates"].as_object_mut().unwrap();
+        coordinates.insert("vendor_scope".into(), serde_json::json!("multi_vendor"));
+        coordinates.insert(
+            "vendors".into(),
+            serde_json::json!(["cisco_ios_xe", "juniper_junos"]),
+        );
+        assert!(validate_instance(SchemaKind::Task, &task).is_err());
     }
 }

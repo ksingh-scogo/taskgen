@@ -105,7 +105,7 @@
         "split_group_id"
       ],
       "properties": {
-        "taxonomy_id": { "const": "scogo-enterprise-netops-v1" },
+        "taxonomy_id": { "const": "scogo-enterprise-netops-v2" },
         "domain": { "$ref": "#/$defs/nonempty" },
         "subdomain": { "$ref": "#/$defs/nonempty" },
         "task_family": { "$ref": "#/$defs/nonempty" },

@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scogo.ai/schemas/taskgen-task-v2.schema.json",
+  "title": "Scogo Taskgen Prompt Record v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "prompt",
+    "category",
+    "domain",
+    "subdomain",
+    "difficulty",
+    "coordinates",
+    "taskgen_model",
+    "temperature"
+  ],
+  "properties": {
+    "schema_version": {"const": "scogo.taskgen.task.v2"},
+    "prompt": {"type": "string", "minLength": 1, "maxLength": 20000},
+    "category": {"$ref": "#/$defs/nonempty"},
+    "domain": {"$ref": "#/$defs/nonempty"},
+    "subdomain": {"$ref": "#/$defs/nonempty"},
+    "difficulty": {"type": "integer", "minimum": 1, "maximum": 10},
+    "coordinates": {"$ref": "#/$defs/coordinates"},
+    "language": {"type": "string", "minLength": 2, "maxLength": 16},
+    "taskgen_model": {"$ref": "#/$defs/nonempty"},
+    "temperature": {"type": "number", "minimum": 0}
+  },
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1},
+    "coordinates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "taxonomy_id",
+        "category_id",
+        "task_family",
+        "environment",
+        "platform_scope",
+        "platforms",
+        "incident_mechanism",
+        "evidence_condition",
+        "evidence_bundle",
+        "action_risk",
+        "presentation"
+      ],
+      "properties": {
+        "taxonomy_id": {"$ref": "#/$defs/nonempty"},
+        "category_id": {"$ref": "#/$defs/nonempty"},
+        "task_family": {"$ref": "#/$defs/nonempty"},
+        "environment": {"$ref": "#/$defs/nonempty"},
+        "platform_scope": {
+          "enum": ["platform_neutral", "single_platform", "multi_platform"]
+        },
+        "platforms": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/nonempty"}
+        },
+        "incident_mechanism": {"$ref": "#/$defs/nonempty"},
+        "evidence_condition": {"$ref": "#/$defs/nonempty"},
+        "evidence_bundle": {"$ref": "#/$defs/nonempty"},
+        "action_risk": {"$ref": "#/$defs/nonempty"},
+        "presentation": {"$ref": "#/$defs/nonempty"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"platform_scope": {"const": "platform_neutral"}}},
+          "then": {"properties": {"platforms": {"maxItems": 0}}}
+        },
+        {
+          "if": {"properties": {"platform_scope": {"const": "single_platform"}}},
+          "then": {"properties": {"platforms": {"minItems": 1, "maxItems": 1}}}
+        },
+        {
+          "if": {"properties": {"platform_scope": {"const": "multi_platform"}}},
+          "then": {"properties": {"platforms": {"minItems": 2, "maxItems": 2}}}
+        }
+      ]
+    }
+  }
+}

@@ -7,7 +7,7 @@ use rand::Rng;
 use rand::distributions::{Distribution, WeightedIndex};
 use serde::{Deserialize, Serialize};
 
-const SCHEMA_VERSION: &str = "scogo.taskgen.taxonomy.v1";
+const SCHEMA_VERSION: &str = "scogo.taskgen.taxonomy.v2";
 const WEIGHT_TOLERANCE: f64 = 0.000_001;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,10 +19,11 @@ pub enum TaxonomyKind {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TaskCoordinates {
     pub taxonomy_id: String,
+    pub category_id: String,
     pub task_family: String,
     pub environment: String,
-    pub vendor_scope: String,
-    pub vendors: Vec<String>,
+    pub platform_scope: String,
+    pub platforms: Vec<String>,
     pub incident_mechanism: String,
     pub evidence_condition: String,
     pub evidence_bundle: String,
@@ -52,13 +53,14 @@ struct RawTaxonomy {
     #[serde(default)]
     categories: Vec<RawCategory>,
     #[serde(default)]
-    vendor_groups: Vec<RawVendorGroup>,
+    platform_groups: Vec<RawPlatformGroup>,
     axes: Option<RawAxes>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 struct RawDefaults {
     system_prompt_file: Option<PathBuf>,
+    review_system_prompt_file: Option<PathBuf>,
     #[serde(default)]
     difficulty_distribution: HashMap<u8, f64>,
 }
@@ -69,14 +71,46 @@ struct RawCategory {
     label: String,
     weight: f64,
     #[serde(default)]
-    domains: Vec<RawHierarchicalDomain>,
+    eligibility: RawEligibility,
+    #[serde(default)]
+    domains: Vec<RawDomain>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct RawHierarchicalDomain {
-    name: String,
+struct RawDomain {
+    id: String,
+    label: String,
+    weight: Option<f64>,
+    #[serde(default)]
+    eligibility: RawEligibility,
     #[serde(default)]
     subdomains: Vec<RawSubdomain>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct RawEligibility {
+    task_families: Option<Vec<String>>,
+    environments: Option<Vec<String>>,
+    platform_scopes: Option<Vec<String>>,
+    platform_groups: Option<Vec<String>>,
+    incident_mechanisms: Option<Vec<String>>,
+    evidence_conditions: Option<Vec<String>>,
+    evidence_bundles: Option<Vec<String>>,
+    action_risks: Option<Vec<String>>,
+    presentations: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedEligibility {
+    pub task_families: Vec<String>,
+    pub environments: Vec<String>,
+    pub platform_scopes: Vec<String>,
+    pub platform_groups: Vec<String>,
+    pub incident_mechanisms: Vec<String>,
+    pub evidence_conditions: Vec<String>,
+    pub evidence_bundles: Vec<String>,
+    pub action_risks: Vec<String>,
+    pub presentations: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -108,13 +142,11 @@ impl RawSubdomain {
 #[derive(Debug, Clone, Deserialize)]
 struct RawAxes {
     #[serde(default)]
-    domains: Vec<RawCompositionalDomain>,
-    #[serde(default)]
     task_families: Vec<RawWeightedOption>,
     #[serde(default)]
     environments: Vec<RawWeightedOption>,
     #[serde(default)]
-    vendor_scopes: Vec<RawWeightedOption>,
+    platform_scopes: Vec<RawWeightedOption>,
     #[serde(default)]
     incident_mechanisms: Vec<RawWeightedOption>,
     #[serde(default)]
@@ -125,23 +157,6 @@ struct RawAxes {
     action_risks: Vec<RawWeightedOption>,
     #[serde(default)]
     presentations: Vec<RawWeightedOption>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct RawCompositionalDomain {
-    id: String,
-    label: String,
-    weight: f64,
-    #[serde(default)]
-    vendor_groups: Vec<String>,
-    #[serde(default)]
-    environments: Vec<String>,
-    #[serde(default)]
-    incident_mechanisms: Vec<String>,
-    #[serde(default)]
-    evidence_bundles: Vec<String>,
-    #[serde(default)]
-    subdomains: Vec<RawSubdomain>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -159,15 +174,15 @@ struct RawWeightedOption {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct RawVendorGroup {
+struct RawPlatformGroup {
     id: String,
     weight: f64,
     #[serde(default)]
-    vendors: Vec<RawVendor>,
+    platforms: Vec<RawPlatform>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct RawVendor {
+struct RawPlatform {
     id: String,
     #[serde(default)]
     label: String,
@@ -187,11 +202,23 @@ pub struct TaxonomyCatalog {
 
 impl TaxonomyCatalog {
     pub fn from_yaml(source: &str, source_path: Option<&Path>) -> Result<Self> {
+        let header: serde_yaml_ng::Value =
+            serde_yaml_ng::from_str(source).context("invalid taxonomy YAML")?;
+        let schema_version = header
+            .get("schema_version")
+            .and_then(serde_yaml_ng::Value::as_str)
+            .unwrap_or("<missing>");
+        if schema_version != SCHEMA_VERSION {
+            bail!(
+                "unsupported taxonomy schema '{schema_version}'; expected {SCHEMA_VERSION}"
+            );
+        }
         let raw: RawTaxonomy = serde_yaml_ng::from_str(source).context("invalid taxonomy YAML")?;
         let kind = match raw.kind.as_str() {
-            "hierarchical" => TaxonomyKind::Hierarchical,
             "compositional" => TaxonomyKind::Compositional,
-            other => bail!("unsupported taxonomy kind '{other}'"),
+            other => bail!(
+                "unsupported taxonomy kind '{other}'; {SCHEMA_VERSION} requires 'compositional'"
+            ),
         };
         let catalog = Self {
             source_path: source_path.map(Path::to_path_buf),
@@ -226,15 +253,17 @@ impl TaxonomyCatalog {
         }
         validate_difficulty(&self.raw.defaults.difficulty_distribution)?;
 
-        match self.kind {
-            TaxonomyKind::Hierarchical => self.validate_hierarchical(),
-            TaxonomyKind::Compositional => self.validate_compositional(),
-        }
+        self.validate_compositional()
     }
 
-    fn validate_hierarchical(&self) -> Result<()> {
+    fn validate_compositional(&self) -> Result<()> {
+        let axes = self
+            .raw
+            .axes
+            .as_ref()
+            .context("compositional taxonomy requires axes")?;
         if self.raw.categories.is_empty() {
-            bail!("hierarchical taxonomy requires categories");
+            bail!("compositional taxonomy requires categories");
         }
         validate_unique_ids(
             "category",
@@ -247,58 +276,10 @@ impl TaxonomyCatalog {
                 .iter()
                 .map(|item| (item.id.as_str(), item.weight)),
         )?;
-        for category in &self.raw.categories {
-            if category.label.trim().is_empty() {
-                bail!("category '{}' label must not be empty", category.id);
-            }
-            if category.domains.is_empty() {
-                bail!(
-                    "category '{}' must contain at least one domain",
-                    category.id
-                );
-            }
-            validate_unique_ids(
-                &format!("domain in category '{}'", category.id),
-                category.domains.iter().map(|item| item.name.as_str()),
-            )?;
-            for domain in &category.domains {
-                if domain.subdomains.is_empty() {
-                    bail!(
-                        "domain '{}' in category '{}' must contain at least one subdomain",
-                        domain.name,
-                        category.id
-                    );
-                }
-                validate_subdomains(&category.id, &domain.name, &domain.subdomains)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_compositional(&self) -> Result<()> {
-        if !self.raw.categories.is_empty() {
-            bail!("compositional taxonomy must not define categories");
-        }
-        let axes = self
-            .raw
-            .axes
-            .as_ref()
-            .context("compositional taxonomy requires axes")?;
-        if axes.domains.is_empty() {
-            bail!("compositional taxonomy requires axes.domains");
-        }
-        validate_unique_ids("domain", axes.domains.iter().map(|item| item.id.as_str()))?;
-        validate_complete_weights(
-            "domain distribution",
-            axes.domains
-                .iter()
-                .map(|item| (item.id.as_str(), item.weight)),
-        )?;
-
         let option_axes = [
             ("task_families", &axes.task_families),
             ("environments", &axes.environments),
-            ("vendor_scopes", &axes.vendor_scopes),
+            ("platform_scopes", &axes.platform_scopes),
             ("incident_mechanisms", &axes.incident_mechanisms),
             ("evidence_conditions", &axes.evidence_conditions),
             ("evidence_bundles", &axes.evidence_bundles),
@@ -309,94 +290,197 @@ impl TaxonomyCatalog {
             validate_options(name, options)?;
         }
         validate_unique_ids(
-            "vendor group",
-            self.raw.vendor_groups.iter().map(|item| item.id.as_str()),
+            "platform group",
+            self.raw.platform_groups.iter().map(|item| item.id.as_str()),
         )?;
-        for group in &self.raw.vendor_groups {
+        if self.raw.platform_groups.is_empty() {
+            bail!("compositional taxonomy requires platform_groups");
+        }
+        for group in &self.raw.platform_groups {
             validate_finite_weight(
-                &format!("vendor group '{}': weight", group.id),
+                &format!("platform group '{}': weight", group.id),
                 group.weight,
             )?;
-            if group.vendors.is_empty() {
-                bail!("vendor group '{}' must contain vendors", group.id);
+            if group.platforms.is_empty() {
+                bail!("platform group '{}' must contain platforms", group.id);
             }
             validate_unique_ids(
-                &format!("vendor in group '{}'", group.id),
-                group.vendors.iter().map(|item| item.id.as_str()),
+                &format!("platform in group '{}'", group.id),
+                group.platforms.iter().map(|item| item.id.as_str()),
             )?;
-            for vendor in &group.vendors {
-                if vendor.label.trim().is_empty() {
+            for platform in &group.platforms {
+                if platform.label.trim().is_empty() {
                     bail!(
-                        "vendor '{}' in group '{}' label must not be empty",
-                        vendor.id,
+                        "platform '{}' in group '{}' label must not be empty",
+                        platform.id,
                         group.id
                     );
                 }
             }
             validate_complete_weights(
-                &format!("vendor distribution in group '{}'", group.id),
+                &format!("platform distribution in group '{}'", group.id),
                 group
-                    .vendors
+                    .platforms
                     .iter()
                     .map(|item| (item.id.as_str(), item.weight)),
             )?;
         }
 
-        let environment_ids = enabled_ids(&axes.environments);
-        let mechanism_ids = enabled_ids(&axes.incident_mechanisms);
-        let evidence_ids = enabled_ids(&axes.evidence_bundles);
-        let vendor_group_ids: HashSet<&str> = self
-            .raw
-            .vendor_groups
+        for category in &self.raw.categories {
+            self.validate_category(category)?;
+        }
+        Ok(())
+    }
+
+    fn validate_category(&self, category: &RawCategory) -> Result<()> {
+        validate_nonempty_id("category", &category.id)?;
+        if category.label.trim().is_empty() {
+            bail!("category '{}' label must not be empty", category.id);
+        }
+        if category.domains.is_empty() {
+            bail!("category '{}' must contain at least one domain", category.id);
+        }
+        validate_unique_ids(
+            &format!("domain in category '{}'", category.id),
+            category.domains.iter().map(|domain| domain.id.as_str()),
+        )?;
+        let weighted = category
+            .domains
             .iter()
-            .map(|item| item.id.as_str())
-            .collect();
-        for domain in &axes.domains {
-            validate_nonempty_id("domain", &domain.id)?;
+            .filter(|domain| domain.weight.is_some())
+            .count();
+        if weighted != 0 && weighted != category.domains.len() {
+            bail!(
+                "category '{}' cannot mix weighted and unweighted domains",
+                category.id
+            );
+        }
+        if weighted == category.domains.len() {
+            validate_complete_weights(
+                &format!("domain distribution in category '{}'", category.id),
+                category
+                    .domains
+                    .iter()
+                    .map(|domain| (domain.id.as_str(), domain.weight.unwrap_or_default())),
+            )?;
+        }
+        for domain in &category.domains {
             if domain.label.trim().is_empty() {
                 bail!("domain '{}' label must not be empty", domain.id);
             }
-            validate_subdomains(&domain.id, &domain.label, &domain.subdomains)?;
-            validate_references(
-                &format!("domain '{}'.environments", domain.id),
-                &domain.environments,
-                &environment_ids,
-            )?;
-            validate_references(
-                &format!("domain '{}'.incident_mechanisms", domain.id),
-                &domain.incident_mechanisms,
-                &mechanism_ids,
-            )?;
-            validate_references(
-                &format!("domain '{}'.evidence_bundles", domain.id),
-                &domain.evidence_bundles,
-                &evidence_ids,
-            )?;
-            validate_references(
-                &format!("domain '{}'.vendor_groups", domain.id),
-                &domain.vendor_groups,
-                &vendor_group_ids,
-            )?;
-            if domain.environments.is_empty()
-                || domain.incident_mechanisms.is_empty()
-                || domain.evidence_bundles.is_empty()
-                || domain.vendor_groups.is_empty()
-            {
-                bail!("domain '{}' has an empty required allow-list", domain.id);
-            }
-            let distinct_vendors: HashSet<&str> = self
-                .raw
-                .vendor_groups
-                .iter()
-                .filter(|group| domain.vendor_groups.contains(&group.id))
-                .flat_map(|group| group.vendors.iter().map(|vendor| vendor.id.as_str()))
-                .collect();
-            if distinct_vendors.len() < 2 {
-                bail!(
-                    "domain '{}' needs at least two distinct eligible vendors for multi_vendor sampling",
-                    domain.id
-                );
-            }
+            validate_subdomains(&category.id, &domain.id, &domain.subdomains)?;
+            let resolved = self.resolve_eligibility(category, domain)?;
+            self.validate_platform_capacity(category, domain, &resolved)?;
+        }
+        Ok(())
+    }
+
+    fn resolve_eligibility(
+        &self,
+        category: &RawCategory,
+        domain: &RawDomain,
+    ) -> Result<ResolvedEligibility> {
+        let axes = self.raw.axes.as_ref().context("missing compositional axes")?;
+        let platform_groups: Vec<String> = self
+            .raw
+            .platform_groups
+            .iter()
+            .map(|group| group.id.clone())
+            .collect();
+        Ok(ResolvedEligibility {
+            task_families: resolve_axis(
+                "task_families",
+                domain.eligibility.task_families.as_ref(),
+                category.eligibility.task_families.as_ref(),
+                &enabled_owned_ids(&axes.task_families),
+            )?,
+            environments: resolve_axis(
+                "environments",
+                domain.eligibility.environments.as_ref(),
+                category.eligibility.environments.as_ref(),
+                &enabled_owned_ids(&axes.environments),
+            )?,
+            platform_scopes: resolve_axis(
+                "platform_scopes",
+                domain.eligibility.platform_scopes.as_ref(),
+                category.eligibility.platform_scopes.as_ref(),
+                &enabled_owned_ids(&axes.platform_scopes),
+            )?,
+            platform_groups: resolve_axis(
+                "platform_groups",
+                domain.eligibility.platform_groups.as_ref(),
+                category.eligibility.platform_groups.as_ref(),
+                &platform_groups,
+            )?,
+            incident_mechanisms: resolve_axis(
+                "incident_mechanisms",
+                domain.eligibility.incident_mechanisms.as_ref(),
+                category.eligibility.incident_mechanisms.as_ref(),
+                &enabled_owned_ids(&axes.incident_mechanisms),
+            )?,
+            evidence_conditions: resolve_axis(
+                "evidence_conditions",
+                domain.eligibility.evidence_conditions.as_ref(),
+                category.eligibility.evidence_conditions.as_ref(),
+                &enabled_owned_ids(&axes.evidence_conditions),
+            )?,
+            evidence_bundles: resolve_axis(
+                "evidence_bundles",
+                domain.eligibility.evidence_bundles.as_ref(),
+                category.eligibility.evidence_bundles.as_ref(),
+                &enabled_owned_ids(&axes.evidence_bundles),
+            )?,
+            action_risks: resolve_axis(
+                "action_risks",
+                domain.eligibility.action_risks.as_ref(),
+                category.eligibility.action_risks.as_ref(),
+                &enabled_owned_ids(&axes.action_risks),
+            )?,
+            presentations: resolve_axis(
+                "presentations",
+                domain.eligibility.presentations.as_ref(),
+                category.eligibility.presentations.as_ref(),
+                &enabled_owned_ids(&axes.presentations),
+            )?,
+        })
+    }
+
+    fn validate_platform_capacity(
+        &self,
+        category: &RawCategory,
+        domain: &RawDomain,
+        eligibility: &ResolvedEligibility,
+    ) -> Result<()> {
+        let distinct: HashSet<&str> = self
+            .raw
+            .platform_groups
+            .iter()
+            .filter(|group| eligibility.platform_groups.contains(&group.id))
+            .flat_map(|group| group.platforms.iter().map(|platform| platform.id.as_str()))
+            .collect();
+        if eligibility
+            .platform_scopes
+            .iter()
+            .any(|scope| scope == "single_platform")
+            && distinct.is_empty()
+        {
+            bail!(
+                "domain '{}/{}' cannot satisfy platform scope 'single_platform'",
+                category.id,
+                domain.id
+            );
+        }
+        if eligibility
+            .platform_scopes
+            .iter()
+            .any(|scope| scope == "multi_platform")
+            && distinct.len() < 2
+        {
+            bail!(
+                "domain '{}/{}' cannot satisfy platform scope 'multi_platform'",
+                category.id,
+                domain.id
+            );
         }
         Ok(())
     }
@@ -410,53 +494,39 @@ impl TaxonomyCatalog {
     }
 
     pub fn default_system_prompt_path(&self) -> Option<PathBuf> {
-        let configured = self.raw.defaults.system_prompt_file.as_ref()?;
+        self.resolve_prompt_path(self.raw.defaults.system_prompt_file.as_ref()?)
+    }
+
+    pub fn default_review_system_prompt_path(&self) -> Option<PathBuf> {
+        self.resolve_prompt_path(self.raw.defaults.review_system_prompt_file.as_ref()?)
+    }
+
+    fn resolve_prompt_path(&self, configured: &Path) -> Option<PathBuf> {
         if configured.is_absolute() {
-            return Some(configured.clone());
+            return Some(configured.to_path_buf());
         }
-        match self.source_path.as_deref().and_then(Path::parent) {
-            Some(parent) => Some(parent.join(configured)),
-            None => Some(configured.clone()),
-        }
+        Some(
+            self.source_path
+                .as_deref()
+                .and_then(Path::parent)
+                .map_or_else(|| configured.to_path_buf(), |parent| parent.join(configured)),
+        )
     }
 
     pub fn available_distribution_ids(&self) -> Vec<&str> {
-        match self.kind {
-            TaxonomyKind::Hierarchical => self
-                .raw
-                .categories
-                .iter()
-                .map(|item| item.id.as_str())
-                .collect(),
-            TaxonomyKind::Compositional => self
-                .raw
-                .axes
-                .as_ref()
-                .map(|axes| axes.domains.iter().map(|item| item.id.as_str()).collect())
-                .unwrap_or_default(),
-        }
+        self.raw
+            .categories
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect()
     }
 
     pub fn default_distribution(&self) -> HashMap<String, f64> {
-        match self.kind {
-            TaxonomyKind::Hierarchical => self
-                .raw
-                .categories
-                .iter()
-                .map(|item| (item.id.clone(), item.weight))
-                .collect(),
-            TaxonomyKind::Compositional => self
-                .raw
-                .axes
-                .as_ref()
-                .map(|axes| {
-                    axes.domains
-                        .iter()
-                        .map(|item| (item.id.clone(), item.weight))
-                        .collect()
-                })
-                .unwrap_or_default(),
-        }
+        self.raw
+            .categories
+            .iter()
+            .map(|item| (item.id.clone(), item.weight))
+            .collect()
     }
 
     pub fn default_difficulty(&self) -> HashMap<u8, f64> {
@@ -464,20 +534,19 @@ impl TaxonomyCatalog {
     }
 
     pub fn domain_count(&self) -> usize {
-        match self.kind {
-            TaxonomyKind::Hierarchical => self
-                .raw
-                .categories
-                .iter()
-                .map(|category| category.domains.len())
-                .sum(),
-            TaxonomyKind::Compositional => self
-                .raw
-                .axes
-                .as_ref()
-                .map(|axes| axes.domains.len())
-                .unwrap_or(0),
-        }
+        self.raw
+            .categories
+            .iter()
+            .map(|category| category.domains.len())
+            .sum()
+    }
+
+    pub fn category_count(&self) -> usize {
+        self.raw.categories.len()
+    }
+
+    pub fn platform_group_count(&self) -> usize {
+        self.raw.platform_groups.len()
     }
 
     pub fn contains_hierarchical_subdomain(
@@ -486,11 +555,10 @@ impl TaxonomyCatalog {
         domain_name: &str,
         subdomain_id: &str,
     ) -> bool {
-        self.kind == TaxonomyKind::Hierarchical
-            && self.raw.categories.iter().any(|category| {
+        self.raw.categories.iter().any(|category| {
                 category.id == category_id
                     && category.domains.iter().any(|domain| {
-                        domain.name == domain_name
+                        (domain.id == domain_name || domain.label == domain_name)
                             && domain
                                 .subdomains
                                 .iter()
@@ -500,9 +568,6 @@ impl TaxonomyCatalog {
     }
 
     pub fn hierarchical_domain_count(&self, category_id: &str) -> usize {
-        if self.kind != TaxonomyKind::Hierarchical {
-            return 0;
-        }
         self.raw
             .categories
             .iter()
@@ -512,30 +577,35 @@ impl TaxonomyCatalog {
     }
 
     pub fn subdomain_count(&self) -> usize {
-        match self.kind {
-            TaxonomyKind::Hierarchical => self
-                .raw
-                .categories
-                .iter()
-                .flat_map(|category| &category.domains)
-                .map(|domain| domain.subdomains.len())
-                .sum(),
-            TaxonomyKind::Compositional => self
-                .raw
-                .axes
-                .as_ref()
-                .map(|axes| {
-                    axes.domains
-                        .iter()
-                        .map(|domain| domain.subdomains.len())
-                        .sum()
-                })
-                .unwrap_or(0),
-        }
+        self.raw
+            .categories
+            .iter()
+            .flat_map(|category| &category.domains)
+            .map(|domain| domain.subdomains.len())
+            .sum()
     }
 
     pub fn default_domain_weight_sum(&self) -> f64 {
         self.default_distribution().values().sum()
+    }
+
+    pub fn resolved_eligibility(
+        &self,
+        category_id: &str,
+        domain_id: &str,
+    ) -> Result<ResolvedEligibility> {
+        let category = self
+            .raw
+            .categories
+            .iter()
+            .find(|category| category.id == category_id)
+            .with_context(|| format!("unknown category '{category_id}'"))?;
+        let domain = category
+            .domains
+            .iter()
+            .find(|domain| domain.id == domain_id)
+            .with_context(|| format!("unknown domain '{category_id}/{domain_id}'"))?;
+        self.resolve_eligibility(category, domain)
     }
 
     pub fn sample_defaults<R: Rng + ?Sized>(&self, rng: &mut R) -> Result<SampledTask> {
@@ -553,10 +623,7 @@ impl TaxonomyCatalog {
         difficulty: &HashMap<u8, f64>,
     ) -> Result<SampledTask> {
         self.validate_sampling_distributions(distribution, difficulty)?;
-        match self.kind {
-            TaxonomyKind::Hierarchical => self.sample_hierarchical(rng, distribution, difficulty),
-            TaxonomyKind::Compositional => self.sample_compositional(rng, distribution, difficulty),
-        }
+        self.sample_compositional(rng, distribution, difficulty)
     }
 
     pub fn validate_sampling_distributions(
@@ -566,38 +633,6 @@ impl TaxonomyCatalog {
     ) -> Result<()> {
         validate_override_distribution(self, distribution)?;
         validate_difficulty(difficulty)
-    }
-
-    fn sample_hierarchical<R: Rng + ?Sized>(
-        &self,
-        rng: &mut R,
-        distribution: &HashMap<String, f64>,
-        difficulty: &HashMap<u8, f64>,
-    ) -> Result<SampledTask> {
-        let mut candidates = Vec::new();
-        let mut weights = Vec::new();
-        for category in &self.raw.categories {
-            let category_weight = distribution[&category.id];
-            let domain_weight = category_weight / category.domains.len() as f64;
-            for domain in &category.domains {
-                let subdomain_total: f64 = domain.subdomains.iter().map(RawSubdomain::weight).sum();
-                for subdomain in &domain.subdomains {
-                    candidates.push((category, domain, subdomain));
-                    weights.push(domain_weight * subdomain.weight() / subdomain_total);
-                }
-            }
-        }
-        let selected = sample_index(rng, &weights, "hierarchical domain pool")?;
-        let (category, domain, subdomain) = candidates[selected];
-        Ok(SampledTask {
-            taxonomy_id: self.raw.id.clone(),
-            category_id: category.id.clone(),
-            domain_id: slugify(&domain.name),
-            domain_label: domain.name.clone(),
-            subdomain_id: subdomain.id().to_string(),
-            coordinates: None,
-            difficulty: sample_difficulty(rng, difficulty, 1, 10, &HashMap::new())?,
-        })
     }
 
     fn sample_compositional<R: Rng + ?Sized>(
@@ -611,41 +646,80 @@ impl TaxonomyCatalog {
             .axes
             .as_ref()
             .context("missing compositional axes")?;
-        let domain_weights: Vec<f64> = axes
-            .domains
+        let category_weights: Vec<f64> = self
+            .raw
+            .categories
             .iter()
             .map(|item| distribution[&item.id])
             .collect();
-        let domain = &axes.domains[sample_index(rng, &domain_weights, "domain distribution")?];
+        let category = &self.raw.categories[sample_index(
+            rng,
+            &category_weights,
+            "category distribution",
+        )?];
+        let domain_weights: Vec<f64> = if category.domains[0].weight.is_some() {
+            category
+                .domains
+                .iter()
+                .map(|domain| domain.weight.unwrap_or_default())
+                .collect()
+        } else {
+            vec![1.0; category.domains.len()]
+        };
+        let domain = &category.domains[sample_index(
+            rng,
+            &domain_weights,
+            "domain distribution",
+        )?];
         let sub_weights: Vec<f64> = domain.subdomains.iter().map(RawSubdomain::weight).collect();
         let subdomain =
             &domain.subdomains[sample_index(rng, &sub_weights, "subdomain distribution")?];
 
-        let task_family = sample_option(rng, &axes.task_families, None, "task family")?;
+        let eligibility = self.resolve_eligibility(category, domain)?;
+
+        let task_family = sample_option(
+            rng,
+            &axes.task_families,
+            Some(&eligibility.task_families),
+            "task family",
+        )?;
         let environment = sample_option(
             rng,
             &axes.environments,
-            Some(&domain.environments),
+            Some(&eligibility.environments),
             "environment",
         )?;
-        let vendor_scope = sample_option(rng, &axes.vendor_scopes, None, "vendor scope")?;
+        let platform_scope = sample_option(
+            rng,
+            &axes.platform_scopes,
+            Some(&eligibility.platform_scopes),
+            "platform scope",
+        )?;
         let mechanism = sample_option(
             rng,
             &axes.incident_mechanisms,
-            Some(&domain.incident_mechanisms),
+            Some(&eligibility.incident_mechanisms),
             "incident mechanism",
         )?;
-        let evidence_condition =
-            sample_option(rng, &axes.evidence_conditions, None, "evidence condition")?;
+        let evidence_condition = sample_option(
+            rng,
+            &axes.evidence_conditions,
+            Some(&eligibility.evidence_conditions),
+            "evidence condition",
+        )?;
         let evidence_bundle = sample_option(
             rng,
             &axes.evidence_bundles,
-            Some(&domain.evidence_bundles),
+            Some(&eligibility.evidence_bundles),
             "evidence bundle",
         )?;
-        let action_risk = sample_option(rng, &axes.action_risks, None, "action risk")?;
-        let presentation = sample_option(rng, &axes.presentations, None, "presentation")?;
-        let vendors = self.sample_vendors(rng, domain, &vendor_scope.id)?;
+        let action_risk = sample_option(
+            rng,
+            &axes.action_risks,
+            Some(&eligibility.action_risks),
+            "action risk",
+        )?;
+        let platforms = self.sample_platforms(rng, &eligibility, &platform_scope.id)?;
         let min = task_family.difficulty_min.unwrap_or(1);
         let max = task_family.difficulty_max.unwrap_or(10);
         let selected_difficulty = sample_difficulty(
@@ -655,19 +729,26 @@ impl TaxonomyCatalog {
             max,
             &task_family.difficulty_multiplier,
         )?;
+        let presentation = sample_option(
+            rng,
+            &axes.presentations,
+            Some(&eligibility.presentations),
+            "presentation",
+        )?;
 
         Ok(SampledTask {
             taxonomy_id: self.raw.id.clone(),
-            category_id: "enterprise_netops".to_string(),
+            category_id: category.id.clone(),
             domain_id: domain.id.clone(),
             domain_label: domain.label.clone(),
             subdomain_id: subdomain.id().to_string(),
             coordinates: Some(TaskCoordinates {
                 taxonomy_id: self.raw.id.clone(),
+                category_id: category.id.clone(),
                 task_family: task_family.id.clone(),
                 environment: environment.id.clone(),
-                vendor_scope: vendor_scope.id.clone(),
-                vendors,
+                platform_scope: platform_scope.id.clone(),
+                platforms,
                 incident_mechanism: mechanism.id.clone(),
                 evidence_condition: evidence_condition.id.clone(),
                 evidence_bundle: evidence_bundle.id.clone(),
@@ -678,43 +759,43 @@ impl TaxonomyCatalog {
         })
     }
 
-    fn sample_vendors<R: Rng + ?Sized>(
+    fn sample_platforms<R: Rng + ?Sized>(
         &self,
         rng: &mut R,
-        domain: &RawCompositionalDomain,
+        eligibility: &ResolvedEligibility,
         scope: &str,
     ) -> Result<Vec<String>> {
         let count = match scope {
-            "vendor_neutral" => return Ok(Vec::new()),
-            "single_vendor" => 1,
-            "multi_vendor" => 2,
-            other => bail!("unsupported vendor scope '{other}'"),
+            "platform_neutral" => return Ok(Vec::new()),
+            "single_platform" => 1,
+            "multi_platform" => 2,
+            other => bail!("unsupported platform scope '{other}'"),
         };
-        let mut vendors = Vec::new();
+        let mut platforms = Vec::new();
         let mut weights = Vec::new();
-        for group in &self.raw.vendor_groups {
-            if !domain.vendor_groups.contains(&group.id) {
+        for group in &self.raw.platform_groups {
+            if !eligibility.platform_groups.contains(&group.id) {
                 continue;
             }
-            for vendor in &group.vendors {
-                if let Some(existing) = vendors.iter().position(|id: &String| id == &vendor.id) {
-                    weights[existing] += group.weight * vendor.weight;
+            for platform in &group.platforms {
+                if let Some(existing) = platforms
+                    .iter()
+                    .position(|id: &String| id == &platform.id)
+                {
+                    weights[existing] += group.weight * platform.weight;
                 } else {
-                    vendors.push(vendor.id.clone());
-                    weights.push(group.weight * vendor.weight);
+                    platforms.push(platform.id.clone());
+                    weights.push(group.weight * platform.weight);
                 }
             }
         }
-        if vendors.len() < count {
-            bail!(
-                "domain '{}' cannot satisfy vendor scope '{scope}'",
-                domain.id
-            );
+        if platforms.len() < count {
+            bail!("eligible platform groups cannot satisfy platform scope '{scope}'");
         }
         let mut selected = Vec::new();
         for _ in 0..count {
-            let index = sample_index(rng, &weights, "vendor distribution")?;
-            selected.push(vendors.remove(index));
+            let index = sample_index(rng, &weights, "platform distribution")?;
+            selected.push(platforms.remove(index));
             weights.remove(index);
         }
         Ok(selected)
@@ -855,12 +936,30 @@ fn validate_options(name: &str, options: &[RawWeightedOption]) -> Result<()> {
     Ok(())
 }
 
-fn enabled_ids(options: &[RawWeightedOption]) -> HashSet<&str> {
+fn enabled_owned_ids(options: &[RawWeightedOption]) -> Vec<String> {
     options
         .iter()
         .filter(|item| item.enabled)
-        .map(|item| item.id.as_str())
+        .map(|item| item.id.clone())
         .collect()
+}
+
+fn resolve_axis(
+    name: &str,
+    domain: Option<&Vec<String>>,
+    category: Option<&Vec<String>>,
+    all_enabled: &[String],
+) -> Result<Vec<String>> {
+    let selected = domain.or(category).map_or_else(
+        || all_enabled.to_vec(),
+        |configured| configured.to_vec(),
+    );
+    if selected.is_empty() {
+        bail!("resolved eligibility for '{name}' must not be empty");
+    }
+    let valid: HashSet<&str> = all_enabled.iter().map(String::as_str).collect();
+    validate_references(name, &selected, &valid)?;
+    Ok(selected)
 }
 
 fn validate_references(name: &str, references: &[String], valid: &HashSet<&str>) -> Result<()> {
@@ -937,71 +1036,67 @@ fn sample_difficulty<R: Rng + ?Sized>(
     Ok(levels[index])
 }
 
-fn slugify(value: &str) -> String {
-    value
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() {
-                character.to_ascii_lowercase()
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>()
-        .split('_')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("_")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
-    #[test]
-    fn loads_and_validates_embedded_itops_taxonomy() {
-        let catalog =
-            TaxonomyCatalog::from_yaml(include_str!("../docs/it-ops-taxonomy.yaml"), None)
-                .expect("embedded IT Ops taxonomy should parse");
-
-        assert_eq!(catalog.id(), "scogo-itops-v3");
-        assert_eq!(catalog.kind(), TaxonomyKind::Hierarchical);
-        catalog
-            .validate()
-            .expect("embedded taxonomy should validate");
-    }
-
-    #[test]
-    fn rejects_distribution_that_does_not_sum_to_one() {
-        let yaml = r#"
-schema_version: scogo.taskgen.taxonomy.v1
-id: invalid
-kind: hierarchical
-label: Invalid
+    const V2_FIXTURE: &str = r#"
+schema_version: scogo.taskgen.taxonomy.v2
+id: compositional-test
+kind: compositional
+label: Compositional Test
 defaults:
   difficulty_distribution: {1: 1.0}
+platform_groups:
+  - id: network
+    weight: 1.0
+    platforms:
+      - {id: platform_a, label: Platform A, weight: 0.5}
+      - {id: platform_b, label: Platform B, weight: 0.5}
+axes:
+  task_families:
+    - {id: investigate, label: Investigate, weight: 1.0, difficulty_min: 1, difficulty_max: 10}
+  environments:
+    - {id: on_premises, label: On premises, weight: 0.5}
+    - {id: hybrid, label: Hybrid, weight: 0.5}
+  platform_scopes:
+    - {id: platform_neutral, label: Platform neutral, weight: 0.34}
+    - {id: single_platform, label: Single platform, weight: 0.33}
+    - {id: multi_platform, label: Multi platform, weight: 0.33}
+  incident_mechanisms:
+    - {id: misconfiguration, label: Misconfiguration, weight: 1.0}
+  evidence_conditions:
+    - {id: partial, label: Partial, weight: 1.0}
+  evidence_bundles:
+    - {id: configuration_state, label: Configuration state, weight: 1.0}
+  action_risks:
+    - {id: read_only_investigation, label: Read only, weight: 1.0}
+  presentations:
+    - {id: service_desk_ticket, label: Service desk ticket, weight: 1.0}
 categories:
-  - id: only
-    label: Only
-    weight: 0.9
+  - id: network
+    label: Network
+    weight: 1.0
+    eligibility:
+      environments: [on_premises, hybrid]
+      platform_groups: [network]
     domains:
-      - name: Domain
-        subdomains: [failure]
+      - id: routing
+        label: Routing
+        subdomains: [bgp, ospf]
+        eligibility:
+          environments: [hybrid]
 "#;
 
-        let error = TaxonomyCatalog::from_yaml(yaml, None).unwrap_err();
-        assert!(error.to_string().contains("sum to 1.0"), "{error:#}");
-    }
-
     #[test]
-    fn rejects_domain_with_no_positive_subdomain_weight() {
-        let yaml = r#"
+    fn rejects_v1_taxonomy_after_compositional_unification() {
+        let v1 = r#"
 schema_version: scogo.taskgen.taxonomy.v1
-id: invalid
+id: old
 kind: hierarchical
-label: Invalid
+label: Old
 defaults:
   difficulty_distribution: {1: 1.0}
 categories:
@@ -1010,12 +1105,101 @@ categories:
     weight: 1.0
     domains:
       - name: Domain
-        subdomains:
-          - {id: disabled_a, weight: 0.0}
-          - {id: disabled_b, weight: 0.0}
+        subdomains: [failure]
 "#;
+        let error = TaxonomyCatalog::from_yaml(v1, None).unwrap_err();
+        assert!(
+            error.to_string().contains("scogo.taskgen.taxonomy.v2"),
+            "{error:#}"
+        );
+    }
 
-        let error = TaxonomyCatalog::from_yaml(yaml, None).unwrap_err();
+    #[test]
+    fn parses_nested_v2_taxonomy_and_samples_universal_coordinates() {
+        let catalog = TaxonomyCatalog::from_yaml(V2_FIXTURE, None).unwrap();
+        assert_eq!(catalog.kind(), TaxonomyKind::Compositional);
+        assert_eq!(catalog.category_count(), 1);
+        assert_eq!(catalog.domain_count(), 1);
+        assert_eq!(catalog.subdomain_count(), 2);
+
+        let sample = catalog
+            .sample_defaults(&mut StdRng::seed_from_u64(7))
+            .unwrap();
+        let coordinates = sample.coordinates.expect("coordinates");
+        assert_eq!(coordinates.category_id, sample.category_id);
+        assert_eq!(coordinates.environment, "hybrid");
+        assert!(matches!(
+            coordinates.platform_scope.as_str(),
+            "platform_neutral" | "single_platform" | "multi_platform"
+        ));
+    }
+
+    #[test]
+    fn rejects_mixed_weighted_and_unweighted_domains() {
+        let invalid = V2_FIXTURE.replacen(
+            "      - id: routing\n        label: Routing\n        subdomains: [bgp, ospf]",
+            "      - id: routing\n        label: Routing\n        weight: 0.5\n        subdomains: [bgp, ospf]\n      - id: switching\n        label: Switching\n        subdomains: [vlan]",
+            1,
+        );
+        let error = TaxonomyCatalog::from_yaml(&invalid, None).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("mix weighted and unweighted domains"),
+            "{error:#}"
+        );
+    }
+
+    #[test]
+    fn loads_and_validates_embedded_itops_taxonomy() {
+        let catalog =
+            TaxonomyCatalog::from_yaml(include_str!("../docs/it-ops-taxonomy.yaml"), None)
+                .expect("embedded IT Ops taxonomy should parse");
+
+        assert_eq!(catalog.id(), "scogo-itops-v4");
+        assert_eq!(catalog.kind(), TaxonomyKind::Compositional);
+        assert_eq!(catalog.category_count(), 14);
+        assert_eq!(catalog.domain_count(), 129);
+        assert_eq!(catalog.subdomain_count(), 884);
+        catalog
+            .validate()
+            .expect("embedded taxonomy should validate");
+    }
+
+    #[test]
+    fn itops_v4_migration_report_is_lossless() {
+        let source = fs::read_to_string("docs/it-ops-taxonomy-v4-migration.json")
+            .expect("checked-in migration report");
+        let report: serde_json::Value = serde_json::from_str(&source).unwrap();
+        assert_eq!(report["source_counts"]["categories"], 14);
+        assert_eq!(report["source_counts"]["domains"], 129);
+        assert_eq!(report["source_counts"]["subdomains"], 884);
+        assert_eq!(report["source_counts"], report["target_counts"]);
+        assert_eq!(report["missing_domains"], serde_json::json!([]));
+        assert_eq!(report["missing_subdomains"], serde_json::json!([]));
+        assert_eq!(report["duplicate_target_ids"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn rejects_distribution_that_does_not_sum_to_one() {
+        let yaml = V2_FIXTURE.replacen(
+            "  - id: network\n    label: Network\n    weight: 1.0\n    eligibility:",
+            "  - id: network\n    label: Network\n    weight: 0.9\n    eligibility:",
+            1,
+        );
+
+        let error = TaxonomyCatalog::from_yaml(&yaml, None).unwrap_err();
+        assert!(error.to_string().contains("sum to 1.0"), "{error:#}");
+    }
+
+    #[test]
+    fn rejects_domain_with_no_positive_subdomain_weight() {
+        let yaml = V2_FIXTURE.replace(
+            "        subdomains: [bgp, ospf]",
+            "        subdomains:\n          - {id: disabled_a, weight: 0.0}\n          - {id: disabled_b, weight: 0.0}",
+        );
+
+        let error = TaxonomyCatalog::from_yaml(&yaml, None).unwrap_err();
         assert!(
             error.to_string().contains("positive subdomain weight"),
             "{error:#}"
@@ -1026,10 +1210,12 @@ categories:
     fn netops_taxonomy_has_exact_inventory_and_seeded_sampling() {
         let catalog = TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml"))
             .expect("checked-in NetOps taxonomy should parse");
-        assert_eq!(catalog.id(), "scogo-enterprise-netops-v1");
+        assert_eq!(catalog.id(), "scogo-enterprise-netops-v2");
         assert_eq!(catalog.kind(), TaxonomyKind::Compositional);
+        assert_eq!(catalog.category_count(), 1);
         assert_eq!(catalog.domain_count(), 25);
         assert_eq!(catalog.subdomain_count(), 531);
+        assert_eq!(catalog.platform_group_count(), 14);
         assert!((catalog.default_domain_weight_sum() - 1.0).abs() < WEIGHT_TOLERANCE);
 
         let mut first = StdRng::seed_from_u64(42);
@@ -1042,7 +1228,7 @@ categories:
 
     #[test]
     fn netops_prompts_preserve_scope_and_harness_boundary() {
-        let taskgen = include_str!("../prompts/netops-taskgen-system-v1.txt");
+        let taskgen = include_str!("../prompts/netops-taskgen-system-v2.txt");
         let teacher = include_str!("../prompts/netops-teacher-system-v1.txt");
         for excluded in [
             "3GPP",
