@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use anyhow::{Context, Result, bail};
 use chrono::Local;
-use clap::{Args as ClapArgs, Parser, Subcommand};
+use clap::{Args as ClapArgs, Parser, Subcommand, ValueEnum};
 use futures::stream::{self, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::SeedableRng;
@@ -15,8 +15,9 @@ use rand::prelude::*;
 use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 
-mod schema;
-mod taxonomy;
+pub mod atif;
+pub mod schema;
+pub mod taxonomy;
 
 const DEFAULT_SYSTEM_PROMPT: &str = r#"Write prompts as if a competent on-call asked a question at 2am — Slack, PagerDuty, a war-room thread, or an SSH session. They might be tired or frustrated, but they're competent. They state symptoms, what they already checked, and what they're afraid of. Don't be a child. Don't be a robot. Don't write a formal runbook. Be a human who forgot to be formal.
 Good casual: "zabbix is paging every 30s on the same host, I already restarted the agent, still flapping—mute or real disk?", "canary's eating error budget and CAB's frozen till Monday, rollback or ride it?", "BGP to DR flapped twice, underlay looks fine, overlay SLA class is red"
@@ -149,10 +150,50 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Command {
     Generate(GenerateArgs),
+    Atif {
+        #[command(subcommand)]
+        command: AtifCommand,
+    },
     Taxonomy {
         #[command(subcommand)]
         command: TaxonomyCommand,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum AtifCommand {
+    Export(AtifArgs),
+    Import(AtifArgs),
+}
+
+#[derive(ClapArgs, Debug)]
+struct AtifArgs {
+    #[arg(long)]
+    input: PathBuf,
+
+    #[arg(long)]
+    output: PathBuf,
+
+    #[arg(long, value_enum)]
+    container: Option<ContainerArg>,
+
+    #[arg(long)]
+    overwrite: bool,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ContainerArg {
+    Json,
+    Jsonl,
+}
+
+impl From<ContainerArg> for atif::Container {
+    fn from(value: ContainerArg) -> Self {
+        match value {
+            ContainerArg::Json => Self::Json,
+            ContainerArg::Jsonl => Self::Jsonl,
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -1324,6 +1365,25 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Generate(args) => run_generate(args).await,
+        Command::Atif { command } => {
+            let (direction, args) = match command {
+                AtifCommand::Export(args) => (atif::ConversionDirection::Export, args),
+                AtifCommand::Import(args) => (atif::ConversionDirection::Import, args),
+            };
+            let container = match args.container {
+                Some(container) => container.into(),
+                None => atif::infer_container(&args.input)?,
+            };
+            let stats = atif::convert_file(
+                direction,
+                &args.input,
+                &args.output,
+                container,
+                args.overwrite,
+            )?;
+            println!("converted {} record(s)", stats.records);
+            Ok(())
+        }
         Command::Taxonomy {
             command: TaxonomyCommand::Validate { taxonomy },
         } => {
@@ -2021,6 +2081,23 @@ mod tests {
                 command: TaxonomyCommand::Validate { .. }
             }
         ));
+    }
+
+    #[test]
+    fn parses_atif_import_and_export_without_api_key() {
+        for operation in ["import", "export"] {
+            let cli = Cli::try_parse_from([
+                "taskgen",
+                "atif",
+                operation,
+                "--input",
+                "input.jsonl",
+                "--output",
+                "output.jsonl",
+            ])
+            .unwrap();
+            assert!(matches!(cli.command, Command::Atif { .. }));
+        }
     }
 
     #[test]

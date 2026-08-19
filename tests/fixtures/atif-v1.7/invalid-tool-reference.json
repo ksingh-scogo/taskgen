@@ -1,0 +1,27 @@
+{
+  "schema_version": "ATIF-v1.7",
+  "trajectory_id": "invalid-tool-reference",
+  "agent": { "name": "fixture-agent", "version": "1.0.0" },
+  "steps": [
+    {
+      "step_id": 1,
+      "source": "agent",
+      "message": "This observation references the wrong call.",
+      "tool_calls": [
+        {
+          "tool_call_id": "call-issued",
+          "function_name": "show_route",
+          "arguments": {}
+        }
+      ],
+      "observation": {
+        "results": [
+          {
+            "source_call_id": "call-missing",
+            "content": "unmatched"
+          }
+        ]
+      }
+    }
+  ]
+}

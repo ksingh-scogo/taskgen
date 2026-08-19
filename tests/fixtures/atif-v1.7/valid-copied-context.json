@@ -1,0 +1,80 @@
+{
+  "schema_version": "ATIF-v1.7",
+  "session_id": "run-context-001",
+  "trajectory_id": "trajectory-context-001",
+  "agent": {
+    "name": "fictional-orchestrator",
+    "version": "1.0.0"
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "source": "system",
+      "message": "Context compaction performed",
+      "observation": {
+        "results": [
+          {
+            "content": "Summary of prior read-only investigation.",
+            "subagent_trajectory_ref": [
+              {
+                "trajectory_id": "subagent-trajectory-001",
+                "session_id": "run-context-001"
+              }
+            ]
+          }
+        ]
+      },
+      "extra": {
+        "context_management": {
+          "type": "compaction",
+          "boundary": "replace"
+        }
+      }
+    },
+    {
+      "step_id": 2,
+      "source": "user",
+      "message": "Retained context from before compaction.",
+      "is_copied_context": true
+    },
+    {
+      "step_id": 3,
+      "source": "agent",
+      "message": "Dispatching a deterministic read-only inventory action.",
+      "tool_calls": [
+        {
+          "tool_call_id": "call-inventory-1",
+          "function_name": "inventory",
+          "arguments": {}
+        }
+      ],
+      "observation": {
+        "results": [
+          {
+            "source_call_id": "call-inventory-1",
+            "content": "two fictional devices found"
+          }
+        ]
+      },
+      "llm_call_count": 0
+    }
+  ],
+  "subagent_trajectories": [
+    {
+      "schema_version": "ATIF-v1.7",
+      "session_id": "run-context-001",
+      "trajectory_id": "subagent-trajectory-001",
+      "agent": {
+        "name": "fictional-summary-agent",
+        "version": "1.0.0"
+      },
+      "steps": [
+        {
+          "step_id": 1,
+          "source": "user",
+          "message": "Summarize the prior read-only evidence."
+        }
+      ]
+    }
+  ]
+}

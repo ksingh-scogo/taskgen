@@ -1,0 +1,69 @@
+{
+  "schema_version": "ATIF-v1.7",
+  "session_id": "run-external-001",
+  "trajectory_id": "trajectory-external-001",
+  "agent": {
+    "name": "fictional-netops-agent",
+    "version": "1.0.0",
+    "model_name": "local/netops-model",
+    "tool_definitions": [
+      {
+        "type": "function",
+        "function": {
+          "name": "show_route",
+          "description": "Read a route from a fictional lab device.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "device": { "type": "string" },
+              "prefix": { "type": "string" }
+            },
+            "required": ["device", "prefix"]
+          }
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-08-19T10:00:00Z",
+      "source": "user",
+      "message": [
+        { "type": "text", "text": "Check why 203.0.113.0/24 is taking the wrong peer." }
+      ]
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-08-19T10:00:01Z",
+      "source": "agent",
+      "model_name": "local/netops-model",
+      "message": "I will inspect the selected route without changing state.",
+      "tool_calls": [
+        {
+          "tool_call_id": "call-route-1",
+          "function_name": "show_route",
+          "arguments": { "device": "edge-r1", "prefix": "203.0.113.0/24" },
+          "extra": { "mode": "read_only" }
+        }
+      ],
+      "observation": {
+        "results": [
+          {
+            "source_call_id": "call-route-1",
+            "content": "peer-b selected; community 65000:999 present",
+            "extra": { "artifact_ref": "artifact://call-route-1" }
+          }
+        ]
+      },
+      "llm_call_count": 1
+    },
+    {
+      "step_id": 3,
+      "timestamp": "2026-08-19T10:00:02Z",
+      "source": "agent",
+      "message": "The unexpected community supports a policy leak; retrieve the approved policy revision before proposing an approval-gated rollback.",
+      "llm_call_count": 1
+    }
+  ]
+}
