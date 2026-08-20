@@ -212,6 +212,7 @@ Every final line validates against `schemas/task-v2.schema.json`:
 | `--review-api-key <KEY>` | inherited on same endpoint | Reviewer credential |
 | `--review-keyfile <FILE>` | none | Reviewer keys, round-robin |
 | `--review-max-output-tokens <N>` | `1024` (`4096` for Qwen/DeepSeek-v4) | Reviewer completion limit |
+| `--skip-review` | off | Skip all reviewer calls for smoke/performance diagnostics |
 | `--dedup-mode <MODE>` | `semantic` | `semantic` or `lexical` |
 | `--jaccard-threshold <F>` | `0.80` | Inclusive lexical threshold |
 | `--semantic-threshold <F>` | `0.90` | Inclusive cosine threshold |
@@ -226,7 +227,7 @@ GPT-5, o-series, and Luna request bodies omit unsupported sampling fields. Qwen 
 
 ### Throughput tuning
 
-Keep review enabled for production datasets. To improve throughput, first calibrate a fast independent reviewer, then raise `--workers` gradually while watching `requests.*.rate_limits` and `efficiency.*` in `run.json`. Separate generation and review endpoints avoid sharing one provider quota. A higher worker count does not help after the serving engine reaches its sequence or token-throughput capacity. Lowering genuine rejection and coordinate-recomposition rates usually saves more time than blind retries because every rejected candidate costs both a generation and a review call. Artifact journals flush in bounded batches and are fully flushed and synced before final validation/publication.
+Keep review enabled for production datasets. `--skip-review` is an explicit diagnostic mode: generated prompts still pass schema validation and deduplication, `reviews.jsonl` remains empty, and `run.json` records review as skipped. To improve throughput, first calibrate a fast independent reviewer, then raise `--workers` gradually while watching `requests.*.rate_limits` and `efficiency.*` in `run.json`. Separate generation and review endpoints avoid sharing one provider quota. A higher worker count does not help after the serving engine reaches its sequence or token-throughput capacity. Lowering genuine rejection and coordinate-recomposition rates usually saves more time than blind retries because every rejected candidate costs both a generation and a review call. Artifact journals flush in bounded batches and are fully flushed and synced before final validation/publication.
 
 ## Standalone Rust dedup
 

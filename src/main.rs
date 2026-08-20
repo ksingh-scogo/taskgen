@@ -398,6 +398,10 @@ struct GenerateArgs {
     #[arg(long)]
     review_model: Option<String>,
 
+    /// Skip LLM quality review. Intended for smoke/performance diagnostics only.
+    #[arg(long)]
+    skip_review: bool,
+
     #[arg(long)]
     review_api_base: Option<String>,
 
@@ -2244,9 +2248,19 @@ fn generation_run_report(
             "priced_cost": generation_cost(outcome.stats, context.args.input_price, context.args.output_price),
         },
         "review": {
-            "model": context.review_provider.model,
+            "enabled": !context.args.skip_review,
+            "status": if context.args.skip_review { "skipped" } else { "enabled" },
+            "model": if context.args.skip_review {
+                None
+            } else {
+                Some(context.review_provider.model.as_str())
+            },
             "effective_models": context.effective_review_models,
-            "endpoint_origin": context.review_provider.api_base.origin().ascii_serialization(),
+            "endpoint_origin": if context.args.skip_review {
+                None
+            } else {
+                Some(context.review_provider.api_base.origin().ascii_serialization())
+            },
             "input_tokens": outcome.stats.review_input_tokens.load(Ordering::Relaxed),
             "output_tokens": outcome.stats.review_output_tokens.load(Ordering::Relaxed),
             "priced_cost": review_cost(
@@ -2466,7 +2480,9 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         .as_ref()
         .map(|models| models.as_ref().clone())
         .unwrap_or_else(|| vec![generation_provider.model.clone()]);
-    let effective_review_models = if free_models.is_some() && args.review_model.is_none() {
+    let effective_review_models = if args.skip_review {
+        Vec::new()
+    } else if free_models.is_some() && args.review_model.is_none() {
         effective_generation_models.clone()
     } else {
         vec![review_provider.model.clone()]
@@ -2500,6 +2516,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         "taxonomy_kind": format!("{:?}", taxonomy.kind()).to_ascii_lowercase(),
         "coordinate_seed": effective_seed,
         "requested_new_records": args.count,
+        "review_enabled": !args.skip_review,
         "concurrency": {
             "acceptance_workers": args.workers,
             "runtime": "tokio-multi-thread",
@@ -2549,6 +2566,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             let taxonomy_id = taxonomy.id().to_string();
             let taxonomy_kind = format!("{:?}", taxonomy.kind()).to_ascii_lowercase();
             let explicit_review_model = args.review_model.is_some();
+            let skip_review = args.skip_review;
             let temperature = args.temperature;
             let max_output_tokens = args.max_output_tokens;
             let requested_review_max_output_tokens = args.review_max_output_tokens;
@@ -2717,75 +2735,94 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                         continue;
                     }
 
-                    let mut effective_review_provider = review_provider.clone();
-                    if free_models.is_some() && !explicit_review_model {
-                        effective_review_provider.model = use_model.clone();
-                    }
-                    let review_max_output_tokens = review_max_output_tokens(
-                        &effective_review_provider.model,
-                        requested_review_max_output_tokens,
-                    );
-                    let reviewer = review::ReviewClient::new(
-                        effective_review_provider,
-                        client.clone(),
-                        review_max_output_tokens,
-                        review_telemetry.clone(),
-                    )?;
-                    let review = match reviewer
-                        .review(review::ReviewRequest {
-                            candidate: serde_json::to_value(&entry)?,
-                            taxonomy_id: taxonomy_id.clone(),
-                            taxonomy_kind: taxonomy_kind.clone(),
-                            system_prompt: review_system_prompt.clone(),
-                        })
-                        .await
-                    {
-                        Ok(review) => review,
-                        Err(error) => {
+                    let review = if skip_review {
+                        None
+                    } else {
+                        let mut effective_review_provider = review_provider.clone();
+                        if free_models.is_some() && !explicit_review_model {
+                            effective_review_provider.model = use_model.clone();
+                        }
+                        let review_max_output_tokens = review_max_output_tokens(
+                            &effective_review_provider.model,
+                            requested_review_max_output_tokens,
+                        );
+                        let reviewer = review::ReviewClient::new(
+                            effective_review_provider,
+                            client.clone(),
+                            review_max_output_tokens,
+                            review_telemetry.clone(),
+                        )?;
+                        let review = match reviewer
+                            .review(review::ReviewRequest {
+                                candidate: serde_json::to_value(&entry)?,
+                                taxonomy_id: taxonomy_id.clone(),
+                                taxonomy_kind: taxonomy_kind.clone(),
+                                system_prompt: review_system_prompt.clone(),
+                            })
+                            .await
+                        {
+                            Ok(review) => review,
+                            Err(error) => {
+                                stats.errors.fetch_add(1, Ordering::Relaxed);
+                                generation_feedback = Some(GenerationFeedback {
+                                    previous_prompt: Some(entry.prompt.clone()),
+                                    review_summary:
+                                        "The quality reviewer could not return a valid decision."
+                                            .into(),
+                                    retry_guidance:
+                                        "Return a technically grounded, internally consistent replacement."
+                                            .into(),
+                                });
+                                let event = serde_json::json!({
+                                    "schema_version": "scogo.taskgen.rejection.v1",
+                                    "slot": slot_index + 1,
+                                    "attempt": attempt,
+                                    "stage": "review_error",
+                                    "reason": error.to_string(),
+                                    "candidate": entry,
+                                });
+                                artifacts
+                                    .lock()
+                                    .unwrap()
+                                    .as_mut()
+                                    .unwrap()
+                                    .write_rejection(&event)?;
+                                continue;
+                            }
+                        };
+                        stats
+                            .review_input_tokens
+                            .fetch_add(review.input_tokens, Ordering::Relaxed);
+                        stats
+                            .review_output_tokens
+                            .fetch_add(review.output_tokens, Ordering::Relaxed);
+                        if review.decision.verdict == review::ReviewVerdict::Reject {
                             stats.errors.fetch_add(1, Ordering::Relaxed);
                             generation_feedback = Some(GenerationFeedback {
                                 previous_prompt: Some(entry.prompt.clone()),
-                                review_summary: "The quality reviewer could not return a valid decision.".into(),
-                                retry_guidance: "Return a technically grounded, internally consistent replacement.".into(),
+                                review_summary: review.decision.summary.clone(),
+                                retry_guidance: review.decision.retry_guidance.clone(),
                             });
                             let event = serde_json::json!({
                                 "schema_version": "scogo.taskgen.rejection.v1",
                                 "slot": slot_index + 1,
                                 "attempt": attempt,
-                                "stage": "review_error",
-                                "reason": error.to_string(),
+                                "stage": "model_review",
+                                "review_model": review.model,
+                                "decision_normalization": review.normalization,
+                                "decision": review.decision,
                                 "candidate": entry,
                             });
-                            artifacts.lock().unwrap().as_mut().unwrap().write_rejection(&event)?;
+                            artifacts
+                                .lock()
+                                .unwrap()
+                                .as_mut()
+                                .unwrap()
+                                .write_rejection(&event)?;
                             continue;
                         }
+                        Some(review)
                     };
-                    stats
-                        .review_input_tokens
-                        .fetch_add(review.input_tokens, Ordering::Relaxed);
-                    stats
-                        .review_output_tokens
-                        .fetch_add(review.output_tokens, Ordering::Relaxed);
-                    if review.decision.verdict == review::ReviewVerdict::Reject {
-                        stats.errors.fetch_add(1, Ordering::Relaxed);
-                        generation_feedback = Some(GenerationFeedback {
-                            previous_prompt: Some(entry.prompt.clone()),
-                            review_summary: review.decision.summary.clone(),
-                            retry_guidance: review.decision.retry_guidance.clone(),
-                        });
-                        let event = serde_json::json!({
-                            "schema_version": "scogo.taskgen.rejection.v1",
-                            "slot": slot_index + 1,
-                            "attempt": attempt,
-                            "stage": "model_review",
-                            "review_model": review.model,
-                            "decision_normalization": review.normalization,
-                            "decision": review.decision,
-                            "candidate": entry,
-                        });
-                        artifacts.lock().unwrap().as_mut().unwrap().write_rejection(&event)?;
-                        continue;
-                    }
 
                     let final_duplicate = {
                         let mut index = dedup_index.lock().unwrap();
@@ -2805,37 +2842,44 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                             review_summary: "The candidate duplicates a concurrently accepted prompt.".into(),
                             retry_guidance: "Generate a materially different incident scenario for the same coordinates.".into(),
                         });
-                        let event = serde_json::json!({
+                        let mut event = serde_json::json!({
                             "schema_version": "scogo.taskgen.rejection.v1",
                             "slot": slot_index + 1,
                             "attempt": attempt,
                             "stage": "dedup_final",
                             "duplicate": duplicate,
-                            "review_model": review.model,
-                            "decision_normalization": review.normalization,
-                            "decision": review.decision,
                             "candidate": entry,
                         });
+                        if let Some(review) = &review {
+                            event["review_model"] = serde_json::json!(review.model);
+                            event["decision_normalization"] =
+                                serde_json::json!(review.normalization);
+                            event["decision"] = serde_json::json!(review.decision);
+                        }
                         artifacts.lock().unwrap().as_mut().unwrap().write_rejection(&event)?;
                         continue;
                     }
 
-                    let review_event = serde_json::json!({
-                        "schema_version": "scogo.taskgen.accepted-review.v1",
-                        "slot": slot_index + 1,
-                        "attempt": attempt,
-                        "prompt_sha256": dedup::prompt_sha256(&entry.prompt),
-                        "review_model": review.model,
-                        "input_tokens": review.input_tokens,
-                        "output_tokens": review.output_tokens,
-                        "decision_normalization": review.normalization,
-                        "decision": review.decision,
+                    let review_event = review.as_ref().map(|review| {
+                        serde_json::json!({
+                            "schema_version": "scogo.taskgen.accepted-review.v1",
+                            "slot": slot_index + 1,
+                            "attempt": attempt,
+                            "prompt_sha256": dedup::prompt_sha256(&entry.prompt),
+                            "review_model": review.model,
+                            "input_tokens": review.input_tokens,
+                            "output_tokens": review.output_tokens,
+                            "decision_normalization": review.normalization,
+                            "decision": review.decision,
+                        })
                     });
                     {
                         let mut guard = artifacts.lock().unwrap();
                         let run = guard.as_mut().unwrap();
                         run.write_accepted_line(&line)?;
-                        run.write_review(&review_event)?;
+                        if let Some(review_event) = review_event {
+                            run.write_review(&review_event)?;
+                        }
                     }
                     let accepted = stats.tasks.fetch_add(1, Ordering::Relaxed) + 1;
                     let rejected = stats.errors.load(Ordering::Relaxed);
@@ -2948,7 +2992,14 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         final_count,
         published.output.display()
     );
-    println!("Accepted reviews: {}", published.reviews.display());
+    if args.skip_review {
+        println!(
+            "Review skipped; empty audit: {}",
+            published.reviews.display()
+        );
+    } else {
+        println!("Accepted reviews: {}", published.reviews.display());
+    }
     println!("Rejected candidates: {}", published.rejected.display());
     println!("Run report: {}", published.run.display());
     Ok(())
@@ -4087,6 +4138,98 @@ mod tests {
         );
         assert!(generation_calls >= 3);
         assert!(review_calls >= 3);
+    }
+
+    #[tokio::test]
+    async fn generate_skip_review_publishes_without_reviewer_calls() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+        #[derive(Clone)]
+        struct GenerationOnlyResponder {
+            calls: Arc<AtomicUsize>,
+        }
+
+        impl Respond for GenerationOnlyResponder {
+            fn respond(&self, request: &Request) -> ResponseTemplate {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                let body = String::from_utf8_lossy(&request.body);
+                assert!(!body.contains("Review this prompt seed"));
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices": [{
+                        "finish_reason": "stop",
+                        "message": {"content":
+                            "After a maintenance window, application latency increased while interface counters and flow telemetry disagree. Which read-only evidence should the on-call collect next before proposing a change?"
+                        }
+                    }],
+                    "usage": {"prompt_tokens": 20, "completion_tokens": 12}
+                }))
+            }
+        }
+
+        let server = MockServer::start().await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(GenerationOnlyResponder {
+                calls: calls.clone(),
+            })
+            .mount(&server)
+            .await;
+
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("skip-review-run");
+        let cli = Cli::try_parse_from([
+            "taskgen",
+            "generate",
+            "--api-base",
+            &format!("{}/v1", server.uri()),
+            "--api-key",
+            "test-key",
+            "--model",
+            "test-model",
+            "--taxonomy",
+            "docs/netops-taxonomy.yaml",
+            "--count",
+            "1",
+            "--workers",
+            "1",
+            "--seed",
+            "123",
+            "--dedup-mode",
+            "lexical",
+            "--skip-review",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+        ])
+        .unwrap();
+        let Command::Generate(args) = cli.command else {
+            panic!("expected generate command");
+        };
+        run_generate(*args).await.unwrap();
+
+        let paths = artifacts::PublishedPaths::for_run_dir(&run_dir);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            std::fs::read_to_string(&paths.output)
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
+        assert_eq!(
+            std::fs::read_to_string(paths.reviews)
+                .unwrap()
+                .lines()
+                .count(),
+            0
+        );
+        let report: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(paths.run).unwrap()).unwrap();
+        assert_eq!(report["review"]["enabled"], false);
+        assert_eq!(report["review"]["status"], "skipped");
+        assert_eq!(report["requests"]["review"]["requests"], 0);
     }
 
     #[tokio::test]
