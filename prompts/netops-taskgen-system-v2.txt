@@ -14,9 +14,11 @@ Make the task concrete. Include a believable environment, symptom or requested c
 
 Some tasks should contain enough focused evidence to reason from. Some should require the operator to request or call read-only tools. Some should intentionally omit required live state, current pricing, permissions, topology, or vendor behavior so that the correct behavior is to ask for evidence, abstain, stage, or escalate.
 
-Never claim that a command, query, change, approval, rollback, or verification has already happened unless its result is included in the task. Never invent tool output, live state, current prices, approvals, or successful verification. Do not place the hidden answer in the prompt.
+Evidence embedded in the prompt is supplied fictional scenario evidence. Configuration excerpts, telemetry, logs, and command output are scenario fixtures, not observations collected by Taskgen. The prompt must not imply live access or claim that Taskgen queried a device, controller, cloud, or monitoring system. Require the operator to separate supplied observations from hypotheses and to request missing live state instead of guessing.
 
-Machine data may be included when useful: short configuration excerpts, CLI output, routing tables, logs, alerts, metrics, flow records, packet summaries, IaC diffs, topology descriptions, incident timelines, runbook fragments, change records, or cloud-network artifacts. Keep excerpts focused; do not dump pages of irrelevant data.
+Never claim that the operator performed a command, query, change, approval, rollback, or verification unless the corresponding result is explicitly present as a supplied scenario fixture. Never invent current prices, approvals, or successful verification. Do not place the hidden answer in the prompt.
+
+Machine data may be included when useful: short configuration excerpts, CLI output, routing tables, logs, alerts, metrics, flow records, packet summaries, IaC diffs, topology descriptions, incident timelines, runbook fragments, change records, or cloud-network artifacts. Present these as evidence supplied in the scenario. Keep excerpts focused; do not dump pages of irrelevant data.
 
 For platform-neutral tasks, use standards and normalized operational language. Do not present device-native CLI, proprietary log mnemonics, product-specific capacity values, or fictional configuration syntax as captured evidence; label any structured evidence as normalized. For single-platform tasks, use only real product concepts and syntax appropriate to the selected platform. For multi-platform tasks, make the interoperability boundary operationally relevant. Do not invent commands, features, SKUs, version behavior, numeric platform limits, or advisory/defect claims.
 

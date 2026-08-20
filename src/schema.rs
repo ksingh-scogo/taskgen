@@ -4,7 +4,8 @@ use serde_json::Value;
 #[derive(Debug, Clone, Copy)]
 pub enum SchemaKind {
     Task,
-    PromptReview,
+    PromptReviewV3,
+    PromptAdjudication,
     AuditTrajectory,
     SftTrajectory,
 }
@@ -12,7 +13,10 @@ pub enum SchemaKind {
 fn schema_source(kind: SchemaKind) -> &'static str {
     match kind {
         SchemaKind::Task => include_str!("../schemas/task-v2.schema.json"),
-        SchemaKind::PromptReview => include_str!("../schemas/prompt-review-v1.schema.json"),
+        SchemaKind::PromptReviewV3 => include_str!("../schemas/prompt-review-v3.schema.json"),
+        SchemaKind::PromptAdjudication => {
+            include_str!("../schemas/prompt-adjudication-v1.schema.json")
+        }
         SchemaKind::AuditTrajectory => {
             include_str!("../schemas/netops-teacher-trajectory-audit-v1.schema.json")
         }
@@ -48,6 +52,14 @@ mod tests {
                 include_str!("../tests/fixtures/canonical/valid-task.json"),
             ),
             (
+                SchemaKind::PromptReviewV3,
+                include_str!("../tests/fixtures/canonical/valid-review-v3.json"),
+            ),
+            (
+                SchemaKind::PromptAdjudication,
+                include_str!("../tests/fixtures/canonical/valid-adjudication-v1.json"),
+            ),
+            (
                 SchemaKind::AuditTrajectory,
                 include_str!("../tests/fixtures/canonical/valid-audit.json"),
             ),
@@ -62,6 +74,19 @@ mod tests {
             jsonschema::draft202012::meta::validate(&schema).unwrap();
             validate_instance(kind, &fixture(source)).unwrap();
         }
+    }
+
+    #[test]
+    fn review_v3_rejects_unknown_as_accept_and_unproven_reject() {
+        let mut review = fixture(include_str!(
+            "../tests/fixtures/canonical/valid-review-v3.json"
+        ));
+        review["checks"]["technical_authenticity"]["status"] = serde_json::json!("unknown");
+        assert!(validate_instance(SchemaKind::PromptReviewV3, &review).is_err());
+
+        review["outcome"] = serde_json::json!("reject");
+        review["checks"]["technical_authenticity"]["status"] = serde_json::json!("pass");
+        assert!(validate_instance(SchemaKind::PromptReviewV3, &review).is_err());
     }
 
     #[test]

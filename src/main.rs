@@ -1,5 +1,5 @@
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -20,8 +20,10 @@ use sha2::{Digest, Sha256};
 
 pub mod artifacts;
 pub mod atif;
+pub mod calibration;
 pub mod dedup;
 pub mod provider;
+pub mod references;
 pub mod review;
 pub mod schema;
 pub mod taxonomy;
@@ -159,23 +161,13 @@ struct GenerationFeedback {
     retry_guidance: String,
 }
 
+#[cfg(test)]
 fn completion_truncation_feedback() -> GenerationFeedback {
     GenerationFeedback {
         previous_prompt: None,
         review_summary: "The previous completion hit the output-token limit before producing a complete task prompt.".into(),
         retry_guidance: "Return a substantially shorter complete task prompt of at most 300 words. Preserve every mandatory coordinate and output only the final prompt.".into(),
     }
-}
-
-fn with_completion_limit_guidance(feedback: Option<&GenerationFeedback>) -> GenerationFeedback {
-    let Some(feedback) = feedback else {
-        return completion_truncation_feedback();
-    };
-    let mut feedback = feedback.clone();
-    feedback.retry_guidance.push_str(
-        " Also keep the complete replacement at most 300 words so it fits the output-token limit.",
-    );
-    feedback
 }
 
 fn task_generation_message(
@@ -198,6 +190,7 @@ fn task_generation_message(
     message
 }
 
+#[cfg(test)]
 fn coordinate_attempt_phase(attempt: u64, max_repairs: u64) -> (u64, u64) {
     debug_assert!(attempt > 0);
     let attempts_per_coordinate = max_repairs.saturating_add(1);
@@ -228,6 +221,7 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Command {
     Generate(Box<GenerateArgs>),
+    Review(Box<ReviewArgs>),
     Dedup(DedupArgs),
     Atif {
         #[command(subcommand)]
@@ -237,6 +231,60 @@ enum Command {
         #[command(subcommand)]
         command: TaxonomyCommand,
     },
+}
+
+#[derive(ClapArgs, Debug, Clone)]
+struct ReviewArgs {
+    #[arg(long)]
+    input: PathBuf,
+
+    #[arg(long)]
+    taxonomy: PathBuf,
+
+    #[arg(long, default_value = "https://api.openai.com/v1")]
+    api_base: String,
+
+    #[arg(long, env = "TASKGEN_REVIEW_API_KEY", hide_env_values = true)]
+    api_key: Option<String>,
+
+    #[arg(short, long, default_value = "gpt-4o-mini")]
+    model: String,
+
+    #[arg(long)]
+    keyfile: Option<PathBuf>,
+
+    #[arg(long, conflicts_with = "system_prompt_file")]
+    system_prompt: Option<String>,
+
+    #[arg(long, conflicts_with = "system_prompt")]
+    system_prompt_file: Option<PathBuf>,
+
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    max_output_tokens: Option<u64>,
+
+    #[arg(long, default_value_t = 5, value_parser = parse_positive_usize)]
+    review_workers: usize,
+
+    #[arg(long)]
+    run_dir: Option<PathBuf>,
+
+    #[arg(long)]
+    review_reference_dir: Option<PathBuf>,
+
+    #[arg(long)]
+    adjudication_model: Option<String>,
+
+    #[arg(long)]
+    adjudication_api_base: Option<String>,
+
+    #[arg(long, env = "TASKGEN_ADJUDICATION_API_KEY", hide_env_values = true)]
+    adjudication_api_key: Option<String>,
+
+    #[arg(long)]
+    adjudication_keyfile: Option<PathBuf>,
+
+    #[arg(long)]
+    gold_labels: Option<PathBuf>,
 }
 
 #[derive(ClapArgs, Debug)]
@@ -375,6 +423,14 @@ struct GenerateArgs {
     #[arg(short, long, default_value_t = 5, value_parser = parse_positive_usize)]
     workers: usize,
 
+    /// Maximum number of rubric reviews processed concurrently in each review stage.
+    #[arg(long, default_value_t = 5, value_parser = parse_positive_usize)]
+    review_workers: usize,
+
+    /// Global generated-candidate limit. Defaults to max(100, 20 * count).
+    #[arg(long, value_parser = parse_positive_usize)]
+    max_candidates: Option<usize>,
+
     #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..))]
     request_timeout_seconds: u64,
 
@@ -411,6 +467,22 @@ struct GenerateArgs {
     #[arg(long)]
     review_keyfile: Option<PathBuf>,
 
+    /// Optional local vendor/reference corpus used only for needs_verification adjudication.
+    #[arg(long)]
+    review_reference_dir: Option<PathBuf>,
+
+    #[arg(long)]
+    adjudication_model: Option<String>,
+
+    #[arg(long)]
+    adjudication_api_base: Option<String>,
+
+    #[arg(long, env = "TASKGEN_ADJUDICATION_API_KEY", hide_env_values = true)]
+    adjudication_api_key: Option<String>,
+
+    #[arg(long)]
+    adjudication_keyfile: Option<PathBuf>,
+
     #[arg(long, conflicts_with = "review_system_prompt_file")]
     review_system_prompt: Option<String>,
 
@@ -420,11 +492,8 @@ struct GenerateArgs {
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     review_max_output_tokens: Option<u64>,
 
-    #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u64).range(1..))]
-    max_attempts_per_slot: u64,
-
     /// Repair attempts for one coordinate before replacing it with a fresh coordinate.
-    #[arg(long, default_value_t = 2)]
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u64).range(..=1))]
     max_repairs_per_coordinate: u64,
 
     #[arg(long, value_enum, default_value_t = dedup::DedupMode::Semantic)]
@@ -485,6 +554,212 @@ struct TaskEntry {
     temperature: f64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct DeterministicCandidateChecks {
+    schema: &'static str,
+    coordinate_compiler: &'static str,
+    fixture_semantics: &'static str,
+    approval_language: &'static str,
+    hard_failures: Vec<String>,
+    warnings: Vec<String>,
+}
+
+fn deterministic_candidate_checks(entry: &TaskEntry) -> DeterministicCandidateChecks {
+    let lower = entry.prompt.to_ascii_lowercase();
+    let mut hard_failures = Vec::new();
+    let mut warnings = Vec::new();
+    let live_access_markers = [
+        "taskgen queried the live",
+        "taskgen connected to",
+        "as an ai, i accessed",
+        "i accessed your live network",
+        "i logged into your production",
+    ];
+    if live_access_markers
+        .iter()
+        .any(|marker| lower.contains(marker))
+    {
+        hard_failures.push(
+            "candidate falsely claims that Taskgen or the model accessed a live system".into(),
+        );
+    }
+    let approval_required = entry.coordinates.as_ref().is_some_and(|coordinates| {
+        matches!(
+            coordinates.action_risk.as_str(),
+            "approval_gated_change"
+                | "emergency_change_decision"
+                | "high_risk_change_plan_only"
+                | "rollback_required"
+        )
+    });
+    let approval_present = [
+        "approval",
+        "approved",
+        "authorize",
+        "authorise",
+        "cab",
+        "change record",
+        "change ticket",
+        "human-in-the-loop",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker));
+    if approval_required && !approval_present {
+        warnings.push(
+            "the action-risk coordinate requires approval but no approval language was detected"
+                .into(),
+        );
+    }
+    let fixture_like = lower.contains("```")
+        || lower.contains("output:")
+        || lower.contains("logs:")
+        || lower.contains("configuration:");
+    let fixture_context = [
+        "supplied", "provided", "pasted", "attached", "shown", "observed",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker));
+    if fixture_like && !fixture_context {
+        warnings.push(
+            "embedded machine evidence is not clearly framed as supplied scenario evidence".into(),
+        );
+    }
+    DeterministicCandidateChecks {
+        schema: "pass",
+        coordinate_compiler: "pass",
+        fixture_semantics: if hard_failures.is_empty() {
+            if fixture_like && !fixture_context {
+                "warning"
+            } else {
+                "pass"
+            }
+        } else {
+            "fail"
+        },
+        approval_language: if approval_required && !approval_present {
+            "warning"
+        } else {
+            "pass"
+        },
+        hard_failures,
+        warnings,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct GenerationWorkItem {
+    sequence: usize,
+    wave: usize,
+    sample: taxonomy::SampledTask,
+    language: Option<String>,
+    feedback: Option<GenerationFeedback>,
+    repair_of: Option<String>,
+    repair_count: u64,
+}
+
+#[derive(Debug)]
+struct StagedCandidate {
+    work: GenerationWorkItem,
+    candidate_id: String,
+    entry: TaskEntry,
+    serialized: String,
+    embedding: Option<Vec<f32>>,
+    deterministic_checks: DeterministicCandidateChecks,
+}
+
+#[derive(Debug)]
+struct CandidateEvaluation {
+    review: review::ReviewResult,
+    adjudication: Option<review::AdjudicationResult>,
+    references: Vec<references::ReferenceExcerpt>,
+}
+
+#[derive(Clone)]
+struct CandidateReviewContext {
+    taxonomy_id: String,
+    taxonomy_kind: String,
+    review_provider: provider::ProviderConfig,
+    adjudication_provider: provider::ProviderConfig,
+    client: reqwest::Client,
+    review_system_prompt: String,
+    review_max_tokens: u64,
+    review_telemetry: Arc<telemetry::RequestTelemetry>,
+    adjudication_telemetry: Arc<telemetry::RequestTelemetry>,
+    reference_store: Arc<references::ReferenceStore>,
+}
+
+impl CandidateEvaluation {
+    fn accepted(&self) -> bool {
+        self.review.decision.outcome == review::ReviewOutcome::Accept
+            || (self.review.decision.outcome == review::ReviewOutcome::NeedsVerification
+                && self.adjudication.as_ref().is_some_and(|result| {
+                    result.decision.outcome == review::AdjudicationOutcome::Accept
+                }))
+    }
+}
+
+async fn evaluate_candidate(
+    entry: &TaskEntry,
+    deterministic_checks: DeterministicCandidateChecks,
+    context: CandidateReviewContext,
+) -> Result<CandidateEvaluation> {
+    use review::{CandidateAdjudicator, CandidateReviewer};
+
+    let candidate = serde_json::to_value(entry)?;
+    let reviewer = review::ReviewClient::new(
+        context.review_provider,
+        context.client.clone(),
+        context.review_max_tokens,
+        context.review_telemetry,
+    )?;
+    let reviewed = reviewer
+        .review(review::ReviewRequest {
+            candidate: candidate.clone(),
+            taxonomy_id: context.taxonomy_id,
+            taxonomy_kind: context.taxonomy_kind,
+            system_prompt: context.review_system_prompt,
+            deterministic_checks: Some(serde_json::to_value(deterministic_checks)?),
+        })
+        .await?;
+    if reviewed.decision.outcome != review::ReviewOutcome::NeedsVerification {
+        return Ok(CandidateEvaluation {
+            review: reviewed,
+            adjudication: None,
+            references: Vec::new(),
+        });
+    }
+
+    let mut by_id = BTreeMap::new();
+    for claim in &reviewed.decision.claims_requiring_verification {
+        for excerpt in context
+            .reference_store
+            .retrieve(&claim.reference_query, 3, 1200)
+        {
+            by_id.entry(excerpt.reference_id.clone()).or_insert(excerpt);
+        }
+    }
+    let references: Vec<_> = by_id.into_values().collect();
+    let adjudicator = review::AdjudicationClient::new(
+        context.adjudication_provider,
+        context.client,
+        1024,
+        context.adjudication_telemetry,
+    )?;
+    let adjudication = adjudicator
+        .adjudicate(review::AdjudicationRequest {
+            candidate,
+            review: reviewed.decision.clone(),
+            references: references.clone(),
+            system_prompt: include_str!("../prompts/prompt-adjudication-system-v1.txt").to_string(),
+        })
+        .await?;
+    Ok(CandidateEvaluation {
+        review: reviewed,
+        adjudication: Some(adjudication),
+        references,
+    })
+}
+
 fn serialize_task_entry(entry: &TaskEntry) -> Result<String> {
     let value = serde_json::to_value(entry)?;
     if entry.schema_version.as_deref() == Some("scogo.taskgen.task.v2") {
@@ -535,17 +810,10 @@ fn chat_request(
 ) -> ChatRequest {
     let normalized_model = model.to_ascii_lowercase();
     let is_qwen = normalized_model.contains("qwen");
-    let is_deepseek_v4 = normalized_model.contains("deepseek-v4");
     let enable_thinking = is_qwen.then_some(false);
     let thinking_budget = enable_thinking.map(|_| 0);
-    let reasoning_effort = if is_qwen {
-        Some("low".to_string())
-    } else if is_deepseek_v4 {
-        Some("none".to_string())
-    } else {
-        None
-    };
-    let include_reasoning = is_deepseek_v4.then_some(false);
+    let reasoning_effort = is_qwen.then(|| "low".to_string());
+    let include_reasoning = None;
     if restricted_sampling(model) {
         ChatRequest {
             model: model.to_string(),
@@ -723,14 +991,8 @@ fn generation_max_output_tokens(model: &str, requested: Option<u64>) -> u64 {
 }
 
 fn review_max_output_tokens(model: &str, requested: Option<u64>) -> u64 {
-    let normalized_model = model.to_ascii_lowercase();
-    if let Some(requested) = requested {
-        requested
-    } else if normalized_model.contains("qwen") || normalized_model.contains("deepseek-v4") {
-        4096
-    } else {
-        1024
-    }
+    let _ = model;
+    requested.unwrap_or(1024)
 }
 
 fn parse_chat_payload(raw: &str) -> Result<(String, u64, u64)> {
@@ -819,7 +1081,14 @@ struct AtomicStats {
     output_tokens: AtomicU64,
     review_input_tokens: AtomicU64,
     review_output_tokens: AtomicU64,
+    adjudication_input_tokens: AtomicU64,
+    adjudication_output_tokens: AtomicU64,
     coordinate_replacements: AtomicU64,
+    top_up_waves: AtomicUsize,
+    review_accepts: AtomicUsize,
+    review_revises: AtomicUsize,
+    review_rejects: AtomicUsize,
+    review_needs_verification: AtomicUsize,
     attempts: AtomicUsize,
     tasks: AtomicUsize,
     errors: AtomicUsize,
@@ -832,7 +1101,14 @@ impl AtomicStats {
             output_tokens: AtomicU64::new(0),
             review_input_tokens: AtomicU64::new(0),
             review_output_tokens: AtomicU64::new(0),
+            adjudication_input_tokens: AtomicU64::new(0),
+            adjudication_output_tokens: AtomicU64::new(0),
             coordinate_replacements: AtomicU64::new(0),
+            top_up_waves: AtomicUsize::new(0),
+            review_accepts: AtomicUsize::new(0),
+            review_revises: AtomicUsize::new(0),
+            review_rejects: AtomicUsize::new(0),
+            review_needs_verification: AtomicUsize::new(0),
             attempts: AtomicUsize::new(0),
             tasks: AtomicUsize::new(0),
             errors: AtomicUsize::new(0),
@@ -1912,6 +2188,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Generate(args) => run_generate(*args).await,
+        Command::Review(args) => run_review(*args).await,
         Command::Dedup(args) => run_dedup(args).await,
         Command::Atif { command } => {
             let (direction, args) = match command {
@@ -1946,6 +2223,323 @@ async fn main() -> Result<()> {
             Ok(())
         }
     }
+}
+
+async fn run_review(args: ReviewArgs) -> Result<()> {
+    let started_at = chrono::Utc::now();
+    let started_clock = std::time::Instant::now();
+    let taxonomy = taxonomy::TaxonomyCatalog::from_path(&args.taxonomy)?;
+    let system_prompt = if let Some(prompt) = &args.system_prompt {
+        prompt.clone()
+    } else if let Some(path) = &args.system_prompt_file {
+        std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read review prompt: {}", path.display()))?
+    } else if let Some(path) = taxonomy.default_review_system_prompt_path() {
+        std::fs::read_to_string(&path)
+            .with_context(|| format!("failed to read taxonomy review prompt: {}", path.display()))?
+    } else {
+        include_str!("../prompts/itops-prompt-review-system-v3.txt").to_string()
+    };
+    let credentials =
+        provider::load_credential_pool(args.keyfile.as_deref(), args.api_key.clone(), "review")?;
+    let review_provider = provider::ProviderConfig {
+        api_base: provider::normalize_api_base(&args.api_base)?,
+        model: args.model.clone(),
+        credentials,
+    };
+    let adjudication_credentials =
+        if args.adjudication_keyfile.is_some() || args.adjudication_api_key.is_some() {
+            Some(provider::load_credential_pool(
+                args.adjudication_keyfile.as_deref(),
+                args.adjudication_api_key.clone(),
+                "adjudication",
+            )?)
+        } else {
+            None
+        };
+    let adjudication_provider = provider::resolve_review_provider(
+        &review_provider,
+        provider::ProviderOverrides {
+            api_base: args.adjudication_api_base.clone(),
+            model: args.adjudication_model.clone(),
+            credentials: adjudication_credentials,
+        },
+    )?;
+    let reference_store = Arc::new(match args.review_reference_dir.as_deref() {
+        Some(path) => references::ReferenceStore::load(path)?,
+        None => references::ReferenceStore::empty(),
+    });
+    let review_telemetry = Arc::new(telemetry::RequestTelemetry::default());
+    let adjudication_telemetry = Arc::new(telemetry::RequestTelemetry::default());
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()?;
+
+    #[derive(Debug)]
+    struct StandaloneCandidate {
+        id: String,
+        sequence: usize,
+        entry: TaskEntry,
+        serialized: String,
+        envelope: serde_json::Value,
+        deterministic_checks: DeterministicCandidateChecks,
+    }
+
+    let mut candidates = Vec::new();
+    for (line_index, line) in BufReader::new(
+        File::open(&args.input)
+            .with_context(|| format!("failed to open review input: {}", args.input.display()))?,
+    )
+    .lines()
+    .enumerate()
+    {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let envelope: serde_json::Value = serde_json::from_str(&line).with_context(|| {
+            format!(
+                "invalid review candidate at {}:{}",
+                args.input.display(),
+                line_index + 1
+            )
+        })?;
+        let candidate_value = envelope.get("candidate").unwrap_or(&envelope).clone();
+        schema::validate_instance(schema::SchemaKind::Task, &candidate_value).with_context(
+            || {
+                format!(
+                    "schema-invalid review candidate at {}:{}",
+                    args.input.display(),
+                    line_index + 1
+                )
+            },
+        )?;
+        let entry: TaskEntry = serde_json::from_value(candidate_value)?;
+        taxonomy.validate_task_coordinates(
+            &entry.category,
+            &entry.domain,
+            &entry.subdomain,
+            entry
+                .coordinates
+                .as_ref()
+                .context("review candidate is missing coordinates")?,
+        )?;
+        let serialized = serialize_task_entry(&entry)?;
+        let sequence = envelope
+            .get("sequence")
+            .and_then(serde_json::Value::as_u64)
+            .map(|value| value as usize)
+            .unwrap_or(line_index + 1);
+        let id = envelope
+            .get("candidate_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                let mut hasher = Sha256::new();
+                hasher.update(sequence.to_le_bytes());
+                hasher.update(entry.prompt.as_bytes());
+                format!("{:x}", hasher.finalize())
+            });
+        let deterministic_checks = deterministic_candidate_checks(&entry);
+        candidates.push(StandaloneCandidate {
+            id,
+            sequence,
+            entry,
+            serialized,
+            envelope,
+            deterministic_checks,
+        });
+    }
+
+    let run_id = format!("{:08x}", rand::random::<u32>());
+    let timestamp = started_at.format("%Y%m%dT%H%M%SZ").to_string();
+    let run_dir = args.run_dir.clone().unwrap_or_else(|| {
+        artifacts::automatic_run_dir(
+            Path::new("taskgen-runs"),
+            &timestamp,
+            &format!("{}-review", taxonomy.id()),
+            &run_id,
+        )
+    });
+    let mut artifacts = artifacts::RunArtifacts::create(
+        &run_dir,
+        None,
+        &serde_json::json!({
+            "schema_version":"scogo.taskgen.review-run.v1",
+            "run_id":run_id,
+            "status":"running",
+            "started_at":started_at.to_rfc3339(),
+            "input":args.input,
+            "input_records":candidates.len(),
+        }),
+    )?;
+    for candidate in &candidates {
+        artifacts.write_candidate(&candidate.envelope)?;
+    }
+    artifacts.flush()?;
+
+    let mut deterministic_rejections = 0usize;
+    let mut reviewable_candidates = Vec::new();
+    for candidate in candidates {
+        if candidate.deterministic_checks.hard_failures.is_empty() {
+            reviewable_candidates.push(candidate);
+        } else {
+            deterministic_rejections += 1;
+            artifacts.write_rejection(&serde_json::json!({
+                "schema_version":"scogo.taskgen.rejection.v2",
+                "candidate_id":candidate.id,
+                "stage":"deterministic_validation",
+                "hard_failures":candidate.deterministic_checks.hard_failures,
+                "candidate":candidate.entry,
+            }))?;
+        }
+    }
+
+    let taxonomy_id = taxonomy.id().to_string();
+    let taxonomy_kind = format!("{:?}", taxonomy.kind()).to_ascii_lowercase();
+    let review_max_tokens =
+        review_max_output_tokens(&review_provider.model, args.max_output_tokens);
+    let mut evaluated: Vec<(
+        StandaloneCandidate,
+        std::result::Result<CandidateEvaluation, String>,
+    )> = stream::iter(reviewable_candidates)
+        .map(|candidate| {
+            let taxonomy_id = taxonomy_id.clone();
+            let taxonomy_kind = taxonomy_kind.clone();
+            let review_provider = review_provider.clone();
+            let adjudication_provider = adjudication_provider.clone();
+            let client = client.clone();
+            let system_prompt = system_prompt.clone();
+            let review_telemetry = review_telemetry.clone();
+            let adjudication_telemetry = adjudication_telemetry.clone();
+            let reference_store = reference_store.clone();
+            async move {
+                let context = CandidateReviewContext {
+                    taxonomy_id,
+                    taxonomy_kind,
+                    review_provider,
+                    adjudication_provider,
+                    client,
+                    review_system_prompt: system_prompt,
+                    review_max_tokens,
+                    review_telemetry,
+                    adjudication_telemetry,
+                    reference_store,
+                };
+                let result = evaluate_candidate(
+                    &candidate.entry,
+                    candidate.deterministic_checks.clone(),
+                    context,
+                )
+                .await
+                .map_err(|error| format!("{error:#}"));
+                (candidate, result)
+            }
+        })
+        .buffer_unordered(args.review_workers)
+        .collect()
+        .await;
+    evaluated.sort_by_key(|(candidate, _)| candidate.sequence);
+
+    let mut accepted = 0usize;
+    let mut rejected = deterministic_rejections;
+    let mut review_errors = 0usize;
+    let mut observed = Vec::new();
+    for (candidate, result) in evaluated {
+        let evaluation = match result {
+            Ok(evaluation) => evaluation,
+            Err(reason) => {
+                review_errors += 1;
+                artifacts.write_rejection(&serde_json::json!({
+                    "schema_version":"scogo.taskgen.rejection.v2",
+                    "candidate_id":candidate.id,
+                    "stage":"review_error",
+                    "reason":reason,
+                    "candidate":candidate.entry,
+                }))?;
+                continue;
+            }
+        };
+        let outcome = serde_json::to_value(&evaluation.review.decision.outcome)?
+            .as_str()
+            .context("review outcome did not serialize as a string")?
+            .to_string();
+        observed.push(calibration::ObservedLabel {
+            candidate_id: candidate.id.clone(),
+            outcome,
+            adjudicated: evaluation.adjudication.is_some(),
+        });
+        let final_disposition = if evaluation.accepted() {
+            accepted += 1;
+            artifacts.write_accepted_line(&candidate.serialized)?;
+            "accepted"
+        } else {
+            rejected += 1;
+            artifacts.write_rejection(&serde_json::json!({
+                "schema_version":"scogo.taskgen.rejection.v2",
+                "candidate_id":candidate.id,
+                "stage":"model_review_v3",
+                "decision":evaluation.review.decision,
+                "adjudication":evaluation.adjudication,
+                "candidate":candidate.entry,
+            }))?;
+            "rejected"
+        };
+        artifacts.write_review(&serde_json::json!({
+            "schema_version":"scogo.taskgen.review-record.v3",
+            "candidate_id":candidate.id,
+            "sequence":candidate.sequence,
+            "review_model":evaluation.review.model,
+            "review_input_tokens":evaluation.review.input_tokens,
+            "review_output_tokens":evaluation.review.output_tokens,
+            "decision_normalization":evaluation.review.normalization,
+            "decision":evaluation.review.decision,
+            "references":evaluation.references,
+            "adjudication":evaluation.adjudication,
+            "final_disposition":final_disposition,
+        }))?;
+    }
+
+    let calibration = if let Some(path) = args.gold_labels.as_deref() {
+        Some(calibration::evaluate(
+            &calibration::load_gold(path)?,
+            &observed,
+        ))
+    } else {
+        None
+    };
+    let completed_at = chrono::Utc::now();
+    let report = serde_json::json!({
+        "schema_version":"scogo.taskgen.review-run.v1",
+        "run_id":run_id,
+        "status":if review_errors == 0 {"success"} else {"completed_with_errors"},
+        "started_at":started_at.to_rfc3339(),
+        "completed_at":completed_at.to_rfc3339(),
+        "duration_seconds":started_clock.elapsed().as_secs_f64(),
+        "input":args.input,
+        "taxonomy_id":taxonomy.id(),
+        "input_records":accepted + rejected + review_errors,
+        "reviewed_records":accepted + rejected,
+        "accepted_records":accepted,
+        "rejected_records":rejected,
+        "review_errors":review_errors,
+        "concurrency":{"review_workers":args.review_workers},
+        "review":{"model":review_provider.model,"endpoint_origin":review_provider.api_base.origin().ascii_serialization()},
+        "adjudication":{"model":adjudication_provider.model,"endpoint_origin":adjudication_provider.api_base.origin().ascii_serialization()},
+        "requests":{"review":review_telemetry.snapshot(),"adjudication":adjudication_telemetry.snapshot()},
+        "calibration":calibration,
+    });
+    let published = artifacts.publish(&report)?;
+    println!(
+        "Reviewed {} candidates: {} accepted, {} rejected, {} review errors -> {}",
+        accepted + rejected + review_errors,
+        accepted,
+        rejected,
+        review_errors,
+        published.output.display()
+    );
+    println!("Run report: {}", published.run.display());
+    Ok(())
 }
 
 fn dedup_default_path(input: &std::path::Path, suffix: &str) -> Result<PathBuf> {
@@ -2025,7 +2619,7 @@ fn resolve_review_system_prompt(
             )
         });
     }
-    Ok(include_str!("../prompts/itops-prompt-review-system-v2.txt").to_string())
+    Ok(include_str!("../prompts/itops-prompt-review-system-v3.txt").to_string())
 }
 
 async fn seed_existing_dedup(
@@ -2111,6 +2705,7 @@ struct GenerationReportContext<'a> {
     generation_provider: &'a provider::ProviderConfig,
     effective_generation_models: &'a [String],
     review_provider: &'a provider::ProviderConfig,
+    adjudication_provider: &'a provider::ProviderConfig,
     effective_review_models: &'a [String],
     semantic_model_id: &'a str,
     existing_records: usize,
@@ -2127,6 +2722,7 @@ struct GenerationReportOutcome<'a> {
     stats: &'a AtomicStats,
     generation_requests: telemetry::RequestTelemetrySnapshot,
     review_requests: telemetry::RequestTelemetrySnapshot,
+    adjudication_requests: telemetry::RequestTelemetrySnapshot,
 }
 
 fn runtime_worker_threads() -> usize {
@@ -2182,7 +2778,7 @@ fn rejection_summary(path: &std::path::Path) -> Result<serde_json::Value> {
         }
         if let Some(reasons) = value
             .get("decision")
-            .and_then(|decision| decision.get("reason_codes"))
+            .and_then(|decision| decision.get("hard_failures"))
             .and_then(serde_json::Value::as_array)
         {
             for reason in reasons.iter().filter_map(serde_json::Value::as_str) {
@@ -2212,7 +2808,7 @@ fn generation_run_report(
         .unwrap_or(1);
 
     Ok(serde_json::json!({
-        "schema_version": "scogo.taskgen.run.v2",
+        "schema_version": "scogo.taskgen.run.v3",
         "command_version": env!("CARGO_PKG_VERSION"),
         "run_id": context.run_id,
         "status": outcome.status,
@@ -2234,7 +2830,8 @@ fn generation_run_report(
         "rejected_candidates": outcome.stats.errors.load(Ordering::Relaxed),
         "coordinate_replacements": outcome.stats.coordinate_replacements.load(Ordering::Relaxed),
         "concurrency": {
-            "acceptance_workers": context.args.workers,
+            "generation_workers": context.args.workers,
+            "review_workers": context.args.review_workers,
             "runtime": "tokio-multi-thread",
             "runtime_worker_threads": runtime_worker_threads(),
             "logical_cpus": logical_cpus,
@@ -2268,14 +2865,28 @@ fn generation_run_report(
                 context.args.review_input_price.or(context.args.input_price),
                 context.args.review_output_price.or(context.args.output_price),
             ),
+            "outcomes": {
+                "accept": outcome.stats.review_accepts.load(Ordering::Relaxed),
+                "revise": outcome.stats.review_revises.load(Ordering::Relaxed),
+                "reject": outcome.stats.review_rejects.load(Ordering::Relaxed),
+                "needs_verification": outcome.stats.review_needs_verification.load(Ordering::Relaxed),
+            },
+        },
+        "adjudication": {
+            "model": context.adjudication_provider.model,
+            "endpoint_origin": context.adjudication_provider.api_base.origin().ascii_serialization(),
+            "input_tokens": outcome.stats.adjudication_input_tokens.load(Ordering::Relaxed),
+            "output_tokens": outcome.stats.adjudication_output_tokens.load(Ordering::Relaxed),
         },
         "timing": {
             "generation_total_ms": outcome.generation_requests.total_ms,
             "review_total_ms": outcome.review_requests.total_ms,
+            "adjudication_total_ms": outcome.adjudication_requests.total_ms,
         },
         "requests": {
             "generation": outcome.generation_requests,
             "review": outcome.review_requests,
+            "adjudication": outcome.adjudication_requests,
         },
         "throughput": {
             "tasks_per_minute": if duration_minutes > 0.0 { accepted as f64 / duration_minutes } else { 0.0 },
@@ -2285,6 +2896,7 @@ fn generation_run_report(
             "candidate_acceptance_rate": if candidate_attempts > 0 { accepted as f64 / candidate_attempts as f64 } else { 0.0 },
             "attempts_per_accepted": if accepted > 0 { serde_json::Value::from(candidate_attempts as f64 / accepted as f64) } else { serde_json::Value::Null },
             "coordinate_replacement_rate": if candidate_attempts > 0 { outcome.stats.coordinate_replacements.load(Ordering::Relaxed) as f64 / candidate_attempts as f64 } else { 0.0 },
+            "top_up_waves": outcome.stats.top_up_waves.load(Ordering::Relaxed),
         },
         "rejections": rejection_summary(&context.paths.rejected)?,
         "dedup": {
@@ -2296,6 +2908,7 @@ fn generation_run_report(
         },
         "artifacts": {
             "tasks": task_artifact,
+            "candidates": artifact_descriptor(&context.paths.candidates, "candidates.jsonl")?,
             "reviews": artifact_descriptor(&context.paths.reviews, "reviews.jsonl")?,
             "rejected": artifact_descriptor(&context.paths.rejected, "rejected.jsonl")?,
             "run": {"file":"run.json"},
@@ -2357,8 +2970,6 @@ fn spawn_shutdown_listener(
 }
 
 async fn run_generate(args: GenerateArgs) -> Result<()> {
-    use review::CandidateReviewer;
-
     let started_at = chrono::Utc::now();
     let started_clock = std::time::Instant::now();
     let taxonomy = match args.taxonomy.as_deref() {
@@ -2409,6 +3020,28 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             credentials: review_credentials,
         },
     )?;
+    let adjudication_credentials =
+        if args.adjudication_keyfile.is_some() || args.adjudication_api_key.is_some() {
+            Some(provider::load_credential_pool(
+                args.adjudication_keyfile.as_deref(),
+                args.adjudication_api_key.clone(),
+                "adjudication",
+            )?)
+        } else {
+            None
+        };
+    let adjudication_provider = provider::resolve_review_provider(
+        &review_provider,
+        provider::ProviderOverrides {
+            api_base: args.adjudication_api_base.clone(),
+            model: args.adjudication_model.clone(),
+            credentials: adjudication_credentials,
+        },
+    )?;
+    let reference_store = Arc::new(match args.review_reference_dir.as_deref() {
+        Some(path) => references::ReferenceStore::load(path)?,
+        None => references::ReferenceStore::empty(),
+    });
 
     let dedup_config = dedup::DedupConfig {
         mode: args.dedup_mode,
@@ -2508,7 +3141,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         )
     });
     let initial_report = serde_json::json!({
-        "schema_version": "scogo.taskgen.run.v2",
+        "schema_version": "scogo.taskgen.run.v3",
         "run_id": run_id,
         "status": "running",
         "started_at": started_at.to_rfc3339(),
@@ -2518,7 +3151,8 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         "requested_new_records": args.count,
         "review_enabled": !args.skip_review,
         "concurrency": {
-            "acceptance_workers": args.workers,
+            "generation_workers": args.workers,
+            "review_workers": args.review_workers,
             "runtime": "tokio-multi-thread",
             "runtime_worker_threads": runtime_worker_threads(),
             "logical_cpus": std::thread::available_parallelism().map(|value| value.get()).unwrap_or(1),
@@ -2533,6 +3167,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     let stats = Arc::new(AtomicStats::new());
     let generation_telemetry = Arc::new(telemetry::RequestTelemetry::default());
     let review_telemetry = Arc::new(telemetry::RequestTelemetry::default());
+    let adjudication_telemetry = Arc::new(telemetry::RequestTelemetry::default());
     let cancel = Arc::new(AtomicBool::new(false));
     let signal_reason = Arc::new(std::sync::Mutex::new(None));
     let shutdown_listener = spawn_shutdown_listener(cancel.clone(), signal_reason.clone());
@@ -2540,369 +3175,569 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     let pb = ProgressBar::new(args.count as u64);
     pb.set_style(progress_style);
     pb.set_message("waiting for accepted prompts");
-    let workers = args.workers;
-    let results: Vec<Result<()>> = stream::iter(0..args.count)
-        .map(|slot_index| {
-            let taxonomy = worker_taxonomy.clone();
-            let dist = dist.clone();
-            let diff_dist = diff_dist.clone();
-            let clients = clients.clone();
-            let proxy_counter = proxy_counter.clone();
-            let generation_provider = generation_provider.clone();
-            let review_provider = review_provider.clone();
-            let free_models = free_models.clone();
-            let model_counter = model_counter.clone();
-            let artifacts = artifacts.clone();
-            let dedup_index = dedup_index.clone();
-            let embedder = embedder.clone();
-            let stats = stats.clone();
-            let generation_telemetry = generation_telemetry.clone();
-            let review_telemetry = review_telemetry.clone();
-            let cancel = cancel.clone();
-            let consecutive_availability_failures = consecutive_availability_failures.clone();
-            let pb = pb.clone();
-            let system_prompt = system_prompt.clone();
-            let review_system_prompt = review_system_prompt.clone();
-            let taxonomy_id = taxonomy.id().to_string();
-            let taxonomy_kind = format!("{:?}", taxonomy.kind()).to_ascii_lowercase();
-            let explicit_review_model = args.review_model.is_some();
-            let skip_review = args.skip_review;
-            let temperature = args.temperature;
-            let max_output_tokens = args.max_output_tokens;
-            let requested_review_max_output_tokens = args.review_max_output_tokens;
-            let max_attempts = args.max_attempts_per_slot;
-            let max_repairs = args.max_repairs_per_coordinate;
-            let input_price = args.input_price;
-            let output_price = args.output_price;
-            let review_input_price = args.review_input_price.or(args.input_price);
-            let review_output_price = args.review_output_price.or(args.output_price);
-            let budget = args.budget;
+    let max_candidates = args
+        .max_candidates
+        .unwrap_or_else(|| args.count.saturating_mul(20).max(100));
+    let taxonomy_id = taxonomy.id().to_string();
+    let taxonomy_kind = format!("{:?}", taxonomy.kind()).to_ascii_lowercase();
+    let explicit_review_model = args.review_model.is_some();
+    let explicit_adjudication_model = args.adjudication_model.is_some();
+    let mut repair_queue: VecDeque<GenerationWorkItem> = VecDeque::new();
+    let mut seen_candidate_hashes = HashSet::new();
+    let mut next_sequence = 1usize;
+    let mut wave = 0usize;
+    let mut execution_error: Option<String> = None;
 
-            async move {
-                let mut slot_rng =
-                    StdRng::seed_from_u64(derive_slot_seed(effective_seed, slot_index));
-                let mut sample =
-                    taxonomy.sample_prevalidated(&mut slot_rng, &dist, &diff_dist)?;
-                let mut attempted_samples = HashSet::from([sample.clone()]);
+    while stats.tasks.load(Ordering::Relaxed) < args.count
+        && stats.attempts.load(Ordering::Relaxed) < max_candidates
+        && !cancel.load(Ordering::Relaxed)
+    {
+        if let Some(limit) = args.budget {
+            let spent = generation_cost(&stats, args.input_price, args.output_price)
+                + review_cost(
+                    &stats,
+                    args.review_input_price.or(args.input_price),
+                    args.review_output_price.or(args.output_price),
+                );
+            if spent >= limit {
+                execution_error = Some("budget exhausted before exact acceptance".into());
+                break;
+            }
+        }
+
+        wave += 1;
+        if wave > 1 {
+            stats.top_up_waves.fetch_add(1, Ordering::Relaxed);
+        }
+        let deficit = args.count - stats.tasks.load(Ordering::Relaxed);
+        let remaining_capacity = max_candidates - stats.attempts.load(Ordering::Relaxed);
+        let wave_size = deficit.min(remaining_capacity);
+        let mut work_items = Vec::with_capacity(wave_size);
+        for _ in 0..wave_size {
+            let sequence = next_sequence;
+            next_sequence += 1;
+            let mut work = if let Some(mut repair) = repair_queue.pop_front() {
+                repair.sequence = sequence;
+                repair.wave = wave;
+                repair
+            } else {
+                let mut rng = StdRng::seed_from_u64(derive_slot_seed(effective_seed, sequence - 1));
+                let sample = worker_taxonomy.sample_prevalidated(&mut rng, &dist, &diff_dist)?;
                 let language = args.multilingual.then(|| {
-                    let index = slot_rng.gen_range(0..LANGUAGES.len());
+                    let index = rng.gen_range(0..LANGUAGES.len());
                     LANGUAGES[index].0.to_string()
                 });
-                let mut generation_feedback: Option<GenerationFeedback> = None;
-                let mut require_concise_completion = false;
-                for attempt in 1..=max_attempts {
-                    let (_, repair_attempt) = coordinate_attempt_phase(attempt, max_repairs);
-                    if attempt > 1 && repair_attempt == 0 {
-                        sample = taxonomy.resample_unseen_subject_coordinates(
-                            &mut slot_rng,
-                            &sample,
-                            &diff_dist,
-                            &attempted_samples,
-                        )?;
-                        attempted_samples.insert(sample.clone());
-                        generation_feedback = None;
+                if sequence > args.count {
+                    stats
+                        .coordinate_replacements
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+                GenerationWorkItem {
+                    sequence,
+                    wave,
+                    sample,
+                    language,
+                    feedback: None,
+                    repair_of: None,
+                    repair_count: 0,
+                }
+            };
+            work.sequence = sequence;
+            work.wave = wave;
+            stats.attempts.fetch_add(1, Ordering::Relaxed);
+            work_items.push(work);
+        }
+
+        pb.set_message(format!(
+            "wave {wave}: generating {} candidates",
+            work_items.len()
+        ));
+        let mut generated: Vec<(
+            GenerationWorkItem,
+            std::result::Result<StagedCandidate, String>,
+        )> = stream::iter(work_items)
+            .map(|work| {
+                let clients = clients.clone();
+                let proxy_counter = proxy_counter.clone();
+                let generation_provider = generation_provider.clone();
+                let free_models = free_models.clone();
+                let model_counter = model_counter.clone();
+                let embedder = embedder.clone();
+                let stats = stats.clone();
+                let generation_telemetry = generation_telemetry.clone();
+                let cancel = cancel.clone();
+                let consecutive_availability_failures = consecutive_availability_failures.clone();
+                let pb = pb.clone();
+                let system_prompt = system_prompt.clone();
+                let taxonomy = worker_taxonomy.clone();
+                let temperature = args.temperature;
+                let max_output_tokens = args.max_output_tokens;
+                async move {
+                    let result = async {
+                        let use_model = match &free_models {
+                            Some(models) => {
+                                let index =
+                                    model_counter.fetch_add(1, Ordering::Relaxed) % models.len();
+                                models[index].clone()
+                            }
+                            None => generation_provider.model.clone(),
+                        };
+                        let client_index =
+                            proxy_counter.fetch_add(1, Ordering::Relaxed) % clients.len();
+                        let client = &clients[client_index];
+                        let credential = generation_provider.credentials.next();
+                        let generated = generate_task(GenerateTaskRequest {
+                            client,
+                            api_base: generation_provider.api_base.as_str(),
+                            api_key: credential.expose(),
+                            model: &use_model,
+                            system_prompt: &system_prompt,
+                            sample: &work.sample,
+                            temperature,
+                            max_output_tokens,
+                            language: work.language.as_deref(),
+                            feedback: work.feedback.as_ref(),
+                            cancel: &cancel,
+                            consecutive_availability_failures: &consecutive_availability_failures,
+                            progress: &pb,
+                            telemetry: &generation_telemetry,
+                        })
+                        .await
+                        .map_err(|error| error.to_string())?;
+                        stats.input_tokens.fetch_add(generated.1, Ordering::Relaxed);
                         stats
-                            .coordinate_replacements
-                            .fetch_add(1, Ordering::Relaxed);
+                            .output_tokens
+                            .fetch_add(generated.2, Ordering::Relaxed);
+                        let entry = TaskEntry {
+                            schema_version: Some("scogo.taskgen.task.v2".into()),
+                            prompt: generated.0,
+                            category: work.sample.category_id.clone(),
+                            domain: work.sample.domain_id.clone(),
+                            subdomain: work.sample.subdomain_id.clone(),
+                            difficulty: work.sample.difficulty,
+                            coordinates: work.sample.coordinates.clone(),
+                            language: work.language.clone(),
+                            taskgen_model: use_model,
+                            temperature,
+                        };
+                        taxonomy
+                            .validate_task_coordinates(
+                                &entry.category,
+                                &entry.domain,
+                                &entry.subdomain,
+                                entry.coordinates.as_ref().ok_or_else(|| {
+                                    "generated task is missing coordinates".to_string()
+                                })?,
+                            )
+                            .map_err(|error| error.to_string())?;
+                        let serialized =
+                            serialize_task_entry(&entry).map_err(|error| error.to_string())?;
+                        let embedding = match &embedder {
+                            Some(embedder) => Some(
+                                embedder
+                                    .embed(&entry.prompt)
+                                    .await
+                                    .map_err(|error| error.to_string())?,
+                            ),
+                            None => None,
+                        };
+                        let candidate_id = {
+                            let mut hasher = Sha256::new();
+                            hasher.update(work.sequence.to_le_bytes());
+                            hasher.update(entry.prompt.as_bytes());
+                            format!("{:x}", hasher.finalize())
+                        };
+                        let deterministic_checks = deterministic_candidate_checks(&entry);
+                        Ok(StagedCandidate {
+                            work: work.clone(),
+                            candidate_id,
+                            entry,
+                            serialized,
+                            embedding,
+                            deterministic_checks,
+                        })
                     }
-                    if cancel.load(Ordering::Relaxed) {
-                        bail!("slot {} cancelled before acceptance", slot_index + 1);
-                    }
-                    if let Some(limit) = budget {
-                        let spent = generation_cost(&stats, input_price, output_price)
-                            + review_cost(&stats, review_input_price, review_output_price);
-                        if spent >= limit {
-                            cancel.store(true, Ordering::Relaxed);
-                            bail!("budget exhausted before slot {} was accepted", slot_index + 1);
-                        }
-                    }
-                    stats.attempts.fetch_add(1, Ordering::Relaxed);
-                    let use_model = match &free_models {
-                        Some(models) => {
-                            let index = model_counter.fetch_add(1, Ordering::Relaxed) % models.len();
-                            models[index].clone()
-                        }
-                        None => generation_provider.model.clone(),
-                    };
-                    let client_index =
-                        proxy_counter.fetch_add(1, Ordering::Relaxed) % clients.len();
-                    let client = &clients[client_index];
-                    let credential = generation_provider.credentials.next();
-                    let concise_feedback = require_concise_completion
-                        .then(|| with_completion_limit_guidance(generation_feedback.as_ref()));
-                    let effective_feedback = concise_feedback
-                        .as_ref()
-                        .or(generation_feedback.as_ref());
-                    let generated = generate_task(GenerateTaskRequest {
-                        client,
-                        api_base: generation_provider.api_base.as_str(),
-                        api_key: credential.expose(),
-                        model: &use_model,
-                        system_prompt: &system_prompt,
-                        sample: &sample,
-                        temperature,
-                        max_output_tokens,
-                        language: language.as_deref(),
-                        feedback: effective_feedback,
-                        cancel: &cancel,
-                        consecutive_availability_failures: &consecutive_availability_failures,
-                        progress: &pb,
-                        telemetry: &generation_telemetry,
-                    })
                     .await;
-                    let (prompt, input_tokens, output_tokens) = match generated {
-                        Ok(result) => result,
-                        Err(error) => {
-                            if matches!(&error, ApiError::CompletionTruncated(_)) {
-                                require_concise_completion = true;
-                            }
-                            stats.errors.fetch_add(1, Ordering::Relaxed);
-                            let event = serde_json::json!({
-                                "schema_version": "scogo.taskgen.rejection.v1",
-                                "slot": slot_index + 1,
-                                "attempt": attempt,
-                                "stage": "generation",
-                                "reason": error.to_string(),
-                                "coordinate": sample,
-                            });
-                            artifacts.lock().unwrap().as_mut().unwrap().write_rejection(&event)?;
-                            if cancel.load(Ordering::Relaxed) {
-                                bail!("slot {} generation stopped: {error}", slot_index + 1);
-                            }
-                            continue;
-                        }
-                    };
-                    stats.input_tokens.fetch_add(input_tokens, Ordering::Relaxed);
-                    stats.output_tokens.fetch_add(output_tokens, Ordering::Relaxed);
-                    let entry = TaskEntry {
-                        schema_version: Some("scogo.taskgen.task.v2".into()),
-                        prompt,
-                        category: sample.category_id.clone(),
-                        domain: sample.domain_id.clone(),
-                        subdomain: sample.subdomain_id.clone(),
-                        difficulty: sample.difficulty,
-                        coordinates: sample.coordinates.clone(),
-                        language: language.clone(),
-                        taskgen_model: use_model.clone(),
-                        temperature,
-                    };
-                    let line = match serialize_task_entry(&entry) {
-                        Ok(line) => line,
-                        Err(error) => {
-                            stats.errors.fetch_add(1, Ordering::Relaxed);
-                            let event = serde_json::json!({
-                                "schema_version": "scogo.taskgen.rejection.v1",
-                                "slot": slot_index + 1,
-                                "attempt": attempt,
-                                "stage": "schema_validation",
-                                "reason": error.to_string(),
-                                "candidate": entry,
-                            });
-                            artifacts.lock().unwrap().as_mut().unwrap().write_rejection(&event)?;
-                            continue;
-                        }
-                    };
-                    let embedding = match &embedder {
-                        Some(embedder) => Some(embedder.embed(&entry.prompt).await?),
-                        None => None,
-                    };
-                    let candidate = dedup::DedupCandidate {
-                        prompt: &entry.prompt,
-                        language: entry.language.as_deref(),
-                        domain: &entry.domain,
-                        subdomain: &entry.subdomain,
-                    };
-                    let pre_duplicate = dedup_index
+                    (work, result)
+                }
+            })
+            .buffer_unordered(args.workers)
+            .collect()
+            .await;
+        generated.sort_by_key(|(work, _)| work.sequence);
+
+        let mut review_candidates = Vec::new();
+        for (work, result) in generated {
+            let candidate = match result {
+                Ok(candidate) => candidate,
+                Err(reason) => {
+                    stats.errors.fetch_add(1, Ordering::Relaxed);
+                    artifacts
                         .lock()
                         .unwrap()
-                        .find_duplicate(&candidate, embedding.as_deref())?;
-                    if let Some(duplicate) = pre_duplicate {
-                        stats.errors.fetch_add(1, Ordering::Relaxed);
-                        generation_feedback = Some(GenerationFeedback {
-                            previous_prompt: Some(entry.prompt.clone()),
-                            review_summary: "The candidate duplicates an already accepted prompt.".into(),
-                            retry_guidance: "Generate a materially different incident scenario for the same coordinates.".into(),
-                        });
-                        let event = serde_json::json!({
-                            "schema_version": "scogo.taskgen.rejection.v1",
-                            "slot": slot_index + 1,
-                            "attempt": attempt,
-                            "stage": "dedup_precheck",
-                            "duplicate": duplicate,
-                            "candidate": entry,
-                        });
-                        artifacts.lock().unwrap().as_mut().unwrap().write_rejection(&event)?;
-                        continue;
-                    }
-
-                    let review = if skip_review {
-                        None
-                    } else {
-                        let mut effective_review_provider = review_provider.clone();
-                        if free_models.is_some() && !explicit_review_model {
-                            effective_review_provider.model = use_model.clone();
-                        }
-                        let review_max_output_tokens = review_max_output_tokens(
-                            &effective_review_provider.model,
-                            requested_review_max_output_tokens,
-                        );
-                        let reviewer = review::ReviewClient::new(
-                            effective_review_provider,
-                            client.clone(),
-                            review_max_output_tokens,
-                            review_telemetry.clone(),
-                        )?;
-                        let review = match reviewer
-                            .review(review::ReviewRequest {
-                                candidate: serde_json::to_value(&entry)?,
-                                taxonomy_id: taxonomy_id.clone(),
-                                taxonomy_kind: taxonomy_kind.clone(),
-                                system_prompt: review_system_prompt.clone(),
-                            })
-                            .await
-                        {
-                            Ok(review) => review,
-                            Err(error) => {
-                                stats.errors.fetch_add(1, Ordering::Relaxed);
-                                generation_feedback = Some(GenerationFeedback {
-                                    previous_prompt: Some(entry.prompt.clone()),
-                                    review_summary:
-                                        "The quality reviewer could not return a valid decision."
-                                            .into(),
-                                    retry_guidance:
-                                        "Return a technically grounded, internally consistent replacement."
-                                            .into(),
-                                });
-                                let event = serde_json::json!({
-                                    "schema_version": "scogo.taskgen.rejection.v1",
-                                    "slot": slot_index + 1,
-                                    "attempt": attempt,
-                                    "stage": "review_error",
-                                    "reason": error.to_string(),
-                                    "candidate": entry,
-                                });
-                                artifacts
-                                    .lock()
-                                    .unwrap()
-                                    .as_mut()
-                                    .unwrap()
-                                    .write_rejection(&event)?;
-                                continue;
-                            }
-                        };
-                        stats
-                            .review_input_tokens
-                            .fetch_add(review.input_tokens, Ordering::Relaxed);
-                        stats
-                            .review_output_tokens
-                            .fetch_add(review.output_tokens, Ordering::Relaxed);
-                        if review.decision.verdict == review::ReviewVerdict::Reject {
-                            stats.errors.fetch_add(1, Ordering::Relaxed);
-                            generation_feedback = Some(GenerationFeedback {
-                                previous_prompt: Some(entry.prompt.clone()),
-                                review_summary: review.decision.summary.clone(),
-                                retry_guidance: review.decision.retry_guidance.clone(),
-                            });
-                            let event = serde_json::json!({
-                                "schema_version": "scogo.taskgen.rejection.v1",
-                                "slot": slot_index + 1,
-                                "attempt": attempt,
-                                "stage": "model_review",
-                                "review_model": review.model,
-                                "decision_normalization": review.normalization,
-                                "decision": review.decision,
-                                "candidate": entry,
-                            });
-                            artifacts
-                                .lock()
-                                .unwrap()
-                                .as_mut()
-                                .unwrap()
-                                .write_rejection(&event)?;
-                            continue;
-                        }
-                        Some(review)
-                    };
-
-                    let final_duplicate = {
-                        let mut index = dedup_index.lock().unwrap();
-                        if let Some(duplicate) =
-                            index.find_duplicate(&candidate, embedding.as_deref())?
-                        {
-                            Some(duplicate)
-                        } else {
-                            index.insert(candidate, embedding)?;
-                            None
-                        }
-                    };
-                    if let Some(duplicate) = final_duplicate {
-                        stats.errors.fetch_add(1, Ordering::Relaxed);
-                        generation_feedback = Some(GenerationFeedback {
-                            previous_prompt: Some(entry.prompt.clone()),
-                            review_summary: "The candidate duplicates a concurrently accepted prompt.".into(),
-                            retry_guidance: "Generate a materially different incident scenario for the same coordinates.".into(),
-                        });
-                        let mut event = serde_json::json!({
-                            "schema_version": "scogo.taskgen.rejection.v1",
-                            "slot": slot_index + 1,
-                            "attempt": attempt,
-                            "stage": "dedup_final",
-                            "duplicate": duplicate,
-                            "candidate": entry,
-                        });
-                        if let Some(review) = &review {
-                            event["review_model"] = serde_json::json!(review.model);
-                            event["decision_normalization"] =
-                                serde_json::json!(review.normalization);
-                            event["decision"] = serde_json::json!(review.decision);
-                        }
-                        artifacts.lock().unwrap().as_mut().unwrap().write_rejection(&event)?;
-                        continue;
-                    }
-
-                    let review_event = review.as_ref().map(|review| {
-                        serde_json::json!({
-                            "schema_version": "scogo.taskgen.accepted-review.v1",
-                            "slot": slot_index + 1,
-                            "attempt": attempt,
-                            "prompt_sha256": dedup::prompt_sha256(&entry.prompt),
-                            "review_model": review.model,
-                            "input_tokens": review.input_tokens,
-                            "output_tokens": review.output_tokens,
-                            "decision_normalization": review.normalization,
-                            "decision": review.decision,
-                        })
-                    });
-                    {
-                        let mut guard = artifacts.lock().unwrap();
-                        let run = guard.as_mut().unwrap();
-                        run.write_accepted_line(&line)?;
-                        if let Some(review_event) = review_event {
-                            run.write_review(&review_event)?;
-                        }
-                    }
-                    let accepted = stats.tasks.fetch_add(1, Ordering::Relaxed) + 1;
-                    let rejected = stats.errors.load(Ordering::Relaxed);
-                    pb.inc(1);
-                    pb.set_message(format!("{accepted} accepted | {rejected} rejected"));
-                    return Ok(());
+                        .as_mut()
+                        .unwrap()
+                        .write_rejection(&serde_json::json!({
+                            "schema_version":"scogo.taskgen.rejection.v2",
+                            "candidate_sequence":work.sequence,
+                            "wave":work.wave,
+                            "stage":"generation",
+                            "reason":reason,
+                            "coordinate":work.sample,
+                        }))?;
+                    continue;
                 }
-                bail!(
-                    "slot {} exhausted {} attempts without an accepted candidate",
-                    slot_index + 1,
-                    max_attempts
-                )
+            };
+            let prompt_hash = dedup::prompt_sha256(&candidate.entry.prompt);
+            artifacts
+                .lock()
+                .unwrap()
+                .as_mut()
+                .unwrap()
+                .write_candidate(&serde_json::json!({
+                    "schema_version":"scogo.taskgen.candidate.v1",
+                    "candidate_id":candidate.candidate_id,
+                    "sequence":candidate.work.sequence,
+                    "wave":candidate.work.wave,
+                    "repair_of":candidate.work.repair_of,
+                    "repair_count":candidate.work.repair_count,
+                    "prompt_sha256":prompt_hash,
+                    "deterministic_checks":candidate.deterministic_checks,
+                    "candidate":candidate.entry,
+                }))?;
+            if !candidate.deterministic_checks.hard_failures.is_empty() {
+                stats.errors.fetch_add(1, Ordering::Relaxed);
+                artifacts
+                    .lock()
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
+                    .write_rejection(&serde_json::json!({
+                        "schema_version":"scogo.taskgen.rejection.v2",
+                        "candidate_id":candidate.candidate_id,
+                        "stage":"deterministic_validation",
+                        "hard_failures":candidate.deterministic_checks.hard_failures,
+                        "candidate":candidate.entry,
+                    }))?;
+                continue;
             }
-        })
-        .buffer_unordered(workers)
-        .collect()
-        .await;
+            if !seen_candidate_hashes.insert(prompt_hash) {
+                stats.errors.fetch_add(1, Ordering::Relaxed);
+                artifacts
+                    .lock()
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
+                    .write_rejection(&serde_json::json!({
+                        "schema_version":"scogo.taskgen.rejection.v2",
+                        "candidate_id":candidate.candidate_id,
+                        "stage":"dedup_precheck",
+                        "reason":"exact candidate-pool duplicate",
+                        "candidate":candidate.entry,
+                    }))?;
+                continue;
+            }
+            let dedup_candidate = dedup::DedupCandidate {
+                prompt: &candidate.entry.prompt,
+                language: candidate.entry.language.as_deref(),
+                domain: &candidate.entry.domain,
+                subdomain: &candidate.entry.subdomain,
+            };
+            let duplicate = dedup_index
+                .lock()
+                .unwrap()
+                .find_duplicate(&dedup_candidate, candidate.embedding.as_deref())?;
+            if let Some(duplicate) = duplicate {
+                stats.errors.fetch_add(1, Ordering::Relaxed);
+                artifacts
+                    .lock()
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
+                    .write_rejection(&serde_json::json!({
+                        "schema_version":"scogo.taskgen.rejection.v2",
+                        "candidate_id":candidate.candidate_id,
+                        "stage":"dedup_precheck",
+                        "duplicate":duplicate,
+                        "candidate":candidate.entry,
+                    }))?;
+                continue;
+            }
+            review_candidates.push(candidate);
+        }
+
+        if args.skip_review {
+            for candidate in review_candidates {
+                let dedup_candidate = dedup::DedupCandidate {
+                    prompt: &candidate.entry.prompt,
+                    language: candidate.entry.language.as_deref(),
+                    domain: &candidate.entry.domain,
+                    subdomain: &candidate.entry.subdomain,
+                };
+                let duplicate = {
+                    let mut index = dedup_index.lock().unwrap();
+                    if let Some(duplicate) =
+                        index.find_duplicate(&dedup_candidate, candidate.embedding.as_deref())?
+                    {
+                        Some(duplicate)
+                    } else {
+                        index.insert(dedup_candidate, candidate.embedding)?;
+                        None
+                    }
+                };
+                if let Some(duplicate) = duplicate {
+                    stats.errors.fetch_add(1, Ordering::Relaxed);
+                    artifacts
+                        .lock()
+                        .unwrap()
+                        .as_mut()
+                        .unwrap()
+                        .write_rejection(&serde_json::json!({
+                            "schema_version":"scogo.taskgen.rejection.v2",
+                            "candidate_id":candidate.candidate_id,
+                            "stage":"dedup_final",
+                            "duplicate":duplicate,
+                            "candidate":candidate.entry,
+                        }))?;
+                    continue;
+                }
+                artifacts
+                    .lock()
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
+                    .write_accepted_line(&candidate.serialized)?;
+                let accepted = stats.tasks.fetch_add(1, Ordering::Relaxed) + 1;
+                pb.inc(1);
+                pb.set_message(format!("{accepted} accepted | review skipped"));
+            }
+            continue;
+        }
+
+        pb.set_message(format!(
+            "wave {wave}: reviewing {} candidates",
+            review_candidates.len()
+        ));
+        let mut reviewed: Vec<(
+            StagedCandidate,
+            std::result::Result<CandidateEvaluation, String>,
+        )> = stream::iter(review_candidates)
+            .map(|candidate| {
+                let mut effective_review_provider = review_provider.clone();
+                if free_models.is_some() && !explicit_review_model {
+                    effective_review_provider.model = candidate.entry.taskgen_model.clone();
+                }
+                let mut effective_adjudication_provider = adjudication_provider.clone();
+                if free_models.is_some() && !explicit_review_model && !explicit_adjudication_model {
+                    effective_adjudication_provider.model = candidate.entry.taskgen_model.clone();
+                }
+                let client_index = proxy_counter.fetch_add(1, Ordering::Relaxed) % clients.len();
+                let client = clients[client_index].clone();
+                let review_system_prompt = review_system_prompt.clone();
+                let review_telemetry = review_telemetry.clone();
+                let adjudication_telemetry = adjudication_telemetry.clone();
+                let reference_store = reference_store.clone();
+                let taxonomy_id = taxonomy_id.clone();
+                let taxonomy_kind = taxonomy_kind.clone();
+                let max_tokens = review_max_output_tokens(
+                    &effective_review_provider.model,
+                    args.review_max_output_tokens,
+                );
+                async move {
+                    let context = CandidateReviewContext {
+                        taxonomy_id,
+                        taxonomy_kind,
+                        review_provider: effective_review_provider,
+                        adjudication_provider: effective_adjudication_provider,
+                        client,
+                        review_system_prompt,
+                        review_max_tokens: max_tokens,
+                        review_telemetry,
+                        adjudication_telemetry,
+                        reference_store,
+                    };
+                    let result = evaluate_candidate(
+                        &candidate.entry,
+                        candidate.deterministic_checks.clone(),
+                        context,
+                    )
+                    .await
+                    .map_err(|error| format!("{error:#}"));
+                    (candidate, result)
+                }
+            })
+            .buffer_unordered(args.review_workers)
+            .collect()
+            .await;
+        reviewed.sort_by_key(|(candidate, _)| candidate.work.sequence);
+
+        for (candidate, evaluation) in reviewed {
+            let evaluation = match evaluation {
+                Ok(evaluation) => evaluation,
+                Err(reason) => {
+                    stats.errors.fetch_add(1, Ordering::Relaxed);
+                    artifacts
+                        .lock()
+                        .unwrap()
+                        .as_mut()
+                        .unwrap()
+                        .write_rejection(&serde_json::json!({
+                            "schema_version":"scogo.taskgen.rejection.v2",
+                            "candidate_id":candidate.candidate_id,
+                            "stage":"review_error",
+                            "reason":reason,
+                            "candidate":candidate.entry,
+                        }))?;
+                    continue;
+                }
+            };
+            stats
+                .review_input_tokens
+                .fetch_add(evaluation.review.input_tokens, Ordering::Relaxed);
+            stats
+                .review_output_tokens
+                .fetch_add(evaluation.review.output_tokens, Ordering::Relaxed);
+            if let Some(adjudication) = &evaluation.adjudication {
+                stats
+                    .adjudication_input_tokens
+                    .fetch_add(adjudication.input_tokens, Ordering::Relaxed);
+                stats
+                    .adjudication_output_tokens
+                    .fetch_add(adjudication.output_tokens, Ordering::Relaxed);
+            }
+            match evaluation.review.decision.outcome {
+                review::ReviewOutcome::Accept => {
+                    stats.review_accepts.fetch_add(1, Ordering::Relaxed);
+                }
+                review::ReviewOutcome::Revise => {
+                    stats.review_revises.fetch_add(1, Ordering::Relaxed);
+                }
+                review::ReviewOutcome::Reject => {
+                    stats.review_rejects.fetch_add(1, Ordering::Relaxed);
+                }
+                review::ReviewOutcome::NeedsVerification => {
+                    stats
+                        .review_needs_verification
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+            }
+
+            if evaluation.review.decision.outcome == review::ReviewOutcome::Revise
+                && candidate.work.repair_count < args.max_repairs_per_coordinate
+            {
+                repair_queue.push_back(GenerationWorkItem {
+                    sequence: 0,
+                    wave: 0,
+                    sample: candidate.work.sample.clone(),
+                    language: candidate.work.language.clone(),
+                    feedback: Some(GenerationFeedback {
+                        previous_prompt: Some(candidate.entry.prompt.clone()),
+                        review_summary: evaluation.review.decision.summary.clone(),
+                        retry_guidance: evaluation.review.decision.retry_guidance.clone(),
+                    }),
+                    repair_of: Some(candidate.candidate_id.clone()),
+                    repair_count: candidate.work.repair_count + 1,
+                });
+            }
+
+            let mut final_disposition = if evaluation.accepted() {
+                "accepted"
+            } else if evaluation.review.decision.outcome == review::ReviewOutcome::Revise
+                && candidate.work.repair_count < args.max_repairs_per_coordinate
+            {
+                "revise_queued"
+            } else if evaluation.review.decision.outcome == review::ReviewOutcome::NeedsVerification
+            {
+                "verification_rejected"
+            } else {
+                "rejected"
+            };
+
+            let mut duplicate = None;
+            if evaluation.accepted() {
+                let dedup_candidate = dedup::DedupCandidate {
+                    prompt: &candidate.entry.prompt,
+                    language: candidate.entry.language.as_deref(),
+                    domain: &candidate.entry.domain,
+                    subdomain: &candidate.entry.subdomain,
+                };
+                let mut index = dedup_index.lock().unwrap();
+                if let Some(hit) =
+                    index.find_duplicate(&dedup_candidate, candidate.embedding.as_deref())?
+                {
+                    duplicate = Some(hit);
+                    final_disposition = "duplicate";
+                } else {
+                    index.insert(dedup_candidate, candidate.embedding)?;
+                }
+            }
+
+            artifacts
+                .lock()
+                .unwrap()
+                .as_mut()
+                .unwrap()
+                .write_review(&serde_json::json!({
+                    "schema_version":"scogo.taskgen.review-record.v3",
+                    "candidate_id":candidate.candidate_id,
+                    "sequence":candidate.work.sequence,
+                    "wave":candidate.work.wave,
+                    "review_model":evaluation.review.model,
+                    "review_input_tokens":evaluation.review.input_tokens,
+                    "review_output_tokens":evaluation.review.output_tokens,
+                    "decision_normalization":evaluation.review.normalization,
+                    "decision":evaluation.review.decision,
+                    "references":evaluation.references,
+                    "adjudication":evaluation.adjudication,
+                    "final_disposition":final_disposition,
+                }))?;
+
+            if final_disposition == "accepted" {
+                artifacts
+                    .lock()
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
+                    .write_accepted_line(&candidate.serialized)?;
+                let accepted = stats.tasks.fetch_add(1, Ordering::Relaxed) + 1;
+                pb.inc(1);
+                pb.set_message(format!(
+                    "{accepted} accepted | {} rejected",
+                    stats.errors.load(Ordering::Relaxed)
+                ));
+            } else {
+                stats.errors.fetch_add(1, Ordering::Relaxed);
+                artifacts
+                    .lock()
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
+                    .write_rejection(&serde_json::json!({
+                        "schema_version":"scogo.taskgen.rejection.v2",
+                        "candidate_id":candidate.candidate_id,
+                        "stage":if final_disposition == "duplicate" {"dedup_final"} else {"model_review_v3"},
+                        "final_disposition":final_disposition,
+                        "duplicate":duplicate,
+                        "decision":evaluation.review.decision,
+                        "adjudication":evaluation.adjudication,
+                        "candidate":candidate.entry,
+                    }))?;
+            }
+        }
+    }
     shutdown_listener.abort();
 
-    let mut execution_error = results
-        .into_iter()
-        .find_map(Result::err)
-        .map(|error| format!("generation incomplete: {error}"));
+    if cancel.load(Ordering::Relaxed) && execution_error.is_none() {
+        execution_error = Some("generation cancelled before exact acceptance".into());
+    }
+    if stats.tasks.load(Ordering::Relaxed) < args.count
+        && stats.attempts.load(Ordering::Relaxed) >= max_candidates
+        && execution_error.is_none()
+    {
+        execution_error = Some(format!(
+            "candidate limit exhausted after {max_candidates} generated candidates"
+        ));
+    }
     let accepted = stats.tasks.load(Ordering::Relaxed);
     artifacts.lock().unwrap().as_mut().unwrap().flush()?;
     let staged_path = artifacts
@@ -2939,6 +3774,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         generation_provider: &generation_provider,
         effective_generation_models: &effective_generation_models,
         review_provider: &review_provider,
+        adjudication_provider: &adjudication_provider,
         effective_review_models: &effective_review_models,
         semantic_model_id: effective_semantic_model.model_id(),
         existing_records: existing,
@@ -2959,6 +3795,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                 stats: &stats,
                 generation_requests: generation_telemetry.snapshot(),
                 review_requests: review_telemetry.snapshot(),
+                adjudication_requests: adjudication_telemetry.snapshot(),
             },
         )?;
         let run = artifacts.lock().unwrap().take().unwrap();
@@ -2980,6 +3817,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             stats: &stats,
             generation_requests: generation_telemetry.snapshot(),
             review_requests: review_telemetry.snapshot(),
+            adjudication_requests: adjudication_telemetry.snapshot(),
         },
     )?;
     let run = artifacts.lock().unwrap().take().unwrap();
@@ -3168,13 +4006,13 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_v4_request_disables_hidden_reasoning() {
+    fn deepseek_v4_request_preserves_endpoint_reasoning_defaults() {
         let request =
             serde_json::to_value(chat_request("deepseek-v4-flash-0731", vec![], 0.2, 2048))
                 .unwrap();
 
-        assert_eq!(request["include_reasoning"], false);
-        assert_eq!(request["reasoning_effort"], "none");
+        assert!(request.get("include_reasoning").is_none());
+        assert!(request.get("reasoning_effort").is_none());
         assert!(request.get("thinking_token_budget").is_none());
     }
 
@@ -3204,20 +4042,60 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_review_has_a_reasoning_aware_default_budget() {
+    fn structured_review_has_a_bounded_default_budget() {
         assert_eq!(
             review_max_output_tokens("deepseek-v4-flash-0731", None),
-            4096
+            1024
         );
         assert_eq!(
             review_max_output_tokens("qwen/qwen3.8-max-free", None),
-            4096
+            1024
         );
         assert_eq!(review_max_output_tokens("gpt-4o-mini", None), 1024);
         assert_eq!(
             review_max_output_tokens("deepseek-v4-flash-0731", Some(1536)),
             1536
         );
+    }
+
+    #[test]
+    fn parses_standalone_review_and_staged_concurrency_flags() {
+        let review = Cli::try_parse_from([
+            "taskgen",
+            "review",
+            "--input",
+            "candidates.jsonl",
+            "--taxonomy",
+            "docs/netops-taxonomy.yaml",
+            "--api-key",
+            "x",
+            "--model",
+            "judge",
+            "--review-workers",
+            "3",
+        ])
+        .unwrap();
+        let Command::Review(args) = review.command else {
+            panic!("expected review command");
+        };
+        assert_eq!(args.review_workers, 3);
+
+        let generate = Cli::try_parse_from([
+            "taskgen",
+            "generate",
+            "--api-key",
+            "x",
+            "--review-workers",
+            "2",
+            "--max-candidates",
+            "40",
+        ])
+        .unwrap();
+        let Command::Generate(args) = generate.command else {
+            panic!("expected generate command");
+        };
+        assert_eq!(args.review_workers, 2);
+        assert_eq!(args.max_candidates, Some(40));
     }
 
     #[test]
@@ -3230,6 +4108,25 @@ mod tests {
         );
         assert!(validate_generated_prompt(&vec!["word"; 801].join(" ")).is_err());
         assert!(validate_generated_prompt("Investigate why the BGP session is flapping.").is_ok());
+    }
+
+    #[test]
+    fn deterministic_checks_flag_live_access_claims_and_missing_approval_language() {
+        let mut entry: TaskEntry =
+            serde_json::from_str(include_str!("../tests/fixtures/canonical/valid-task.json"))
+                .unwrap();
+        entry.prompt = "Taskgen queried the live router and applied the fix.".into();
+        entry.coordinates.as_mut().unwrap().action_risk = "approval_gated_change".into();
+
+        let checks = deterministic_candidate_checks(&entry);
+
+        assert!(!checks.hard_failures.is_empty());
+        assert!(
+            checks
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("approval"))
+        );
     }
 
     #[test]
@@ -3796,8 +4693,6 @@ mod tests {
             "1",
             "--dedup-mode",
             "lexical",
-            "--max-attempts-per-slot",
-            "1",
             "--run-dir",
             run_dir.to_str().unwrap(),
         ])
@@ -3898,7 +4793,7 @@ mod tests {
         let generation_prompt = resolve_system_prompt(&args, &taxonomy).unwrap();
         let review_prompt = resolve_review_system_prompt(&args, &taxonomy).unwrap();
         assert!(generation_prompt.contains("Scogo Sovereign IT Operations training data"));
-        assert!(review_prompt.contains("Scogo IT Operations prompt seeds"));
+        assert!(review_prompt.contains("Scogo Sovereign IT Operations prompt seeds"));
     }
 
     #[test]
@@ -3991,20 +4886,25 @@ mod tests {
                     let review_number = self.reviews.fetch_add(1, Ordering::SeqCst) + 1;
                     let decision = if review_number == 1 {
                         serde_json::json!({
-                            "schema_version": "scogo.taskgen.prompt-review.v1",
-                            "verdict": "reject",
-                            "reason_codes": ["ambiguous_or_unanswerable"],
+                            "schema_version": "scogo.taskgen.prompt-review.v3",
+                            "outcome": "reject",
+                            "checks": {
+                                "coordinate_realization": {"status":"pass","rationale":"Coordinates are realized.","evidence_paths":["$.candidate.prompt"]},
+                                "internal_consistency": {"status":"pass","rationale":"Internally consistent.","evidence_paths":["$.candidate.prompt"]},
+                                "operational_quality": {"status":"fail","rationale":"The prompt lacks decisive evidence.","evidence_paths":["$.candidate.prompt"]},
+                                "safety": {"status":"pass","rationale":"Read-only investigation.","evidence_paths":["$.candidate.prompt"]},
+                                "technical_authenticity": {"status":"pass","rationale":"No unsupported platform fact.","evidence_paths":["$.candidate.prompt"]}
+                            },
+                            "hard_failures": ["ambiguous_or_unanswerable"],
+                            "claims_requiring_verification": [],
                             "summary": "The first candidate lacks decisive evidence.",
                             "retry_guidance": "Include a concrete observed symptom and one conflicting signal."
                         })
                     } else {
-                        serde_json::json!({
-                            "schema_version": "scogo.taskgen.prompt-review.v1",
-                            "verdict": "accept",
-                            "reason_codes": [],
-                            "summary": "Operationally coherent and coordinate-aligned.",
-                            "retry_guidance": ""
-                        })
+                        serde_json::from_str(include_str!(
+                            "../tests/fixtures/canonical/valid-review-v3.json"
+                        ))
+                        .unwrap()
                     };
                     return ResponseTemplate::new(200).set_body_json(serde_json::json!({
                         "choices": [{"message": {"content": decision.to_string()}}],
@@ -4057,8 +4957,6 @@ mod tests {
             "123",
             "--dedup-mode",
             "lexical",
-            "--max-attempts-per-slot",
-            "5",
             "--max-repairs-per-coordinate",
             "0",
             "--run-dir",
@@ -4083,7 +4981,7 @@ mod tests {
                 .unwrap()
                 .lines()
                 .count(),
-            2
+            3
         );
         assert!(
             std::fs::read_to_string(paths.rejected)
@@ -4107,7 +5005,15 @@ mod tests {
         );
         assert_eq!(report["efficiency"]["candidate_acceptance_rate"], 2.0 / 3.0);
         assert_eq!(report["efficiency"]["attempts_per_accepted"], 1.5);
-        assert_eq!(report["concurrency"]["acceptance_workers"], 2);
+        assert_eq!(
+            std::fs::read_to_string(paths.candidates)
+                .unwrap()
+                .lines()
+                .count(),
+            3
+        );
+        assert_eq!(report["concurrency"]["generation_workers"], 2);
+        assert_eq!(report["efficiency"]["top_up_waves"], 1);
         assert_eq!(report["generation"]["effective_models"][0], "test-model");
         assert_eq!(report["review"]["effective_models"][0], "test-model");
         assert!(report["started_at"].as_str().is_some());
@@ -4138,6 +5044,232 @@ mod tests {
         );
         assert!(generation_calls >= 3);
         assert!(review_calls >= 3);
+    }
+
+    #[tokio::test]
+    async fn staged_pipeline_repairs_once_then_selectively_adjudicates() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+        #[derive(Clone)]
+        struct StagedResponder {
+            generations: Arc<AtomicUsize>,
+            reviews: Arc<AtomicUsize>,
+            adjudications: Arc<AtomicUsize>,
+        }
+
+        impl Respond for StagedResponder {
+            fn respond(&self, request: &Request) -> ResponseTemplate {
+                let body = String::from_utf8_lossy(&request.body);
+                let content = if body.contains("Adjudicate only the listed claims") {
+                    self.adjudications.fetch_add(1, Ordering::SeqCst);
+                    include_str!("../tests/fixtures/canonical/valid-adjudication-v1.json")
+                        .to_string()
+                } else if body.contains("Review this prompt seed") {
+                    let review_number = self.reviews.fetch_add(1, Ordering::SeqCst) + 1;
+                    if review_number == 1 {
+                        serde_json::json!({
+                            "schema_version":"scogo.taskgen.prompt-review.v3",
+                            "outcome":"revise",
+                            "checks":{
+                                "coordinate_realization":{"status":"fail","rationale":"The platform boundary is not explicit.","evidence_paths":["$.candidate.prompt"]},
+                                "internal_consistency":{"status":"pass","rationale":"The observations are consistent.","evidence_paths":["$.candidate.prompt"]},
+                                "operational_quality":{"status":"pass","rationale":"The task requires investigation.","evidence_paths":["$.candidate.prompt"]},
+                                "safety":{"status":"pass","rationale":"It is read-only first.","evidence_paths":["$.candidate.prompt"]},
+                                "technical_authenticity":{"status":"pass","rationale":"No false technical claim is present.","evidence_paths":["$.candidate.prompt"]}
+                            },
+                            "hard_failures":[],
+                            "claims_requiring_verification":[],
+                            "summary":"Clarify the selected platform boundary.",
+                            "retry_guidance":"Make the selected platform boundary operationally explicit."
+                        })
+                        .to_string()
+                    } else {
+                        serde_json::json!({
+                            "schema_version":"scogo.taskgen.prompt-review.v3",
+                            "outcome":"needs_verification",
+                            "checks":{
+                                "coordinate_realization":{"status":"pass","rationale":"Coordinates are material.","evidence_paths":["$.candidate.prompt"]},
+                                "internal_consistency":{"status":"pass","rationale":"The observations are consistent.","evidence_paths":["$.candidate.prompt"]},
+                                "operational_quality":{"status":"pass","rationale":"The task requires investigation.","evidence_paths":["$.candidate.prompt"]},
+                                "safety":{"status":"pass","rationale":"It is read-only first.","evidence_paths":["$.candidate.prompt"]},
+                                "technical_authenticity":{"status":"unknown","rationale":"Confirm the supplied next-hop statement.","evidence_paths":["$.candidate.prompt"]}
+                            },
+                            "hard_failures":[],
+                            "claims_requiring_verification":[{
+                                "claim_id":"claim-1",
+                                "claim":"The supplied route table establishes the next hop.",
+                                "candidate_evidence_paths":["$.candidate.prompt"],
+                                "reference_query":"route table next hop"
+                            }],
+                            "summary":"One supplied technical claim requires adjudication.",
+                            "retry_guidance":""
+                        })
+                        .to_string()
+                    }
+                } else {
+                    let number = self.generations.fetch_add(1, Ordering::SeqCst) + 1;
+                    format!(
+                        "Candidate {number}: the supplied route table and flow telemetry disagree after a maintenance window. Investigate with read-only evidence, separate observations from hypotheses, and require approval before any bounded change."
+                    )
+                };
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices":[{"finish_reason":"stop","message":{"content":content}}],
+                    "usage":{"prompt_tokens":20,"completion_tokens":12}
+                }))
+            }
+        }
+
+        let server = MockServer::start().await;
+        let generations = Arc::new(AtomicUsize::new(0));
+        let reviews = Arc::new(AtomicUsize::new(0));
+        let adjudications = Arc::new(AtomicUsize::new(0));
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(StagedResponder {
+                generations: generations.clone(),
+                reviews: reviews.clone(),
+                adjudications: adjudications.clone(),
+            })
+            .mount(&server)
+            .await;
+
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("staged-review");
+        let cli = Cli::try_parse_from([
+            "taskgen",
+            "generate",
+            "--api-base",
+            &format!("{}/v1", server.uri()),
+            "--api-key",
+            "test-key",
+            "--model",
+            "same-model",
+            "--taxonomy",
+            "docs/netops-taxonomy.yaml",
+            "--count",
+            "1",
+            "--workers",
+            "1",
+            "--review-workers",
+            "1",
+            "--seed",
+            "99",
+            "--dedup-mode",
+            "lexical",
+            "--max-candidates",
+            "5",
+            "--max-repairs-per-coordinate",
+            "1",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+        ])
+        .unwrap();
+        let Command::Generate(args) = cli.command else {
+            panic!("expected generate command");
+        };
+        run_generate(*args).await.unwrap();
+
+        assert_eq!(generations.load(Ordering::SeqCst), 2);
+        assert_eq!(reviews.load(Ordering::SeqCst), 2);
+        assert_eq!(adjudications.load(Ordering::SeqCst), 1);
+        let paths = artifacts::PublishedPaths::for_run_dir(&run_dir);
+        assert_eq!(
+            std::fs::read_to_string(paths.output)
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
+        assert_eq!(
+            std::fs::read_to_string(paths.candidates)
+                .unwrap()
+                .lines()
+                .count(),
+            2
+        );
+        let review_records: Vec<serde_json::Value> = std::fs::read_to_string(paths.reviews)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(review_records[0]["final_disposition"], "revise_queued");
+        assert_eq!(review_records[1]["final_disposition"], "accepted");
+        assert_eq!(review_records[1]["adjudication"]["model"], "same-model");
+    }
+
+    #[tokio::test]
+    async fn standalone_review_replays_candidates_and_reports_calibration() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let decision = include_str!("../tests/fixtures/canonical/valid-review-v3.json");
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices":[{"message":{"content":decision}}],
+                "usage":{"prompt_tokens":10,"completion_tokens":5}
+            })))
+            .mount(&server)
+            .await;
+
+        let temp = tempfile::tempdir().unwrap();
+        let input = temp.path().join("candidates.jsonl");
+        let candidate: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/canonical/valid-task.json"))
+                .unwrap();
+        std::fs::write(
+            &input,
+            format!(
+                "{}\n",
+                serde_json::json!({
+                    "schema_version":"scogo.taskgen.candidate.v1",
+                    "candidate_id":"candidate-1",
+                    "sequence":1,
+                    "candidate":candidate,
+                })
+            ),
+        )
+        .unwrap();
+        let run_dir = temp.path().join("review-run");
+        run_review(ReviewArgs {
+            input,
+            taxonomy: PathBuf::from("docs/netops-taxonomy.yaml"),
+            api_base: format!("{}/v1", server.uri()),
+            api_key: Some("test-key".into()),
+            model: "same-model".into(),
+            keyfile: None,
+            system_prompt: None,
+            system_prompt_file: None,
+            max_output_tokens: None,
+            review_workers: 1,
+            run_dir: Some(run_dir.clone()),
+            review_reference_dir: None,
+            adjudication_model: None,
+            adjudication_api_base: None,
+            adjudication_api_key: None,
+            adjudication_keyfile: None,
+            gold_labels: Some(PathBuf::from("tests/fixtures/review-gold.jsonl")),
+        })
+        .await
+        .unwrap();
+
+        let paths = artifacts::PublishedPaths::for_run_dir(&run_dir);
+        assert_eq!(
+            std::fs::read_to_string(paths.output)
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
+        let report: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(paths.run).unwrap()).unwrap();
+        assert_eq!(report["status"], "success");
+        assert_eq!(report["accepted_records"], 1);
+        assert_eq!(report["calibration"]["false_reject_rate"], 0.0);
+        assert_eq!(report["review"]["model"], "same-model");
     }
 
     #[tokio::test]
@@ -4280,8 +5412,6 @@ mod tests {
             "1",
             "--dedup-mode",
             "lexical",
-            "--max-attempts-per-slot",
-            "1",
             "--run-dir",
             run_dir.to_str().unwrap(),
         ])

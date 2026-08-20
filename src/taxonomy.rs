@@ -7,7 +7,7 @@ use rand::Rng;
 use rand::distributions::{Distribution, WeightedIndex};
 use serde::{Deserialize, Serialize};
 
-const SCHEMA_VERSION: &str = "scogo.taskgen.taxonomy.v2";
+const SCHEMA_VERSION: &str = "scogo.taskgen.taxonomy.v3";
 const WEIGHT_TOLERANCE: f64 = 0.000_001;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,37 +116,26 @@ pub struct ResolvedEligibility {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum RawSubdomain {
-    Id(String),
-    Definition {
-        id: String,
-        label: Option<String>,
-        weight: Option<f64>,
-        #[serde(default)]
-        eligibility: Box<RawEligibility>,
-    },
+#[serde(deny_unknown_fields)]
+struct RawSubdomain {
+    id: String,
+    label: Option<String>,
+    weight: Option<f64>,
+    #[serde(default)]
+    capabilities: Box<RawEligibility>,
 }
 
 impl RawSubdomain {
     fn id(&self) -> &str {
-        match self {
-            Self::Id(id) | Self::Definition { id, .. } => id,
-        }
+        &self.id
     }
 
     fn weight(&self) -> f64 {
-        match self {
-            Self::Id(_) => 1.0,
-            Self::Definition { weight, .. } => weight.unwrap_or(1.0),
-        }
+        self.weight.unwrap_or(1.0)
     }
 
-    fn eligibility(&self) -> Option<&RawEligibility> {
-        match self {
-            Self::Id(_) => None,
-            Self::Definition { eligibility, .. } => Some(eligibility),
-        }
+    fn capabilities(&self) -> &RawEligibility {
+        &self.capabilities
     }
 }
 
@@ -552,10 +541,10 @@ impl TaxonomyCatalog {
             .iter()
             .map(|group| group.id.clone())
             .collect();
-        let subdomain_eligibility = subdomain.and_then(RawSubdomain::eligibility);
+        let subdomain_capabilities = subdomain.map(RawSubdomain::capabilities);
         let resolved_platform_groups = resolve_axis(
             "platform_groups",
-            subdomain_eligibility.and_then(|value| value.platform_groups.as_ref()),
+            subdomain_capabilities.and_then(|value| value.platform_groups.as_ref()),
             domain.eligibility.platform_groups.as_ref(),
             category.eligibility.platform_groups.as_ref(),
             &platform_groups,
@@ -574,38 +563,43 @@ impl TaxonomyCatalog {
                 }
             }
         }
-        let configured_platforms = subdomain_eligibility
-            .and_then(|value| value.platforms.as_ref())
-            .or(domain.eligibility.platforms.as_ref())
-            .or(category.eligibility.platforms.as_ref());
-        let resolved_platforms = match configured_platforms {
-            Some(platforms) => {
-                let resolved =
-                    resolve_axis("platforms", Some(platforms), None, None, &all_platforms)?;
-                let allowed: HashSet<&str> = group_platforms.iter().map(String::as_str).collect();
-                validate_references("platforms allowed by platform_groups", &resolved, &allowed)?;
-                resolved
-            }
-            None => group_platforms,
+        let configured_platforms =
+            subdomain_capabilities.and_then(|value| value.platforms.as_ref());
+        let resolved_platforms = if configured_platforms.is_some()
+            || domain.eligibility.platforms.is_some()
+            || category.eligibility.platforms.is_some()
+        {
+            let resolved = resolve_axis(
+                "platforms",
+                configured_platforms,
+                domain.eligibility.platforms.as_ref(),
+                category.eligibility.platforms.as_ref(),
+                &all_platforms,
+            )?;
+            let allowed: HashSet<&str> = group_platforms.iter().map(String::as_str).collect();
+            validate_references("platforms allowed by platform_groups", &resolved, &allowed)?;
+            resolved
+        } else {
+            group_platforms
         };
         Ok(ResolvedEligibility {
             task_families: resolve_axis(
                 "task_families",
-                subdomain_eligibility.and_then(|value| value.task_families.as_ref()),
+                subdomain_capabilities.and_then(|value| value.task_families.as_ref()),
                 domain.eligibility.task_families.as_ref(),
                 category.eligibility.task_families.as_ref(),
                 &enabled_owned_ids(&axes.task_families),
             )?,
             environments: resolve_axis(
                 "environments",
-                subdomain_eligibility.and_then(|value| value.environments.as_ref()),
+                subdomain_capabilities.and_then(|value| value.environments.as_ref()),
                 domain.eligibility.environments.as_ref(),
                 category.eligibility.environments.as_ref(),
                 &enabled_owned_ids(&axes.environments),
             )?,
             platform_scopes: resolve_axis(
                 "platform_scopes",
-                subdomain_eligibility.and_then(|value| value.platform_scopes.as_ref()),
+                subdomain_capabilities.and_then(|value| value.platform_scopes.as_ref()),
                 domain.eligibility.platform_scopes.as_ref(),
                 category.eligibility.platform_scopes.as_ref(),
                 &enabled_owned_ids(&axes.platform_scopes),
@@ -614,35 +608,35 @@ impl TaxonomyCatalog {
             platforms: resolved_platforms,
             incident_mechanisms: resolve_axis(
                 "incident_mechanisms",
-                subdomain_eligibility.and_then(|value| value.incident_mechanisms.as_ref()),
+                subdomain_capabilities.and_then(|value| value.incident_mechanisms.as_ref()),
                 domain.eligibility.incident_mechanisms.as_ref(),
                 category.eligibility.incident_mechanisms.as_ref(),
                 &enabled_owned_ids(&axes.incident_mechanisms),
             )?,
             evidence_conditions: resolve_axis(
                 "evidence_conditions",
-                subdomain_eligibility.and_then(|value| value.evidence_conditions.as_ref()),
+                subdomain_capabilities.and_then(|value| value.evidence_conditions.as_ref()),
                 domain.eligibility.evidence_conditions.as_ref(),
                 category.eligibility.evidence_conditions.as_ref(),
                 &enabled_owned_ids(&axes.evidence_conditions),
             )?,
             evidence_bundles: resolve_axis(
                 "evidence_bundles",
-                subdomain_eligibility.and_then(|value| value.evidence_bundles.as_ref()),
+                subdomain_capabilities.and_then(|value| value.evidence_bundles.as_ref()),
                 domain.eligibility.evidence_bundles.as_ref(),
                 category.eligibility.evidence_bundles.as_ref(),
                 &enabled_owned_ids(&axes.evidence_bundles),
             )?,
             action_risks: resolve_axis(
                 "action_risks",
-                subdomain_eligibility.and_then(|value| value.action_risks.as_ref()),
+                subdomain_capabilities.and_then(|value| value.action_risks.as_ref()),
                 domain.eligibility.action_risks.as_ref(),
                 category.eligibility.action_risks.as_ref(),
                 &enabled_owned_ids(&axes.action_risks),
             )?,
             presentations: resolve_axis(
                 "presentations",
-                subdomain_eligibility.and_then(|value| value.presentations.as_ref()),
+                subdomain_capabilities.and_then(|value| value.presentations.as_ref()),
                 domain.eligibility.presentations.as_ref(),
                 category.eligibility.presentations.as_ref(),
                 &enabled_owned_ids(&axes.presentations),
@@ -833,6 +827,102 @@ impl TaxonomyCatalog {
                 format!("unknown subdomain '{category_id}/{domain_id}/{subdomain_id}'")
             })?;
         self.resolve_eligibility(category, domain, Some(subdomain))
+    }
+
+    pub fn validate_task_coordinates(
+        &self,
+        category_id: &str,
+        domain_id: &str,
+        subdomain_id: &str,
+        coordinates: &TaskCoordinates,
+    ) -> Result<()> {
+        if coordinates.taxonomy_id != self.raw.id {
+            bail!(
+                "coordinate taxonomy_id '{}' does not match '{}'",
+                coordinates.taxonomy_id,
+                self.raw.id
+            );
+        }
+        if coordinates.category_id != category_id {
+            bail!(
+                "coordinate category_id '{}' does not match task category '{}'",
+                coordinates.category_id,
+                category_id
+            );
+        }
+        let eligibility =
+            self.resolved_subdomain_eligibility(category_id, domain_id, subdomain_id)?;
+        for (axis, value, allowed) in [
+            (
+                "task_family",
+                &coordinates.task_family,
+                &eligibility.task_families,
+            ),
+            (
+                "environment",
+                &coordinates.environment,
+                &eligibility.environments,
+            ),
+            (
+                "platform_scope",
+                &coordinates.platform_scope,
+                &eligibility.platform_scopes,
+            ),
+            (
+                "incident_mechanism",
+                &coordinates.incident_mechanism,
+                &eligibility.incident_mechanisms,
+            ),
+            (
+                "evidence_condition",
+                &coordinates.evidence_condition,
+                &eligibility.evidence_conditions,
+            ),
+            (
+                "evidence_bundle",
+                &coordinates.evidence_bundle,
+                &eligibility.evidence_bundles,
+            ),
+            (
+                "action_risk",
+                &coordinates.action_risk,
+                &eligibility.action_risks,
+            ),
+            (
+                "presentation",
+                &coordinates.presentation,
+                &eligibility.presentations,
+            ),
+        ] {
+            if !allowed.contains(value) {
+                bail!(
+                    "coordinate {axis} '{}' is not allowed for {category_id}/{domain_id}/{subdomain_id}",
+                    value
+                );
+            }
+        }
+        if coordinates
+            .platforms
+            .iter()
+            .any(|platform| !eligibility.platforms.contains(platform))
+        {
+            bail!(
+                "coordinate platforms are not allowed for {category_id}/{domain_id}/{subdomain_id}"
+            );
+        }
+        match coordinates.platform_scope.as_str() {
+            "platform_neutral" if !coordinates.platforms.is_empty() => {
+                bail!("platform_neutral coordinates must not select platforms")
+            }
+            "single_platform" if coordinates.platforms.len() != 1 => {
+                bail!("single_platform coordinates must select exactly one platform")
+            }
+            "multi_platform" if coordinates.platforms.len() < 2 => {
+                bail!("multi_platform coordinates must select at least two platforms")
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     pub fn sample_defaults<R: Rng + ?Sized>(&self, rng: &mut R) -> Result<SampledTask> {
@@ -1265,10 +1355,10 @@ fn validate_subdomains(category: &str, domain: &str, subdomains: &[RawSubdomain]
             subdomain.weight(),
         )?;
         total_weight += subdomain.weight();
-        if let RawSubdomain::Definition {
-            label: Some(label), ..
-        } = subdomain
-            && label.trim().is_empty()
+        if subdomain
+            .label
+            .as_ref()
+            .is_some_and(|label| label.trim().is_empty())
         {
             bail!(
                 "subdomain '{category}/{domain}/{}' label must not be empty",
@@ -1357,15 +1447,28 @@ fn resolve_axis(
     category: Option<&Vec<String>>,
     all_enabled: &[String],
 ) -> Result<Vec<String>> {
-    let selected = subdomain
-        .or(domain)
-        .or(category)
-        .map_or_else(|| all_enabled.to_vec(), |configured| configured.to_vec());
+    let valid: HashSet<&str> = all_enabled.iter().map(String::as_str).collect();
+    let mut selected = all_enabled.to_vec();
+    for (level, configured) in [
+        ("category", category),
+        ("domain", domain),
+        ("subdomain capabilities", subdomain),
+    ] {
+        let Some(configured) = configured else {
+            continue;
+        };
+        validate_references(name, configured, &valid)?;
+        let inherited: HashSet<&str> = selected.iter().map(String::as_str).collect();
+        for value in configured {
+            if !inherited.contains(value.as_str()) {
+                bail!("{level} '{name}' capability '{value}' is outside inherited eligibility");
+            }
+        }
+        selected = configured.clone();
+    }
     if selected.is_empty() {
         bail!("resolved eligibility for '{name}' must not be empty");
     }
-    let valid: HashSet<&str> = all_enabled.iter().map(String::as_str).collect();
-    validate_references(name, &selected, &valid)?;
     Ok(selected)
 }
 
@@ -1452,8 +1555,8 @@ mod tests {
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
-    const V2_FIXTURE: &str = r#"
-schema_version: scogo.taskgen.taxonomy.v2
+    const V3_FIXTURE: &str = r#"
+schema_version: scogo.taskgen.taxonomy.v3
 id: compositional-test
 kind: compositional
 label: Compositional Test
@@ -1495,7 +1598,9 @@ categories:
     domains:
       - id: routing
         label: Routing
-        subdomains: [bgp, ospf]
+        subdomains:
+          - {id: bgp, capabilities: {}}
+          - {id: ospf, capabilities: {}}
         eligibility:
           environments: [hybrid]
 "#;
@@ -1519,27 +1624,27 @@ categories:
 "#;
         let error = TaxonomyCatalog::from_yaml(v1, None).unwrap_err();
         assert!(
-            error.to_string().contains("scogo.taskgen.taxonomy.v2"),
+            error.to_string().contains("scogo.taskgen.taxonomy.v3"),
             "{error:#}"
         );
     }
 
     #[test]
     fn rejects_compositions_that_cannot_be_sampled() {
-        let zero_weight_environment = V2_FIXTURE
+        let zero_weight_environment = V3_FIXTURE
             .replace(
                 "    - {id: on_premises, label: On premises, weight: 0.5}\n    - {id: hybrid, label: Hybrid, weight: 0.5}",
                 "    - {id: on_premises, label: On premises, weight: 1.0}\n    - {id: hybrid, label: Hybrid, weight: 0.0}",
             );
         assert!(TaxonomyCatalog::from_yaml(&zero_weight_environment, None).is_err());
 
-        let unsupported_scope = V2_FIXTURE.replace(
+        let unsupported_scope = V3_FIXTURE.replace(
             "{id: platform_neutral, label: Platform neutral, weight: 0.34}",
             "{id: unsupported_scope, label: Unsupported, weight: 0.34}",
         );
         assert!(TaxonomyCatalog::from_yaml(&unsupported_scope, None).is_err());
 
-        let unreachable_difficulty = V2_FIXTURE.replace(
+        let unreachable_difficulty = V3_FIXTURE.replace(
             "difficulty_min: 1, difficulty_max: 10",
             "difficulty_min: 2, difficulty_max: 10",
         );
@@ -1547,8 +1652,8 @@ categories:
     }
 
     #[test]
-    fn parses_nested_v2_taxonomy_and_samples_universal_coordinates() {
-        let catalog = TaxonomyCatalog::from_yaml(V2_FIXTURE, None).unwrap();
+    fn parses_nested_v3_taxonomy_and_samples_universal_coordinates() {
+        let catalog = TaxonomyCatalog::from_yaml(V3_FIXTURE, None).unwrap();
         assert_eq!(catalog.kind(), TaxonomyKind::Compositional);
         assert_eq!(catalog.category_count(), 1);
         assert_eq!(catalog.domain_count(), 1);
@@ -1568,9 +1673,9 @@ categories:
 
     #[test]
     fn subdomain_eligibility_controls_scope_and_exact_platforms() {
-        let yaml = V2_FIXTURE.replace(
-            "        subdomains: [bgp, ospf]",
-            "        subdomains:\n          - id: bgp\n            eligibility:\n              platform_scopes: [single_platform]\n              platforms: [platform_b]",
+        let yaml = V3_FIXTURE.replace(
+            "        subdomains:\n          - {id: bgp, capabilities: {}}\n          - {id: ospf, capabilities: {}}",
+            "        subdomains:\n          - id: bgp\n            capabilities:\n              platform_scopes: [single_platform]\n              platforms: [platform_b]",
         );
         let catalog = TaxonomyCatalog::from_yaml(&yaml, None).unwrap();
         let mut rng = StdRng::seed_from_u64(17);
@@ -1585,14 +1690,14 @@ categories:
 
     #[test]
     fn rejects_subdomain_platform_outside_eligible_groups() {
-        let yaml = V2_FIXTURE
+        let yaml = V3_FIXTURE
             .replace(
                 "      - {id: platform_b, label: Platform B, weight: 0.5}",
                 "      - {id: platform_b, label: Platform B, weight: 0.5}\n  - id: other\n    weight: 1.0\n    platforms:\n      - {id: platform_c, label: Platform C, weight: 1.0}",
             )
             .replace(
-                "        subdomains: [bgp, ospf]",
-                "        subdomains:\n          - id: bgp\n            eligibility:\n              platform_scopes: [single_platform]\n              platforms: [platform_c]",
+                "        subdomains:\n          - {id: bgp, capabilities: {}}\n          - {id: ospf, capabilities: {}}",
+                "        subdomains:\n          - id: bgp\n            capabilities:\n              platform_scopes: [single_platform]\n              platforms: [platform_c]",
             );
 
         let error = TaxonomyCatalog::from_yaml(&yaml, None).unwrap_err();
@@ -1606,9 +1711,9 @@ categories:
 
     #[test]
     fn rejects_mixed_weighted_and_unweighted_domains() {
-        let invalid = V2_FIXTURE.replacen(
-            "      - id: routing\n        label: Routing\n        subdomains: [bgp, ospf]",
-            "      - id: routing\n        label: Routing\n        weight: 0.5\n        subdomains: [bgp, ospf]\n      - id: switching\n        label: Switching\n        subdomains: [vlan]",
+        let invalid = V3_FIXTURE.replacen(
+            "      - id: routing\n        label: Routing\n        subdomains:\n          - {id: bgp, capabilities: {}}\n          - {id: ospf, capabilities: {}}",
+            "      - id: routing\n        label: Routing\n        weight: 0.5\n        subdomains: [{id: bgp, capabilities: {}}]\n      - id: switching\n        label: Switching\n        subdomains: [{id: vlan, capabilities: {}}]",
             1,
         );
         let error = TaxonomyCatalog::from_yaml(&invalid, None).unwrap_err();
@@ -1652,7 +1757,7 @@ categories:
 
     #[test]
     fn rejects_distribution_that_does_not_sum_to_one() {
-        let yaml = V2_FIXTURE.replacen(
+        let yaml = V3_FIXTURE.replacen(
             "  - id: network\n    label: Network\n    weight: 1.0\n    eligibility:",
             "  - id: network\n    label: Network\n    weight: 0.9\n    eligibility:",
             1,
@@ -1677,7 +1782,7 @@ categories:
 
     #[test]
     fn rejects_difficulty_override_unreachable_by_eligible_task_family() {
-        let source = V2_FIXTURE
+        let source = V3_FIXTURE
             .replace(
                 "difficulty_distribution: {1: 1.0}",
                 "difficulty_distribution: {2: 1.0}",
@@ -1702,9 +1807,9 @@ categories:
 
     #[test]
     fn rejects_domain_with_no_positive_subdomain_weight() {
-        let yaml = V2_FIXTURE.replace(
-            "        subdomains: [bgp, ospf]",
-            "        subdomains:\n          - {id: disabled_a, weight: 0.0}\n          - {id: disabled_b, weight: 0.0}",
+        let yaml = V3_FIXTURE.replace(
+            "        subdomains:\n          - {id: bgp, capabilities: {}}\n          - {id: ospf, capabilities: {}}",
+            "        subdomains:\n          - {id: disabled_a, weight: 0.0, capabilities: {}}\n          - {id: disabled_b, weight: 0.0, capabilities: {}}",
         );
 
         let error = TaxonomyCatalog::from_yaml(&yaml, None).unwrap_err();
@@ -1761,7 +1866,7 @@ categories:
 
     #[test]
     fn coordinate_recycling_preserves_subject_identity() {
-        let catalog = TaxonomyCatalog::from_yaml(V2_FIXTURE, None).unwrap();
+        let catalog = TaxonomyCatalog::from_yaml(V3_FIXTURE, None).unwrap();
         let mut rng = StdRng::seed_from_u64(91);
         let initial = catalog.sample_defaults(&mut rng).unwrap();
 
@@ -1777,12 +1882,15 @@ categories:
 
     #[test]
     fn coordinate_recycling_fails_when_subject_has_no_unseen_composition() {
-        let singleton = V2_FIXTURE
+        let singleton = V3_FIXTURE
             .replace(
                 "    - {id: platform_neutral, label: Platform neutral, weight: 0.34}\n    - {id: single_platform, label: Single platform, weight: 0.33}\n    - {id: multi_platform, label: Multi platform, weight: 0.33}",
                 "    - {id: platform_neutral, label: Platform neutral, weight: 1.0}",
             )
-            .replace("        subdomains: [bgp, ospf]", "        subdomains: [bgp]");
+            .replace(
+                "        subdomains:\n          - {id: bgp, capabilities: {}}\n          - {id: ospf, capabilities: {}}",
+                "        subdomains: [{id: bgp, capabilities: {}}]",
+            );
         let catalog = TaxonomyCatalog::from_yaml(&singleton, None).unwrap();
         let mut rng = StdRng::seed_from_u64(7);
         let initial = catalog.sample_defaults(&mut rng).unwrap();
@@ -1820,10 +1928,24 @@ categories:
         }
         assert!(taskgen.contains("operational behavior, not certification recall"));
         assert!(taskgen.contains("internally and causally consistent"));
+        assert!(taskgen.contains("scenario fixtures"));
+        assert!(taskgen.contains("must not imply live access"));
         assert!(taskgen.contains("Never disguise pseudocode as captured production output"));
         assert!(taskgen.contains("Output only the final user task prompt."));
         assert!(teacher.contains("ATIF serialization"));
         assert!(teacher.contains("The harness, not you"));
+    }
+
+    #[test]
+    fn both_generator_prompts_distinguish_scenario_fixtures_from_live_state() {
+        for prompt in [
+            include_str!("../prompts/netops-taskgen-system-v2.txt"),
+            include_str!("../prompts/itops-taskgen-system-v2.txt"),
+        ] {
+            assert!(prompt.contains("scenario fixtures"));
+            assert!(prompt.contains("must not imply live access"));
+            assert!(prompt.contains("observations from hypotheses"));
+        }
     }
 
     #[test]
@@ -1832,11 +1954,11 @@ categories:
         let netops = TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml")).unwrap();
         assert_eq!(
             itops.default_review_system_prompt_path().unwrap(),
-            PathBuf::from("docs/../prompts/itops-prompt-review-system-v2.txt")
+            PathBuf::from("docs/../prompts/itops-prompt-review-system-v3.txt")
         );
         assert_eq!(
             netops.default_review_system_prompt_path().unwrap(),
-            PathBuf::from("docs/../prompts/netops-prompt-review-system-v2.txt")
+            PathBuf::from("docs/../prompts/netops-prompt-review-system-v3.txt")
         );
     }
 
@@ -1860,5 +1982,71 @@ categories:
                 );
             }
         }
+    }
+
+    #[test]
+    fn v3_rejects_bare_subdomain_ids() {
+        let yaml = V3_FIXTURE.replace(
+            "        subdomains:\n          - {id: bgp, capabilities: {}}\n          - {id: ospf, capabilities: {}}",
+            "        subdomains: [bgp, ospf]",
+        );
+        let error = TaxonomyCatalog::from_yaml(&yaml, None).unwrap_err();
+        assert!(format!("{error:#}").contains("subdomain"), "{error:#}");
+    }
+
+    #[test]
+    fn netops_known_vendor_architecture_coordinates_are_compiled_out() {
+        let catalog = TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml")).unwrap();
+
+        let selectors = catalog
+            .resolved_subdomain_eligibility(
+                "enterprise_netops",
+                "vpn_remote_access",
+                "phase1_phase2_selectors",
+            )
+            .unwrap();
+        assert!(!selectors.platforms.contains(&"sonic".to_string()));
+
+        let virtual_systems = catalog
+            .resolved_subdomain_eligibility(
+                "enterprise_netops",
+                "firewall_network_security",
+                "vrf_vdom_vsys",
+            )
+            .unwrap();
+        assert!(
+            !virtual_systems
+                .platforms
+                .contains(&"google_cloud".to_string())
+        );
+        assert!(
+            virtual_systems
+                .platforms
+                .contains(&"fortinet_fortios".to_string())
+        );
+    }
+
+    #[test]
+    fn coordinate_compiler_rejects_platform_outside_subdomain_capability() {
+        let catalog = TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml")).unwrap();
+        let mut rng = StdRng::seed_from_u64(91);
+        let mut sample = catalog.sample_defaults(&mut rng).unwrap();
+        sample.category_id = "enterprise_netops".into();
+        sample.domain_id = "firewall_network_security".into();
+        sample.subdomain_id = "vrf_vdom_vsys".into();
+        let mut coordinates = sample.coordinates.unwrap();
+        coordinates.category_id = "enterprise_netops".into();
+        coordinates.platform_scope = "single_platform".into();
+        coordinates.platforms = vec!["google_cloud".into()];
+
+        let error = catalog
+            .validate_task_coordinates(
+                &sample.category_id,
+                &sample.domain_id,
+                &sample.subdomain_id,
+                &coordinates,
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("platforms are not allowed"));
     }
 }

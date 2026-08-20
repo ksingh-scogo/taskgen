@@ -1,4 +1,4 @@
-# Scogo IT Ops compositional prompt-seed taxonomy v2
+# Scogo IT Ops compositional prompt-seed taxonomy using schema v3
 # Built 2026-08-17 from: Scogo connector categories, Scogo use-case catalogue,
 # ITIL 4 (34 practices), NIST CSF 2.0, Gartner ITSM/ITOM/ITAM + Observability,
 # CSOH 2026 security umbrellas (CNAPP/SSE/XDR/ASPM/DSPM/SSPM).
@@ -14,13 +14,13 @@
 #   catalogue  — Scogo use-case catalogue / scogo.ai, no connector bucket
 #   fill       — ITIL / NIST / Gartner / market gap; needed for full-estate SFT
 
-schema_version: scogo.taskgen.taxonomy.v2
+schema_version: scogo.taskgen.taxonomy.v3
 id: scogo-itops-v4
 kind: compositional
 label: Scogo IT Operations
 defaults:
   system_prompt_file: ../prompts/itops-taskgen-system-v2.txt
-  review_system_prompt_file: ../prompts/itops-prompt-review-system-v2.txt
+  review_system_prompt_file: ../prompts/itops-prompt-review-system-v3.txt
   difficulty_distribution:
     1: 0.05
     2: 0.05
@@ -890,50 +890,59 @@ categories:
         origin: connector
         connectors: 15
         frameworks: [ITIL Service Desk, ITIL Request]
-        subdomains: [auto_deflection, classification_routing, l0_l1_autoresolve, ticket_enrichment, sla_breach, major_incident, approval_workflows, reassignment_churn, conversational_status, knowledge_deflection]
+        subdomains: [{id: auto_deflection, capabilities: {}}, {id: classification_routing, capabilities: {}}, {id: l0_l1_autoresolve, capabilities: {}}, {id: ticket_enrichment, capabilities: {}}, {id: sla_breach, capabilities: {}}, {id: major_incident, capabilities: {}}, {id: approval_workflows, capabilities: {}}, {id: reassignment_churn, capabilities: {}}, {id: conversational_status, capabilities: {}}, {id: knowledge_deflection, capabilities: {}}]
+
       - id: incident_management
         label: Incident Management
         origin: fill
         frameworks: [ITIL Incident, NIST RS]
-        subdomains: [sev_classify, war_room, customer_comms, timeline, page_storm, commander_role, handoff, major_incident_bridge]
+        subdomains: [{id: sev_classify, capabilities: {}}, {id: war_room, capabilities: {}}, {id: customer_comms, capabilities: {}}, {id: timeline, capabilities: {}}, {id: page_storm, capabilities: {}}, {id: commander_role, capabilities: {}}, {id: handoff, capabilities: {}}, {id: major_incident_bridge, capabilities: {}}]
+
       - id: problem_management
         label: Problem Management
         origin: fill
         frameworks: [ITIL Problem]
-        subdomains: [rca, known_error, workaround, problem_trend, ke_article, recurring_incident]
+        subdomains: [{id: rca, capabilities: {}}, {id: known_error, capabilities: {}}, {id: workaround, capabilities: {}}, {id: problem_trend, capabilities: {}}, {id: ke_article, capabilities: {}}, {id: recurring_incident, capabilities: {}}]
+
       - id: change_enablement
         label: Change Enablement
         origin: fill
         frameworks: [ITIL Change, Gartner ARO]
-        subdomains: [cab_risk, emergency_change, backout_plan, collision_window, standard_change, post_impl_verify, freeze_calendar]
+        subdomains: [{id: cab_risk, capabilities: {}}, {id: emergency_change, capabilities: {}}, {id: backout_plan, capabilities: {}}, {id: collision_window, capabilities: {}}, {id: standard_change, capabilities: {}}, {id: post_impl_verify, capabilities: {}}, {id: freeze_calendar, capabilities: {}}]
+
       - id: request_catalog
         label: Request Catalog
         origin: fill
         frameworks: [ITIL Request, ITIL Catalog]
-        subdomains: [catalog_item, fulfillment_path, entitlement, approval_chain, service_offering, request_sla]
+        subdomains: [{id: catalog_item, capabilities: {}}, {id: fulfillment_path, capabilities: {}}, {id: entitlement, capabilities: {}}, {id: approval_chain, capabilities: {}}, {id: service_offering, capabilities: {}}, {id: request_sla, capabilities: {}}]
+
       - id: cmdb_configuration
         label: CMDB Configuration
         origin: fill
         frameworks: [ITIL Configuration, ServiceNow CSDM]
-        subdomains: [ci_reconciliation, relationship_map, stale_ci, discovery_gap, service_mapping, orphan_ci]
+        subdomains: [{id: ci_reconciliation, capabilities: {}}, {id: relationship_map, capabilities: {}}, {id: stale_ci, capabilities: {}}, {id: discovery_gap, capabilities: {}}, {id: service_mapping, capabilities: {}}, {id: orphan_ci, capabilities: {}}]
+
       - id: knowledge_management
         label: Knowledge Management
         origin: connector
         connectors: 13
         note: Scogo bucket is Productivity & Knowledge
         frameworks: [ITIL Knowledge]
-        subdomains: [kb_gap, article_decay, sop_from_ticket, search_miss, deflection_quality, conflicting_sop]
+        subdomains: [{id: kb_gap, capabilities: {}}, {id: article_decay, capabilities: {}}, {id: sop_from_ticket, capabilities: {}}, {id: search_miss, capabilities: {}}, {id: deflection_quality, capabilities: {}}, {id: conflicting_sop, capabilities: {}}]
+
       - id: task_project_management
         label: Task Project Management
         origin: connector
         connectors: 5
         frameworks: [ITIL Project]
-        subdomains: [sprint_block, it_project_risk, dependency, resource_conflict, change_project, milestone_slip]
+        subdomains: [{id: sprint_block, capabilities: {}}, {id: it_project_risk, capabilities: {}}, {id: dependency, capabilities: {}}, {id: resource_conflict, capabilities: {}}, {id: change_project, capabilities: {}}, {id: milestone_slip, capabilities: {}}]
+
       - id: sla_measurement
         label: SLA Measurement
         origin: fill
         frameworks: [ITIL SLM, ITIL Measurement]
-        subdomains: [sla_clock, ola_breach, kpi_drift, report_pack, under_reporting]
+        subdomains: [{id: sla_clock, capabilities: {}}, {id: ola_breach, capabilities: {}}, {id: kpi_drift, capabilities: {}}, {id: report_pack, capabilities: {}}, {id: under_reporting, capabilities: {}}]
+
 
   - id: workplace
     weight: 0.08
@@ -949,41 +958,49 @@ categories:
         label: Collaboration Messaging
         origin: connector
         connectors: 3
-        subdomains: [teams_outage, slack_guest, channel_perm, message_retention, webhook_fail, federation]
+        subdomains: [{id: teams_outage, capabilities: {}}, {id: slack_guest, capabilities: {}}, {id: channel_perm, capabilities: {}}, {id: message_retention, capabilities: {}}, {id: webhook_fail, capabilities: {}}, {id: federation, capabilities: {}}]
+
       - id: email_communication
         label: Email Communication
         origin: connector
         connectors: 3
-        subdomains: [mailbox_full, mail_flow, shared_mailbox, alias, journaling, transport_rule]
+        subdomains: [{id: mailbox_full, capabilities: {}}, {id: mail_flow, capabilities: {}}, {id: shared_mailbox, capabilities: {}}, {id: alias, capabilities: {}}, {id: journaling, capabilities: {}}, {id: transport_rule, capabilities: {}}]
+
       - id: calendar_scheduling
         label: Calendar Scheduling
         origin: connector
         connectors: 3
-        subdomains: [room_conflict, booking_delegate, timezone, resource_mailbox, calendar_perm]
+        subdomains: [{id: room_conflict, capabilities: {}}, {id: booking_delegate, capabilities: {}}, {id: timezone, capabilities: {}}, {id: resource_mailbox, capabilities: {}}, {id: calendar_perm, capabilities: {}}]
+
       - id: document_management
         label: Document Management
         origin: connector
         connectors: 5
-        subdomains: [share_perm, version_conflict, retention_label, sync_fail, external_share, checkout_lock]
+        subdomains: [{id: share_perm, capabilities: {}}, {id: version_conflict, capabilities: {}}, {id: retention_label, capabilities: {}}, {id: sync_fail, capabilities: {}}, {id: external_share, capabilities: {}}, {id: checkout_lock, capabilities: {}}]
+
       - id: content_website
         label: Content Website
         origin: connector
         connectors: 2
-        subdomains: [cms_outage, publish_fail, cert_on_site, wcm_perm, plugin_break]
+        subdomains: [{id: cms_outage, capabilities: {}}, {id: publish_fail, capabilities: {}}, {id: cert_on_site, capabilities: {}}, {id: wcm_perm, capabilities: {}}, {id: plugin_break, capabilities: {}}]
+
       - id: print_workplace_devices
         label: Print Workplace Devices
         origin: fill
-        subdomains: [print_queue, driver_mapping, scan_workflow, meeting_room_av, badge_access, thin_client]
+        subdomains: [{id: print_queue, capabilities: {}}, {id: driver_mapping, capabilities: {}}, {id: scan_workflow, capabilities: {}}, {id: meeting_room_av, capabilities: {}}, {id: badge_access, capabilities: {}}, {id: thin_client, capabilities: {}}]
+
       - id: ucaas_voice
         label: UCaaS Voice
         origin: fill
         frameworks: [ITIL Service Continuity]
-        subdomains: [call_quality, sbc, did_port, contact_center_queue, voicemail, recording_compliance]
+        subdomains: [{id: call_quality, capabilities: {}}, {id: sbc, capabilities: {}}, {id: did_port, capabilities: {}}, {id: contact_center_queue, capabilities: {}}, {id: voicemail, capabilities: {}}, {id: recording_compliance, capabilities: {}}]
+
       - id: digital_experience
         label: Digital Experience
         origin: fill
         frameworks: [Gartner DEM / DEX]
-        subdomains: [login_slowness, saas_apdex, rum_error, last_mile, crash_free]
+        subdomains: [{id: login_slowness, capabilities: {}}, {id: saas_apdex, capabilities: {}}, {id: rum_error, capabilities: {}}, {id: last_mile, capabilities: {}}, {id: crash_free, capabilities: {}}]
+
 
   - id: endpoint
     weight: 0.11
@@ -999,21 +1016,25 @@ categories:
         label: RMM
         origin: connector
         connectors: 1
-        subdomains: [agent_offline, self_heal, script_fail, patch_job, remote_session, policy_drift]
+        subdomains: [{id: agent_offline, capabilities: {}}, {id: self_heal, capabilities: {}}, {id: script_fail, capabilities: {}}, {id: patch_job, capabilities: {}}, {id: remote_session, capabilities: {}}, {id: policy_drift, capabilities: {}}]
+
       - id: uem_mdm
         label: UEM MDM
         origin: fill
         frameworks: [NIST PR.PS]
-        subdomains: [enrollment, compliance_policy, wipe, app_push, byod_privacy, autopilot]
+        subdomains: [{id: enrollment, capabilities: {}}, {id: compliance_policy, capabilities: {}}, {id: wipe, capabilities: {}}, {id: app_push, capabilities: {}}, {id: byod_privacy, capabilities: {}}, {id: autopilot, capabilities: {}}]
+
       - id: vdi_daas
         label: VDI DaaS
         origin: fill
-        subdomains: [pool_exhaust, profile_corrupt, protocol_quality, golden_image, gpu_contention, broker]
+        subdomains: [{id: pool_exhaust, capabilities: {}}, {id: profile_corrupt, capabilities: {}}, {id: protocol_quality, capabilities: {}}, {id: golden_image, capabilities: {}}, {id: gpu_contention, capabilities: {}}, {id: broker, capabilities: {}}]
+
       - id: endpoint_health
         label: Endpoint Health
         origin: catalogue
         frameworks: [Scogo D3]
-        subdomains: [health_score, disk_pressure, encryption_bitlocker, edr_presence, baseline_drift, service_failures]
+        subdomains: [{id: health_score, capabilities: {}}, {id: disk_pressure, capabilities: {}}, {id: encryption_bitlocker, capabilities: {}}, {id: edr_presence, capabilities: {}}, {id: baseline_drift, capabilities: {}}, {id: service_failures, capabilities: {}}]
+
 
   - id: identity
     weight: 0.10
@@ -1030,20 +1051,24 @@ categories:
         origin: connector
         connectors: 15
         frameworks: [NIST PR.AA]
-        subdomains: [joiner, mover, leaver, sso_break, mfa_enrollment, conditional_access, scim_sync, guest_stale, entra_ad_sync]
+        subdomains: [{id: joiner, capabilities: {}}, {id: mover, capabilities: {}}, {id: leaver, capabilities: {}}, {id: sso_break, capabilities: {}}, {id: mfa_enrollment, capabilities: {}}, {id: conditional_access, capabilities: {}}, {id: scim_sync, capabilities: {}}, {id: guest_stale, capabilities: {}}, {id: entra_ad_sync, capabilities: {}}]
+
       - id: privileged_access
         label: Privileged Access
         origin: fill
         frameworks: [NIST PR.AA]
-        subdomains: [vault_checkout, jit_elevation, session_record, standing_admin, password_rotation, break_glass]
+        subdomains: [{id: vault_checkout, capabilities: {}}, {id: jit_elevation, capabilities: {}}, {id: session_record, capabilities: {}}, {id: standing_admin, capabilities: {}}, {id: password_rotation, capabilities: {}}, {id: break_glass, capabilities: {}}]
+
       - id: identity_governance
         label: Identity Governance
         origin: fill
-        subdomains: [access_certification, sod_conflict, orphan_account, entitlement_creep, role_mining, joiner_lag]
+        subdomains: [{id: access_certification, capabilities: {}}, {id: sod_conflict, capabilities: {}}, {id: orphan_account, capabilities: {}}, {id: entitlement_creep, capabilities: {}}, {id: role_mining, capabilities: {}}, {id: joiner_lag, capabilities: {}}]
+
       - id: directory_services
         label: Directory Services
         origin: fill
-        subdomains: [ad_replication, fsmo, gpo_drift, aad_connect, ldap_bind, dns_srv]
+        subdomains: [{id: ad_replication, capabilities: {}}, {id: fsmo, capabilities: {}}, {id: gpo_drift, capabilities: {}}, {id: aad_connect, capabilities: {}}, {id: ldap_bind, capabilities: {}}, {id: dns_srv, capabilities: {}}]
+
 
   - id: secops
     weight: 0.07
@@ -1060,38 +1085,45 @@ categories:
         origin: connector
         connectors: 8
         frameworks: [NIST DE]
-        subdomains: [use_case_tune, parser_break, ingestion_lag, correlation_miss, ueba_alert, retention_cost, data_lake]
+        subdomains: [{id: use_case_tune, capabilities: {}}, {id: parser_break, capabilities: {}}, {id: ingestion_lag, capabilities: {}}, {id: correlation_miss, capabilities: {}}, {id: ueba_alert, capabilities: {}}, {id: retention_cost, capabilities: {}}, {id: data_lake, capabilities: {}}]
+
       - id: soar
         label: SOAR
         origin: connector
         connectors: 6
         frameworks: [NIST RS]
-        subdomains: [playbook_fail, enrichment_gap, ticket_loop, containment_action, approval_gate, stale_playbook]
+        subdomains: [{id: playbook_fail, capabilities: {}}, {id: enrichment_gap, capabilities: {}}, {id: ticket_loop, capabilities: {}}, {id: containment_action, capabilities: {}}, {id: approval_gate, capabilities: {}}, {id: stale_playbook, capabilities: {}}]
+
       - id: edr_xdr
         label: EDR XDR
         origin: connector
         connectors: 7
         frameworks: [NIST DE, CSOH XDR]
-        subdomains: [isolate_host, false_positive, ransomware_roll, sensor_health, threat_hunt, identity_signal]
+        subdomains: [{id: isolate_host, capabilities: {}}, {id: false_positive, capabilities: {}}, {id: ransomware_roll, capabilities: {}}, {id: sensor_health, capabilities: {}}, {id: threat_hunt, capabilities: {}}, {id: identity_signal, capabilities: {}}]
+
       - id: vulnerability_management
         label: Vulnerability Management
         origin: fill
         frameworks: [NIST ID.RA, Scogo D7]
-        subdomains: [scan_coverage, risk_score, exception_waiver, exploit_available, agentless_gap, patch_advisory]
+        subdomains: [{id: scan_coverage, capabilities: {}}, {id: risk_score, capabilities: {}}, {id: exception_waiver, capabilities: {}}, {id: exploit_available, capabilities: {}}, {id: agentless_gap, capabilities: {}}, {id: patch_advisory, capabilities: {}}]
+
       - id: threat_intel_ndr
         label: Threat Intel NDR
         origin: fill
-        subdomains: [ioc_match, dns_tunnel, lateral_movement, beacon, feed_stale, east_west]
+        subdomains: [{id: ioc_match, capabilities: {}}, {id: dns_tunnel, capabilities: {}}, {id: lateral_movement, capabilities: {}}, {id: beacon, capabilities: {}}, {id: feed_stale, capabilities: {}}, {id: east_west, capabilities: {}}]
+
       - id: grc_audit
         label: GRC Audit
         origin: fill
         frameworks: [NIST GV, ITIL Risk]
-        subdomains: [control_evidence, iso27001, soc2, policy_exception, vendor_risk, dpdp]
+        subdomains: [{id: control_evidence, capabilities: {}}, {id: iso27001, capabilities: {}}, {id: soc2, capabilities: {}}, {id: policy_exception, capabilities: {}}, {id: vendor_risk, capabilities: {}}, {id: dpdp, capabilities: {}}]
+
       - id: forensics_ir
         label: Forensics IR
         origin: fill
         frameworks: [NIST RS]
-        subdomains: [disk_image, chain_of_custody, timeline, malware_sandbox, legal_hold, memory_capture]
+        subdomains: [{id: disk_image, capabilities: {}}, {id: chain_of_custody, capabilities: {}}, {id: timeline, capabilities: {}}, {id: malware_sandbox, capabilities: {}}, {id: legal_hold, capabilities: {}}, {id: memory_capture, capabilities: {}}]
+
 
   - id: secure_edge
     weight: 0.03
@@ -1108,42 +1140,50 @@ categories:
         origin: connector
         connectors: 9
         frameworks: [CSOH SSE]
-        subdomains: [ztna_app, swg_block, fwaas, private_access, policy_conflict, user_steering]
+        subdomains: [{id: ztna_app, capabilities: {}}, {id: swg_block, capabilities: {}}, {id: fwaas, capabilities: {}}, {id: private_access, capabilities: {}}, {id: policy_conflict, capabilities: {}}, {id: user_steering, capabilities: {}}]
+
       - id: casb
         label: CASB
         origin: connector
         connectors: 3
-        subdomains: [unsanctioned_saas, session_control, api_mode, shadow_it, dlp_saas]
+        subdomains: [{id: unsanctioned_saas, capabilities: {}}, {id: session_control, capabilities: {}}, {id: api_mode, capabilities: {}}, {id: shadow_it, capabilities: {}}, {id: dlp_saas, capabilities: {}}]
+
       - id: data_loss_prevention
         label: Data Loss Prevention
         origin: connector
         connectors: 3
         frameworks: [NIST PR.DS]
-        subdomains: [exfil_alert, false_positive, endpoint_dlp, email_dlp, classification]
+        subdomains: [{id: exfil_alert, capabilities: {}}, {id: false_positive, capabilities: {}}, {id: endpoint_dlp, capabilities: {}}, {id: email_dlp, capabilities: {}}, {id: classification, capabilities: {}}]
+
       - id: email_security
         label: Email Security
         origin: connector
         connectors: 4
-        subdomains: [phish, bec, spoof_dmarc, quarantine, impersonation, time_of_click]
+        subdomains: [{id: phish, capabilities: {}}, {id: bec, capabilities: {}}, {id: spoof_dmarc, capabilities: {}}, {id: quarantine, capabilities: {}}, {id: impersonation, capabilities: {}}, {id: time_of_click, capabilities: {}}]
+
       - id: web_security
         label: Web Security
         origin: connector
         connectors: 4
-        subdomains: [url_filter, malicious_site, ssl_inspect, category_miss, swg_bypass]
+        subdomains: [{id: url_filter, capabilities: {}}, {id: malicious_site, capabilities: {}}, {id: ssl_inspect, capabilities: {}}, {id: category_miss, capabilities: {}}, {id: swg_bypass, capabilities: {}}]
+
       - id: waf_ddos
         label: WAF DDoS
         origin: fill
-        subdomains: [l7_flood, bot, owasp, api_abuse, tls_policy, origin_shield]
+        subdomains: [{id: l7_flood, capabilities: {}}, {id: bot, capabilities: {}}, {id: owasp, capabilities: {}}, {id: api_abuse, capabilities: {}}, {id: tls_policy, capabilities: {}}, {id: origin_shield, capabilities: {}}]
+
       - id: dspm
         label: DSPM
         origin: fill
         frameworks: [CSOH DSPM]
-        subdomains: [public_bucket_data, shadow_db, classification_gap, overshare, lineage]
+        subdomains: [{id: public_bucket_data, capabilities: {}}, {id: shadow_db, capabilities: {}}, {id: classification_gap, capabilities: {}}, {id: overshare, capabilities: {}}, {id: lineage, capabilities: {}}]
+
       - id: sspm
         label: SSPM
         origin: fill
         frameworks: [CSOH SSPM]
-        subdomains: [saas_posture, third_party_app, oauth_grant, m365_hardening, salesforce_perm]
+        subdomains: [{id: saas_posture, capabilities: {}}, {id: third_party_app, capabilities: {}}, {id: oauth_grant, capabilities: {}}, {id: m365_hardening, capabilities: {}}, {id: salesforce_perm, capabilities: {}}]
+
 
   - id: network
     weight: 0.08
@@ -1159,46 +1199,55 @@ categories:
         label: Networking
         origin: connector
         connectors: 6
-        subdomains: [l2_loop, dhcp_exhaust, spanning_tree, vlan_misconfig, mtu, ipam]
+        subdomains: [{id: l2_loop, capabilities: {}}, {id: dhcp_exhaust, capabilities: {}}, {id: spanning_tree, capabilities: {}}, {id: vlan_misconfig, capabilities: {}}, {id: mtu, capabilities: {}}, {id: ipam, capabilities: {}}]
+
       - id: dns_cdn
         label: DNS CDN
         origin: connector
         connectors: 4
-        subdomains: [dns_outage, cache_poison, cdn_purge, ttl, split_horizon, dnssec]
+        subdomains: [{id: dns_outage, capabilities: {}}, {id: cache_poison, capabilities: {}}, {id: cdn_purge, capabilities: {}}, {id: ttl, capabilities: {}}, {id: split_horizon, capabilities: {}}, {id: dnssec, capabilities: {}}]
+
       - id: firewall
         label: Firewall
         origin: connector
         connectors: 7
-        subdomains: [unused_rule, any_any, hit_count, nat, change_window, app_id]
+        subdomains: [{id: unused_rule, capabilities: {}}, {id: any_any, capabilities: {}}, {id: hit_count, capabilities: {}}, {id: nat, capabilities: {}}, {id: change_window, capabilities: {}}, {id: app_id, capabilities: {}}]
+
       - id: load_balancer
         label: Load Balancer
         origin: connector
         connectors: 4
-        subdomains: [pool_down, ssl_offload, persistence, health_check, cert_expiry]
+        subdomains: [{id: pool_down, capabilities: {}}, {id: ssl_offload, capabilities: {}}, {id: persistence, capabilities: {}}, {id: health_check, capabilities: {}}, {id: cert_expiry, capabilities: {}}]
+
       - id: network_management
         label: Network Management
         origin: connector
         connectors: 6
-        subdomains: [snmp_poll, config_backup, config_drift, inventory, capacity, syslog]
+        subdomains: [{id: snmp_poll, capabilities: {}}, {id: config_backup, capabilities: {}}, {id: config_drift, capabilities: {}}, {id: inventory, capabilities: {}}, {id: capacity, capabilities: {}}, {id: syslog, capabilities: {}}]
+
       - id: routers
         label: Routers
         origin: connector
         connectors: 3
-        subdomains: [bgp_flap, ospf_neighbor, route_leak, acl, wan_brownout]
+        subdomains: [{id: bgp_flap, capabilities: {}}, {id: ospf_neighbor, capabilities: {}}, {id: route_leak, capabilities: {}}, {id: acl, capabilities: {}}, {id: wan_brownout, capabilities: {}}]
+
       - id: sd_wan
         label: SD-WAN
         origin: connector
         connectors: 8
-        subdomains: [sla_class, underlay_fail, app_steering, overlay_flap, qos, site_brownout]
+        subdomains: [{id: sla_class, capabilities: {}}, {id: underlay_fail, capabilities: {}}, {id: app_steering, capabilities: {}}, {id: overlay_flap, capabilities: {}}, {id: qos, capabilities: {}}, {id: site_brownout, capabilities: {}}]
+
       - id: wireless
         label: Wireless
         origin: connector
         connectors: 4
-        subdomains: [ap_down, roam, rf_interference, captive_portal, controller]
+        subdomains: [{id: ap_down, capabilities: {}}, {id: roam, capabilities: {}}, {id: rf_interference, capabilities: {}}, {id: captive_portal, capabilities: {}}, {id: controller, capabilities: {}}]
+
       - id: nac
         label: NAC
         origin: fill
-        subdomains: [dot1x, posture, quarantine_vlan, guest_ssid, eap_cert]
+        subdomains: [{id: dot1x, capabilities: {}}, {id: posture, capabilities: {}}, {id: quarantine_vlan, capabilities: {}}, {id: guest_ssid, capabilities: {}}, {id: eap_cert, capabilities: {}}]
+
 
   - id: infra
     weight: 0.12
@@ -1215,44 +1264,52 @@ categories:
         origin: connector
         connectors: 12
         frameworks: [Scogo D9]
-        subdomains: [landing_zone, iam_role, sg_open, quota, region_failover, orphan_resource, public_bucket]
+        subdomains: [{id: landing_zone, capabilities: {}}, {id: iam_role, capabilities: {}}, {id: sg_open, capabilities: {}}, {id: quota, capabilities: {}}, {id: region_failover, capabilities: {}}, {id: orphan_resource, capabilities: {}}, {id: public_bucket, capabilities: {}}]
+
       - id: finops
         label: FinOps
         origin: catalogue
         frameworks: [Scogo D9]
-        subdomains: [cost_anomaly, ri_coverage, idle_orphans, tag_gap, commitment, unit_econ]
+        subdomains: [{id: cost_anomaly, capabilities: {}}, {id: ri_coverage, capabilities: {}}, {id: idle_orphans, capabilities: {}}, {id: tag_gap, capabilities: {}}, {id: commitment, capabilities: {}}, {id: unit_econ, capabilities: {}}]
+
       - id: cnapp
         label: CNAPP
         origin: fill
         frameworks: [CSOH CNAPP]
-        subdomains: [cspm_finding, cwpp_runtime, kspm, ciem_perm, secret_in_image, toxic_combo]
+        subdomains: [{id: cspm_finding, capabilities: {}}, {id: cwpp_runtime, capabilities: {}}, {id: kspm, capabilities: {}}, {id: ciem_perm, capabilities: {}}, {id: secret_in_image, capabilities: {}}, {id: toxic_combo, capabilities: {}}]
+
       - id: virtualization
         label: Virtualization
         origin: connector
         connectors: 28
         frameworks: [Scogo D10]
-        subdomains: [vm_health, snapshot_age, cpu_ready, datastore, ha_failover, template_golden, capacity_forecast]
+        subdomains: [{id: vm_health, capabilities: {}}, {id: snapshot_age, capabilities: {}}, {id: cpu_ready, capabilities: {}}, {id: datastore, capabilities: {}}, {id: ha_failover, capabilities: {}}, {id: template_golden, capabilities: {}}, {id: capacity_forecast, capabilities: {}}]
+
       - id: storage
         label: Storage
         origin: connector
         connectors: 29
         frameworks: [Scogo D11]
-        subdomains: [volume_full, latency, raid_degrade, lun_map, replication, thin_provision, array_health]
+        subdomains: [{id: volume_full, capabilities: {}}, {id: latency, capabilities: {}}, {id: raid_degrade, capabilities: {}}, {id: lun_map, capabilities: {}}, {id: replication, capabilities: {}}, {id: thin_provision, capabilities: {}}, {id: array_health, capabilities: {}}]
+
       - id: backup
         label: Backup
         origin: connector
         connectors: 17
         frameworks: [NIST RC, Scogo D11]
-        subdomains: [job_fail, rpo_miss, restore_test, immutable, catalog_corrupt, ransomware_recovery]
+        subdomains: [{id: job_fail, capabilities: {}}, {id: rpo_miss, capabilities: {}}, {id: restore_test, capabilities: {}}, {id: immutable, capabilities: {}}, {id: catalog_corrupt, capabilities: {}}, {id: ransomware_recovery, capabilities: {}}]
+
       - id: bcdr_continuity
         label: BCDR Continuity
         origin: fill
         frameworks: [ITIL Continuity, NIST RC]
-        subdomains: [dr_drill, rto_miss, runbook, site_failover, chaos, comms_tree]
+        subdomains: [{id: dr_drill, capabilities: {}}, {id: rto_miss, capabilities: {}}, {id: runbook, capabilities: {}}, {id: site_failover, capabilities: {}}, {id: chaos, capabilities: {}}, {id: comms_tree, capabilities: {}}]
+
       - id: dcim_facilities
         label: DCIM Facilities
         origin: fill
-        subdomains: [pdu, cooling, rack, generator, environmental, colo]
+        subdomains: [{id: pdu, capabilities: {}}, {id: cooling, capabilities: {}}, {id: rack, capabilities: {}}, {id: generator, capabilities: {}}, {id: environmental, capabilities: {}}, {id: colo, capabilities: {}}]
+
 
   - id: observe
     weight: 0.06
@@ -1269,27 +1326,32 @@ categories:
         origin: connector
         connectors: 28
         frameworks: [ITIL Monitoring, Scogo D13]
-        subdomains: [alert_storm, threshold, snmp, agent_down, auto_close, noise, runbook_restart, webhook_enrich]
+        subdomains: [{id: alert_storm, capabilities: {}}, {id: threshold, capabilities: {}}, {id: snmp, capabilities: {}}, {id: agent_down, capabilities: {}}, {id: auto_close, capabilities: {}}, {id: noise, capabilities: {}}, {id: runbook_restart, capabilities: {}}, {id: webhook_enrich, capabilities: {}}]
+
       - id: observability_apm
         label: Observability APM
         origin: fill
         frameworks: [Gartner Observability 2026]
-        subdomains: [trace_break, golden_signals, otel, service_map, error_budget, slow_span]
+        subdomains: [{id: trace_break, capabilities: {}}, {id: golden_signals, capabilities: {}}, {id: otel, capabilities: {}}, {id: service_map, capabilities: {}}, {id: error_budget, capabilities: {}}, {id: slow_span, capabilities: {}}]
+
       - id: aiops
         label: AIOps
         origin: fill
         frameworks: [Gartner ITOM]
-        subdomains: [correlate, suppress, probable_cause, forecast, anomaly, ticket_reduce]
+        subdomains: [{id: correlate, capabilities: {}}, {id: suppress, capabilities: {}}, {id: probable_cause, capabilities: {}}, {id: forecast, capabilities: {}}, {id: anomaly, capabilities: {}}, {id: ticket_reduce, capabilities: {}}]
+
       - id: synthetics_dem
         label: Synthetics DEM
         origin: fill
         frameworks: [Gartner DEM]
-        subdomains: [synthetic_fail, rum, apdex, last_mile, mobile_crash, journey]
+        subdomains: [{id: synthetic_fail, capabilities: {}}, {id: rum, capabilities: {}}, {id: apdex, capabilities: {}}, {id: last_mile, capabilities: {}}, {id: mobile_crash, capabilities: {}}, {id: journey, capabilities: {}}]
+
       - id: ai_agent_observability
         label: AI Agent Observability
         origin: fill
         frameworks: [Gartner Observability 2026]
-        subdomains: [tool_fail, hallucination, token_cost, loop, policy_break, eval_regress]
+        subdomains: [{id: tool_fail, capabilities: {}}, {id: hallucination, capabilities: {}}, {id: token_cost, capabilities: {}}, {id: loop, capabilities: {}}, {id: policy_break, capabilities: {}}, {id: eval_regress, capabilities: {}}]
+
 
   - id: data
     weight: 0.05
@@ -1305,24 +1367,29 @@ categories:
         label: Database
         origin: connector
         connectors: 21
-        subdomains: [replication_lag, failover, bloat_vacuum, connection_exhaustion, slow_query, backup_restore, blocking_locks, storage_growth]
+        subdomains: [{id: replication_lag, capabilities: {}}, {id: failover, capabilities: {}}, {id: bloat_vacuum, capabilities: {}}, {id: connection_exhaustion, capabilities: {}}, {id: slow_query, capabilities: {}}, {id: backup_restore, capabilities: {}}, {id: blocking_locks, capabilities: {}}, {id: storage_growth, capabilities: {}}]
+
       - id: analytics
         label: Analytics
         origin: connector
         connectors: 24
-        subdomains: [pipeline_sla, warehouse_spend, refresh_fail, semantic_layer, access, cube_stale]
+        subdomains: [{id: pipeline_sla, capabilities: {}}, {id: warehouse_spend, capabilities: {}}, {id: refresh_fail, capabilities: {}}, {id: semantic_layer, capabilities: {}}, {id: access, capabilities: {}}, {id: cube_stale, capabilities: {}}]
+
       - id: messaging_streaming
         label: Messaging Streaming
         origin: fill
-        subdomains: [kafka_lag, consumer_rebalance, redis_eviction, rabbit_poison, dlq_replay, schema]
+        subdomains: [{id: kafka_lag, capabilities: {}}, {id: consumer_rebalance, capabilities: {}}, {id: redis_eviction, capabilities: {}}, {id: rabbit_poison, capabilities: {}}, {id: dlq_replay, capabilities: {}}, {id: schema, capabilities: {}}]
+
       - id: ipaas_api
         label: iPaaS API
         origin: fill
-        subdomains: [connector_fail, rate_limit, mapping_break, webhook, contract_test, dead_letter]
+        subdomains: [{id: connector_fail, capabilities: {}}, {id: rate_limit, capabilities: {}}, {id: mapping_break, capabilities: {}}, {id: webhook, capabilities: {}}, {id: contract_test, capabilities: {}}, {id: dead_letter, capabilities: {}}]
+
       - id: data_governance
         label: Data Governance
         origin: fill
-        subdomains: [catalog_stale, lineage, quality_rule, pii_tag, retention, mdq]
+        subdomains: [{id: catalog_stale, capabilities: {}}, {id: lineage, capabilities: {}}, {id: quality_rule, capabilities: {}}, {id: pii_tag, capabilities: {}}, {id: retention, capabilities: {}}, {id: mdq, capabilities: {}}]
+
 
   - id: delivery
     weight: 0.06
@@ -1339,30 +1406,36 @@ categories:
         origin: connector
         connectors: 23
         frameworks: [ITIL Deployment, ITIL Software]
-        subdomains: [pipeline_red, flaky_tests, secret_in_ci, runner_capacity, artifact, env_drift]
+        subdomains: [{id: pipeline_red, capabilities: {}}, {id: flaky_tests, capabilities: {}}, {id: secret_in_ci, capabilities: {}}, {id: runner_capacity, capabilities: {}}, {id: artifact, capabilities: {}}, {id: env_drift, capabilities: {}}]
+
       - id: kubernetes
         label: Kubernetes
         origin: fill
-        subdomains: [crashloopbackoff, oomkill, hpa_thrash, pdb_block, ingress_tls, etcd_health, pending_pods, image_cve]
+        subdomains: [{id: crashloopbackoff, capabilities: {}}, {id: oomkill, capabilities: {}}, {id: hpa_thrash, capabilities: {}}, {id: pdb_block, capabilities: {}}, {id: ingress_tls, capabilities: {}}, {id: etcd_health, capabilities: {}}, {id: pending_pods, capabilities: {}}, {id: image_cve, capabilities: {}}]
+
       - id: iac_gitops
         label: IaC GitOps
         origin: fill
-        subdomains: [terraform_drift, state_lock, helm_rollback, argo_out_of_sync, opa_deny, module_blast_radius]
+        subdomains: [{id: terraform_drift, capabilities: {}}, {id: state_lock, capabilities: {}}, {id: helm_rollback, capabilities: {}}, {id: argo_out_of_sync, capabilities: {}}, {id: opa_deny, capabilities: {}}, {id: module_blast_radius, capabilities: {}}]
+
       - id: release_orchestration
         label: Release Orchestration
         origin: fill
         frameworks: [Gartner ARO, ITIL Release]
-        subdomains: [canary_abort, rollback, feature_flag, change_freeze, artifact_promote, smoke]
+        subdomains: [{id: canary_abort, capabilities: {}}, {id: rollback, capabilities: {}}, {id: feature_flag, capabilities: {}}, {id: change_freeze, capabilities: {}}, {id: artifact_promote, capabilities: {}}, {id: smoke, capabilities: {}}]
+
       - id: appsec_aspm
         label: AppSec ASPM
         origin: fill
         frameworks: [CSOH ASPM]
-        subdomains: [sast, sca, dast, iac_scan, secret_scan, container_scan]
+        subdomains: [{id: sast, capabilities: {}}, {id: sca, capabilities: {}}, {id: dast, capabilities: {}}, {id: iac_scan, capabilities: {}}, {id: secret_scan, capabilities: {}}, {id: container_scan, capabilities: {}}]
+
       - id: mainframe_midrange
         label: Mainframe Midrange
         origin: fill
         frameworks: [Gartner ITOM mainframe]
-        subdomains: [batch_abend, racf, cics, capacity, tape, lpar]
+        subdomains: [{id: batch_abend, capabilities: {}}, {id: racf, capabilities: {}}, {id: cics, capabilities: {}}, {id: capacity, capabilities: {}}, {id: tape, capabilities: {}}, {id: lpar, capabilities: {}}]
+
 
   - id: enterprise
     weight: 0.01
@@ -1378,22 +1451,26 @@ categories:
         label: CRM Sales
         origin: connector
         connectors: 9
-        subdomains: [sync_fail, sandbox, api_limit, sharing_rule, integration_user, duplicate]
+        subdomains: [{id: sync_fail, capabilities: {}}, {id: sandbox, capabilities: {}}, {id: api_limit, capabilities: {}}, {id: sharing_rule, capabilities: {}}, {id: integration_user, capabilities: {}}, {id: duplicate, capabilities: {}}]
+
       - id: hr_payroll
         label: HR Payroll
         origin: connector
         connectors: 5
         frameworks: [ITIL Workforce]
-        subdomains: [joiner_feed, payroll_file, pii, access, offboard_hris, org_chart]
+        subdomains: [{id: joiner_feed, capabilities: {}}, {id: payroll_file, capabilities: {}}, {id: pii, capabilities: {}}, {id: access, capabilities: {}}, {id: offboard_hris, capabilities: {}}, {id: org_chart, capabilities: {}}]
+
       - id: erp_finance
         label: ERP Finance
         origin: fill
-        subdomains: [sap_rfc, transport, job_fail, tcode, idoc, interface_queue]
+        subdomains: [{id: sap_rfc, capabilities: {}}, {id: transport, capabilities: {}}, {id: job_fail, capabilities: {}}, {id: tcode, capabilities: {}}, {id: idoc, capabilities: {}}, {id: interface_queue, capabilities: {}}]
+
       - id: supplier_contract
         label: Supplier Contract
         origin: fill
         frameworks: [ITIL Supplier]
-        subdomains: [vendor_sla, license_trueup, sow, offboarding_vendor, saas_renewal]
+        subdomains: [{id: vendor_sla, capabilities: {}}, {id: license_trueup, capabilities: {}}, {id: sow, capabilities: {}}, {id: offboarding_vendor, capabilities: {}}, {id: saas_renewal, capabilities: {}}]
+
 
   - id: agentic
     weight: 0.03
@@ -1408,23 +1485,28 @@ categories:
       - id: agent_fabric
         label: Agent Fabric
         origin: catalogue
-        subdomains: [connector_outage, oauth_scope, mcp_tool_fail, oem_version_skew, least_privilege_app_reg, integration_auth_rot]
+        subdomains: [{id: connector_outage, capabilities: {}}, {id: oauth_scope, capabilities: {}}, {id: mcp_tool_fail, capabilities: {}}, {id: oem_version_skew, capabilities: {}}, {id: least_privilege_app_reg, capabilities: {}}, {id: integration_auth_rot, capabilities: {}}]
+
       - id: sia_guardrails
         label: SIA Guardrails
         origin: catalogue
-        subdomains: [approval_gate, dry_run_preview, rollback, audit_export, hallucination_refuse, destructive_cmd_block, human_in_loop]
+        subdomains: [{id: approval_gate, capabilities: {}}, {id: dry_run_preview, capabilities: {}}, {id: rollback, capabilities: {}}, {id: audit_export, capabilities: {}}, {id: hallucination_refuse, capabilities: {}}, {id: destructive_cmd_block, capabilities: {}}, {id: human_in_loop, capabilities: {}}]
+
       - id: knowledge_graph
         label: Knowledge Graph
         origin: catalogue
-        subdomains: [cross_system_join, stale_cmdb, alert_to_asset, identity_to_device, policy_conflict, context_gap]
+        subdomains: [{id: cross_system_join, capabilities: {}}, {id: stale_cmdb, capabilities: {}}, {id: alert_to_asset, capabilities: {}}, {id: identity_to_device, capabilities: {}}, {id: policy_conflict, capabilities: {}}, {id: context_gap, capabilities: {}}]
+
       - id: channels_knowledge
         label: Channels Knowledge
         origin: catalogue
-        subdomains: [slack_teams_whatsapp, sop_curation, kb_from_ticket, remote_session_learn, deflection_accuracy]
+        subdomains: [{id: slack_teams_whatsapp, capabilities: {}}, {id: sop_curation, capabilities: {}}, {id: kb_from_ticket, capabilities: {}}, {id: remote_session_learn, capabilities: {}}, {id: deflection_accuracy, capabilities: {}}]
+
       - id: platform_deploy
         label: Platform Deploy
         origin: catalogue
-        subdomains: [saas_india, byoc, on_prem, airgap, rmm_agent, browser_intel]
+        subdomains: [{id: saas_india, capabilities: {}}, {id: byoc, capabilities: {}}, {id: on_prem, capabilities: {}}, {id: airgap, capabilities: {}}, {id: rmm_agent, capabilities: {}}, {id: browser_intel, capabilities: {}}]
+
 
   - id: oem
     weight: 0.10
@@ -1444,7 +1526,8 @@ categories:
         kind: vendor
         group: cloud
         note: Hyperscale IaaS/PaaS
-        subdomains: [ec2, vpc_iam, s3, rds, eks, lambda, cloudwatch, route53, direct_connect, elb_alb, waf_shield, organizations, secrets_manager, backup]
+        subdomains: [{id: ec2, capabilities: {}}, {id: vpc_iam, capabilities: {}}, {id: s3, capabilities: {}}, {id: rds, capabilities: {}}, {id: eks, capabilities: {}}, {id: lambda, capabilities: {}}, {id: cloudwatch, capabilities: {}}, {id: route53, capabilities: {}}, {id: direct_connect, capabilities: {}}, {id: elb_alb, capabilities: {}}, {id: waf_shield, capabilities: {}}, {id: organizations, capabilities: {}}, {id: secrets_manager, capabilities: {}}, {id: backup, capabilities: {}}]
+
       - id: azure
         label: Azure
         eligibility:
@@ -1453,7 +1536,8 @@ categories:
         kind: vendor
         group: cloud
         note: Microsoft cloud IaaS/PaaS (not M365)
-        subdomains: [vm, vnet, blob, aks, azure_sql, monitor, expressroute, firewall, sentinel, policy_arc, lb_appgw, backup, files]
+        subdomains: [{id: vm, capabilities: {}}, {id: vnet, capabilities: {}}, {id: blob, capabilities: {}}, {id: aks, capabilities: {}}, {id: azure_sql, capabilities: {}}, {id: monitor, capabilities: {}}, {id: expressroute, capabilities: {}}, {id: firewall, capabilities: {}}, {id: sentinel, capabilities: {}}, {id: policy_arc, capabilities: {}}, {id: lb_appgw, capabilities: {}}, {id: backup, capabilities: {}}, {id: files, capabilities: {}}]
+
       - id: google_cloud
         label: Google Cloud
         eligibility:
@@ -1462,7 +1546,8 @@ categories:
         kind: vendor
         group: cloud
         note: GCP IaaS/PaaS
-        subdomains: [gce, vpc, gke, cloud_sql, bigquery, gcs, iam, cloud_armor, interconnect, logging, pubsub, cloud_run]
+        subdomains: [{id: gce, capabilities: {}}, {id: vpc, capabilities: {}}, {id: gke, capabilities: {}}, {id: cloud_sql, capabilities: {}}, {id: bigquery, capabilities: {}}, {id: gcs, capabilities: {}}, {id: iam, capabilities: {}}, {id: cloud_armor, capabilities: {}}, {id: interconnect, capabilities: {}}, {id: logging, capabilities: {}}, {id: pubsub, capabilities: {}}, {id: cloud_run, capabilities: {}}]
+
       - id: other_cloud
         label: Other Cloud
         eligibility:
@@ -1471,7 +1556,8 @@ categories:
         kind: bucket
         group: cloud
         note: Long-tail public cloud
-        subdomains: [oci, ibm_cloud, alibaba, digitalocean, akamai_linode, ovh, hetzner]
+        subdomains: [{id: oci, capabilities: {}}, {id: ibm_cloud, capabilities: {}}, {id: alibaba, capabilities: {}}, {id: digitalocean, capabilities: {}}, {id: akamai_linode, capabilities: {}}, {id: ovh, capabilities: {}}, {id: hetzner, capabilities: {}}]
+
       - id: microsoft
         label: Microsoft
         eligibility:
@@ -1480,7 +1566,8 @@ categories:
         kind: vendor
         group: os
         note: Windows, AD, M365, Intune, Defender, SQL Server
-        subdomains: [windows_server, active_directory, m365, exchange, sharepoint, teams, entra_id, intune, defender, sql_server, hyper_v, sccm_mecm, power_platform, windows_11]
+        subdomains: [{id: windows_server, capabilities: {}}, {id: active_directory, capabilities: {}}, {id: m365, capabilities: {}}, {id: exchange, capabilities: {}}, {id: sharepoint, capabilities: {}}, {id: teams, capabilities: {}}, {id: entra_id, capabilities: {}}, {id: intune, capabilities: {}}, {id: defender, capabilities: {}}, {id: sql_server, capabilities: {}}, {id: hyper_v, capabilities: {}}, {id: sccm_mecm, capabilities: {}}, {id: power_platform, capabilities: {}}, {id: windows_11, capabilities: {}}]
+
       - id: ibm
         label: IBM
         eligibility:
@@ -1489,7 +1576,8 @@ categories:
         kind: vendor
         group: os
         note: Power, z, storage, Maximo, QRadar, MQ, watsonx
-        subdomains: [power_aix, ibm_i, zos, flashsystem, maximo, qradar, instana, turbonomic, mq, db2, watsonx, cloud_pak, websphere, spectrum_protect]
+        subdomains: [{id: power_aix, capabilities: {}}, {id: ibm_i, capabilities: {}}, {id: zos, capabilities: {}}, {id: flashsystem, capabilities: {}}, {id: maximo, capabilities: {}}, {id: qradar, capabilities: {}}, {id: instana, capabilities: {}}, {id: turbonomic, capabilities: {}}, {id: mq, capabilities: {}}, {id: db2, capabilities: {}}, {id: watsonx, capabilities: {}}, {id: cloud_pak, capabilities: {}}, {id: websphere, capabilities: {}}, {id: spectrum_protect, capabilities: {}}]
+
       - id: red_hat
         label: Red Hat
         eligibility:
@@ -1498,7 +1586,8 @@ categories:
         kind: vendor
         group: os
         note: RHEL, OpenShift, Ansible, Satellite
-        subdomains: [rhel, openshift, ansible_aap, satellite, idm, ceph, openstack, insights]
+        subdomains: [{id: rhel, capabilities: {}}, {id: openshift, capabilities: {}}, {id: ansible_aap, capabilities: {}}, {id: satellite, capabilities: {}}, {id: idm, capabilities: {}}, {id: ceph, capabilities: {}}, {id: openstack, capabilities: {}}, {id: insights, capabilities: {}}]
+
       - id: canonical
         label: Canonical
         eligibility:
@@ -1507,7 +1596,8 @@ categories:
         kind: vendor
         group: os
         note: Ubuntu and Landscape
-        subdomains: [ubuntu_server, ubuntu_pro, landscape, lxd, maas, juju]
+        subdomains: [{id: ubuntu_server, capabilities: {}}, {id: ubuntu_pro, capabilities: {}}, {id: landscape, capabilities: {}}, {id: lxd, capabilities: {}}, {id: maas, capabilities: {}}, {id: juju, capabilities: {}}]
+
       - id: linux_distros
         label: Linux Distros
         eligibility:
@@ -1516,7 +1606,8 @@ categories:
         kind: bucket
         group: os
         note: Community and clone distros
-        subdomains: [debian, rocky, alma, oracle_linux, amazon_linux, sles, freebsd]
+        subdomains: [{id: debian, capabilities: {}}, {id: rocky, capabilities: {}}, {id: alma, capabilities: {}}, {id: oracle_linux, capabilities: {}}, {id: amazon_linux, capabilities: {}}, {id: sles, capabilities: {}}, {id: freebsd, capabilities: {}}]
+
       - id: kubernetes
         label: Kubernetes
         eligibility:
@@ -1525,7 +1616,8 @@ categories:
         kind: vendor
         group: containers
         note: CNCF platform — not a company
-        subdomains: [control_plane, etcd, cni, ingress, rbac, storage_class, operators, gateway_api, network_policy, cluster_upgrade]
+        subdomains: [{id: control_plane, capabilities: {}}, {id: etcd, capabilities: {}}, {id: cni, capabilities: {}}, {id: ingress, capabilities: {}}, {id: rbac, capabilities: {}}, {id: storage_class, capabilities: {}}, {id: operators, capabilities: {}}, {id: gateway_api, capabilities: {}}, {id: network_policy, capabilities: {}}, {id: cluster_upgrade, capabilities: {}}]
+
       - id: cisco
         label: Cisco
         eligibility:
@@ -1534,7 +1626,8 @@ categories:
         kind: vendor
         group: network
         note: IOS, NX-OS, Meraki, ISE, Viptela, UCS
-        subdomains: [ios_xe, ios_xr, nxos, meraki, catalyst_center, ise, firepower, umbrella, duo, thousandeyes, viptela, webex, appdynamics, ucs]
+        subdomains: [{id: ios_xe, capabilities: {}}, {id: ios_xr, capabilities: {}}, {id: nxos, capabilities: {}}, {id: meraki, capabilities: {}}, {id: catalyst_center, capabilities: {}}, {id: ise, capabilities: {}}, {id: firepower, capabilities: {}}, {id: umbrella, capabilities: {}}, {id: duo, capabilities: {}}, {id: thousandeyes, capabilities: {}}, {id: viptela, capabilities: {}}, {id: webex, capabilities: {}}, {id: appdynamics, capabilities: {}}, {id: ucs, capabilities: {}}]
+
       - id: juniper
         label: Juniper
         eligibility:
@@ -1543,7 +1636,8 @@ categories:
         kind: vendor
         group: network
         note: Junos, Mist, SRX, MX
-        subdomains: [junos, mist, srx, mx, qfx, apstra, contrail, session_smart]
+        subdomains: [{id: junos, capabilities: {}}, {id: mist, capabilities: {}}, {id: srx, capabilities: {}}, {id: mx, capabilities: {}}, {id: qfx, capabilities: {}}, {id: apstra, capabilities: {}}, {id: contrail, capabilities: {}}, {id: session_smart, capabilities: {}}]
+
       - id: fortinet
         label: Fortinet
         eligibility:
@@ -1552,7 +1646,8 @@ categories:
         kind: vendor
         group: network
         note: FortiGate and Security Fabric
-        subdomains: [fortigate, fortimanager, fortianalyzer, forticlient, fortisase, fortimail, fortiweb, fortiedr, fortiswitch, fortiap, fortiauthenticator, forticnapp]
+        subdomains: [{id: fortigate, capabilities: {}}, {id: fortimanager, capabilities: {}}, {id: fortianalyzer, capabilities: {}}, {id: forticlient, capabilities: {}}, {id: fortisase, capabilities: {}}, {id: fortimail, capabilities: {}}, {id: fortiweb, capabilities: {}}, {id: fortiedr, capabilities: {}}, {id: fortiswitch, capabilities: {}}, {id: fortiap, capabilities: {}}, {id: fortiauthenticator, capabilities: {}}, {id: forticnapp, capabilities: {}}]
+
       - id: versa
         label: Versa
         eligibility:
@@ -1561,7 +1656,8 @@ categories:
         kind: vendor
         group: network
         note: SD-WAN / SASE
-        subdomains: [versa_director, versa_analytics, versa_os, versa_sase, versa_titan]
+        subdomains: [{id: versa_director, capabilities: {}}, {id: versa_analytics, capabilities: {}}, {id: versa_os, capabilities: {}}, {id: versa_sase, capabilities: {}}, {id: versa_titan, capabilities: {}}]
+
       - id: palo_alto
         label: Palo Alto
         eligibility:
@@ -1570,7 +1666,8 @@ categories:
         kind: vendor
         group: network
         note: PAN-OS, Prisma, Cortex
-        subdomains: [panos, panorama, prisma_access, prisma_cloud, cortex_xdr, globalprotect, wildfire, sdwan]
+        subdomains: [{id: panos, capabilities: {}}, {id: panorama, capabilities: {}}, {id: prisma_access, capabilities: {}}, {id: prisma_cloud, capabilities: {}}, {id: cortex_xdr, capabilities: {}}, {id: globalprotect, capabilities: {}}, {id: wildfire, capabilities: {}}, {id: sdwan, capabilities: {}}]
+
       - id: hpe_aruba
         label: HPE Aruba
         eligibility:
@@ -1579,7 +1676,8 @@ categories:
         kind: vendor
         group: network
         note: AOS-CX, Central, ClearPass, Silver Peak
-        subdomains: [aos_cx, central, clearpass, silver_peak, ssid_rf, nac]
+        subdomains: [{id: aos_cx, capabilities: {}}, {id: central, capabilities: {}}, {id: clearpass, capabilities: {}}, {id: silver_peak, capabilities: {}}, {id: ssid_rf, capabilities: {}}, {id: nac, capabilities: {}}]
+
       - id: other_network_oem
         label: Other Network OEM
         eligibility:
@@ -1588,7 +1686,8 @@ categories:
         kind: bucket
         group: network
         note: Arista, F5, Check Point, campus/SMB
-        subdomains: [arista_eos, extreme, ubiquiti, mikrotik, f5_bigip, checkpoint, nokia_srlinux, sonicwall, ruckus, infoblox]
+        subdomains: [{id: arista_eos, capabilities: {}}, {id: extreme, capabilities: {}}, {id: ubiquiti, capabilities: {}}, {id: mikrotik, capabilities: {}}, {id: f5_bigip, capabilities: {}}, {id: checkpoint, capabilities: {}}, {id: nokia_srlinux, capabilities: {}}, {id: sonicwall, capabilities: {}}, {id: ruckus, capabilities: {}}, {id: infoblox, capabilities: {}}]
+
       - id: cloudflare
         label: Cloudflare
         eligibility:
@@ -1597,7 +1696,8 @@ categories:
         kind: vendor
         group: sase
         note: CDN, WAF, Zero Trust, Workers
-        subdomains: [cdn_cache, waf, tunnel, zero_trust, workers, r2, dns, bot_mgmt, magic_wan]
+        subdomains: [{id: cdn_cache, capabilities: {}}, {id: waf, capabilities: {}}, {id: tunnel, capabilities: {}}, {id: zero_trust, capabilities: {}}, {id: workers, capabilities: {}}, {id: r2, capabilities: {}}, {id: dns, capabilities: {}}, {id: bot_mgmt, capabilities: {}}, {id: magic_wan, capabilities: {}}]
+
       - id: zscaler
         label: Zscaler
         eligibility:
@@ -1606,7 +1706,8 @@ categories:
         kind: vendor
         group: sase
         note: ZIA / ZPA / ZDX
-        subdomains: [zia, zpa, zdx, zcc, bsp, deception]
+        subdomains: [{id: zia, capabilities: {}}, {id: zpa, capabilities: {}}, {id: zdx, capabilities: {}}, {id: zcc, capabilities: {}}, {id: bsp, capabilities: {}}, {id: deception, capabilities: {}}]
+
       - id: other_sase
         label: Other SASE
         eligibility:
@@ -1615,7 +1716,8 @@ categories:
         kind: bucket
         group: sase
         note: Netskope, Cato, Forcepoint
-        subdomains: [netskope, cato, forcepoint, skyhigh, perimeter81]
+        subdomains: [{id: netskope, capabilities: {}}, {id: cato, capabilities: {}}, {id: forcepoint, capabilities: {}}, {id: skyhigh, capabilities: {}}, {id: perimeter81, capabilities: {}}]
+
       - id: crowdstrike
         label: CrowdStrike
         eligibility:
@@ -1624,7 +1726,8 @@ categories:
         kind: vendor
         group: security
         note: Falcon platform
-        subdomains: [falcon_prevent, insight, overwatch, identity, cloud, logscale, discover, spotlight]
+        subdomains: [{id: falcon_prevent, capabilities: {}}, {id: insight, capabilities: {}}, {id: overwatch, capabilities: {}}, {id: identity, capabilities: {}}, {id: cloud, capabilities: {}}, {id: logscale, capabilities: {}}, {id: discover, capabilities: {}}, {id: spotlight, capabilities: {}}]
+
       - id: cyberark
         label: CyberArk
         eligibility:
@@ -1633,7 +1736,8 @@ categories:
         kind: vendor
         group: security
         note: PAM, secrets, EPM
-        subdomains: [privileged_cloud, pam, identity, endpoint_privilege, secrets_manager, conjur, remote_access]
+        subdomains: [{id: privileged_cloud, capabilities: {}}, {id: pam, capabilities: {}}, {id: identity, capabilities: {}}, {id: endpoint_privilege, capabilities: {}}, {id: secrets_manager, capabilities: {}}, {id: conjur, capabilities: {}}, {id: remote_access, capabilities: {}}]
+
       - id: okta
         label: Okta
         eligibility:
@@ -1642,7 +1746,8 @@ categories:
         kind: vendor
         group: security
         note: Workforce IdP
-        subdomains: [workforce, cic, wga, privileged_access, workflows, fastpass]
+        subdomains: [{id: workforce, capabilities: {}}, {id: cic, capabilities: {}}, {id: wga, capabilities: {}}, {id: privileged_access, capabilities: {}}, {id: workflows, capabilities: {}}, {id: fastpass, capabilities: {}}]
+
       - id: other_security_isv
         label: Other Security ISV
         eligibility:
@@ -1651,7 +1756,8 @@ categories:
         kind: bucket
         group: security
         note: EDR, vuln, email security long-tail
-        subdomains: [sentinelone, tenable, qualys, rapid7, proofpoint, mimecast, trend_micro, sophos, tanium, darktrace]
+        subdomains: [{id: sentinelone, capabilities: {}}, {id: tenable, capabilities: {}}, {id: qualys, capabilities: {}}, {id: rapid7, capabilities: {}}, {id: proofpoint, capabilities: {}}, {id: mimecast, capabilities: {}}, {id: trend_micro, capabilities: {}}, {id: sophos, capabilities: {}}, {id: tanium, capabilities: {}}, {id: darktrace, capabilities: {}}]
+
       - id: other_identity_isv
         label: Other Identity ISV
         eligibility:
@@ -1660,7 +1766,8 @@ categories:
         kind: bucket
         group: security
         note: IGA / PAM long-tail
-        subdomains: [ping, sailpoint, beyondtrust, delinea, forgerock, jumpcloud]
+        subdomains: [{id: ping, capabilities: {}}, {id: sailpoint, capabilities: {}}, {id: beyondtrust, capabilities: {}}, {id: delinea, capabilities: {}}, {id: forgerock, capabilities: {}}, {id: jumpcloud, capabilities: {}}]
+
       - id: dell
         label: Dell
         eligibility:
@@ -1669,7 +1776,8 @@ categories:
         kind: vendor
         group: hardware
         note: PowerEdge, PowerStore, VxRail
-        subdomains: [poweredge, idrac, powerstore, powerscale, vxrail, avamar, networker, openmanage]
+        subdomains: [{id: poweredge, capabilities: {}}, {id: idrac, capabilities: {}}, {id: powerstore, capabilities: {}}, {id: powerscale, capabilities: {}}, {id: vxrail, capabilities: {}}, {id: avamar, capabilities: {}}, {id: networker, capabilities: {}}, {id: openmanage, capabilities: {}}]
+
       - id: hpe
         label: HPE
         eligibility:
@@ -1678,7 +1786,8 @@ categories:
         kind: vendor
         group: hardware
         note: ProLiant, Alletra, GreenLake
-        subdomains: [proliant, ilo, alletra, synergy, greenlake, primera_3par, storeonce, oneview]
+        subdomains: [{id: proliant, capabilities: {}}, {id: ilo, capabilities: {}}, {id: alletra, capabilities: {}}, {id: synergy, capabilities: {}}, {id: greenlake, capabilities: {}}, {id: primera_3par, capabilities: {}}, {id: storeonce, capabilities: {}}, {id: oneview, capabilities: {}}]
+
       - id: netapp
         label: NetApp
         eligibility:
@@ -1687,7 +1796,8 @@ categories:
         kind: vendor
         group: hardware
         note: ONTAP and Cloud Volumes
-        subdomains: [ontap, ontap_select, storagegrid, cloud_volumes, snapmirror, active_iq]
+        subdomains: [{id: ontap, capabilities: {}}, {id: ontap_select, capabilities: {}}, {id: storagegrid, capabilities: {}}, {id: cloud_volumes, capabilities: {}}, {id: snapmirror, capabilities: {}}, {id: active_iq, capabilities: {}}]
+
       - id: pure_storage
         label: Pure Storage
         eligibility:
@@ -1696,7 +1806,8 @@ categories:
         kind: vendor
         group: hardware
         note: FlashArray, FlashBlade, Portworx
-        subdomains: [flasharray, flashblade, portworx, fusion, cloud_block]
+        subdomains: [{id: flasharray, capabilities: {}}, {id: flashblade, capabilities: {}}, {id: portworx, capabilities: {}}, {id: fusion, capabilities: {}}, {id: cloud_block, capabilities: {}}]
+
       - id: other_compute_oem
         label: Other Compute OEM
         eligibility:
@@ -1705,7 +1816,8 @@ categories:
         kind: bucket
         group: hardware
         note: Lenovo, SuperMicro, Hitachi
-        subdomains: [lenovo_thinksystem, supermicro, hitachi_vantara]
+        subdomains: [{id: lenovo_thinksystem, capabilities: {}}, {id: supermicro, capabilities: {}}, {id: hitachi_vantara, capabilities: {}}]
+
       - id: vmware
         label: VMware
         eligibility:
@@ -1714,7 +1826,8 @@ categories:
         kind: vendor
         group: virt
         note: Broadcom VMware Cloud Foundation
-        subdomains: [vsphere, vcenter, vsan, nsx, horizon, aria, velocloud, tanzu, vcf]
+        subdomains: [{id: vsphere, capabilities: {}}, {id: vcenter, capabilities: {}}, {id: vsan, capabilities: {}}, {id: nsx, capabilities: {}}, {id: horizon, capabilities: {}}, {id: aria, capabilities: {}}, {id: velocloud, capabilities: {}}, {id: tanzu, capabilities: {}}, {id: vcf, capabilities: {}}]
+
       - id: nutanix
         label: Nutanix
         eligibility:
@@ -1723,7 +1836,8 @@ categories:
         kind: vendor
         group: virt
         note: AHV and Prism
-        subdomains: [ahv, prism, files, flow, calm, nkp]
+        subdomains: [{id: ahv, capabilities: {}}, {id: prism, capabilities: {}}, {id: files, capabilities: {}}, {id: flow, capabilities: {}}, {id: calm, capabilities: {}}, {id: nkp, capabilities: {}}]
+
       - id: other_hypervisor
         label: Other Hypervisor
         eligibility:
@@ -1732,7 +1846,8 @@ categories:
         kind: bucket
         group: virt
         note: Proxmox, Citrix, KVM
-        subdomains: [proxmox, citrix_cvad, kvm_libvirt, oracle_virtualization]
+        subdomains: [{id: proxmox, capabilities: {}}, {id: citrix_cvad, capabilities: {}}, {id: kvm_libvirt, capabilities: {}}, {id: oracle_virtualization, capabilities: {}}]
+
       - id: oracle
         label: Oracle
         eligibility:
@@ -1741,7 +1856,8 @@ categories:
         kind: vendor
         group: data
         note: Database, Exadata, EBS, Fusion — not OCI
-        subdomains: [database, rac_dataguard, exadata, goldengate, ebs, fusion_cloud, weblogic, mysql_heatwave]
+        subdomains: [{id: database, capabilities: {}}, {id: rac_dataguard, capabilities: {}}, {id: exadata, capabilities: {}}, {id: goldengate, capabilities: {}}, {id: ebs, capabilities: {}}, {id: fusion_cloud, capabilities: {}}, {id: weblogic, capabilities: {}}, {id: mysql_heatwave, capabilities: {}}]
+
       - id: database_isvs
         label: Database ISVs
         eligibility:
@@ -1750,7 +1866,8 @@ categories:
         kind: bucket
         group: data
         note: Postgres, MySQL, MongoDB, Snowflake, …
-        subdomains: [postgresql, mysql, mariadb, mongodb, redis, elasticsearch, snowflake, databricks, cockroach, cassandra, neo4j, clickhouse]
+        subdomains: [{id: postgresql, capabilities: {}}, {id: mysql, capabilities: {}}, {id: mariadb, capabilities: {}}, {id: mongodb, capabilities: {}}, {id: redis, capabilities: {}}, {id: elasticsearch, capabilities: {}}, {id: snowflake, capabilities: {}}, {id: databricks, capabilities: {}}, {id: cockroach, capabilities: {}}, {id: cassandra, capabilities: {}}, {id: neo4j, capabilities: {}}, {id: clickhouse, capabilities: {}}]
+
       - id: datadog
         label: Datadog
         eligibility:
@@ -1759,7 +1876,8 @@ categories:
         kind: vendor
         group: observe
         note: Infra, APM, logs, synthetics
-        subdomains: [infra, apm, logs, synthetics, rum, security, k8s, usm]
+        subdomains: [{id: infra, capabilities: {}}, {id: apm, capabilities: {}}, {id: logs, capabilities: {}}, {id: synthetics, capabilities: {}}, {id: rum, capabilities: {}}, {id: security, capabilities: {}}, {id: k8s, capabilities: {}}, {id: usm, capabilities: {}}]
+
       - id: splunk
         label: Splunk
         eligibility:
@@ -1768,7 +1886,8 @@ categories:
         kind: vendor
         group: observe
         note: Enterprise / Cloud / OTel (Cisco-owned)
-        subdomains: [enterprise, cloud, otel, enterprise_security, it_si, observability, forwarder]
+        subdomains: [{id: enterprise, capabilities: {}}, {id: cloud, capabilities: {}}, {id: otel, capabilities: {}}, {id: enterprise_security, capabilities: {}}, {id: it_si, capabilities: {}}, {id: observability, capabilities: {}}, {id: forwarder, capabilities: {}}]
+
       - id: other_observability
         label: Other Observability
         eligibility:
@@ -1777,7 +1896,8 @@ categories:
         kind: bucket
         group: observe
         note: Dynatrace, Grafana, Zabbix, PagerDuty, …
-        subdomains: [dynatrace, new_relic, grafana, zabbix, elastic, pagerduty, solarwinds, manageengine, prometheus]
+        subdomains: [{id: dynatrace, capabilities: {}}, {id: new_relic, capabilities: {}}, {id: grafana, capabilities: {}}, {id: zabbix, capabilities: {}}, {id: elastic, capabilities: {}}, {id: pagerduty, capabilities: {}}, {id: solarwinds, capabilities: {}}, {id: manageengine, capabilities: {}}, {id: prometheus, capabilities: {}}]
+
       - id: backup_isvs
         label: Backup ISVs
         eligibility:
@@ -1786,7 +1906,8 @@ categories:
         kind: bucket
         group: backup
         note: Veeam, Rubrik, Cohesity, Commvault, …
-        subdomains: [veeam, rubrik, cohesity, commvault, veritas, acronis, datto, druva]
+        subdomains: [{id: veeam, capabilities: {}}, {id: rubrik, capabilities: {}}, {id: cohesity, capabilities: {}}, {id: commvault, capabilities: {}}, {id: veritas, capabilities: {}}, {id: acronis, capabilities: {}}, {id: datto, capabilities: {}}, {id: druva, capabilities: {}}]
+
       - id: servicenow
         label: ServiceNow
         eligibility:
@@ -1795,7 +1916,8 @@ categories:
         kind: vendor
         group: itsm
         note: ITSM / ITOM / CMDB
-        subdomains: [itsm, itom, cmdb, now_assist, secops, hrsd, csm, integration_hub]
+        subdomains: [{id: itsm, capabilities: {}}, {id: itom, capabilities: {}}, {id: cmdb, capabilities: {}}, {id: now_assist, capabilities: {}}, {id: secops, capabilities: {}}, {id: hrsd, capabilities: {}}, {id: csm, capabilities: {}}, {id: integration_hub, capabilities: {}}]
+
       - id: atlassian
         label: Atlassian
         eligibility:
@@ -1804,7 +1926,8 @@ categories:
         kind: vendor
         group: itsm
         note: Jira, Confluence, Opsgenie
-        subdomains: [jira, jira_sm, confluence, bitbucket, opsgenie, statuspage]
+        subdomains: [{id: jira, capabilities: {}}, {id: jira_sm, capabilities: {}}, {id: confluence, capabilities: {}}, {id: bitbucket, capabilities: {}}, {id: opsgenie, capabilities: {}}, {id: statuspage, capabilities: {}}]
+
       - id: google_workspace
         label: Google Workspace
         eligibility:
@@ -1813,7 +1936,8 @@ categories:
         kind: vendor
         group: itsm
         note: Gmail, Drive, Meet, ChromeOS
-        subdomains: [gmail, drive, calendar, meet, chromeos, cloud_identity, vault, admin]
+        subdomains: [{id: gmail, capabilities: {}}, {id: drive, capabilities: {}}, {id: calendar, capabilities: {}}, {id: meet, capabilities: {}}, {id: chromeos, capabilities: {}}, {id: cloud_identity, capabilities: {}}, {id: vault, capabilities: {}}, {id: admin, capabilities: {}}]
+
       - id: workplace_saas
         label: Workplace SaaS
         eligibility:
@@ -1822,7 +1946,8 @@ categories:
         kind: bucket
         group: itsm
         note: Slack, Zoom, Box, Freshservice, …
-        subdomains: [slack, zoom, box, dropbox, adobe, freshservice, zendesk, bmc_helix]
+        subdomains: [{id: slack, capabilities: {}}, {id: zoom, capabilities: {}}, {id: box, capabilities: {}}, {id: dropbox, capabilities: {}}, {id: adobe, capabilities: {}}, {id: freshservice, capabilities: {}}, {id: zendesk, capabilities: {}}, {id: bmc_helix, capabilities: {}}]
+
       - id: rmm_uem_isvs
         label: RMM UEM ISVs
         eligibility:
@@ -1831,7 +1956,8 @@ categories:
         kind: bucket
         group: endpoint
         note: Jamf, NinjaOne, ConnectWise, Kaseya, …
-        subdomains: [jamf, ninjaone, connectwise, kaseya, datto_rmm, omnissa, addigy, hexnode]
+        subdomains: [{id: jamf, capabilities: {}}, {id: ninjaone, capabilities: {}}, {id: connectwise, capabilities: {}}, {id: kaseya, capabilities: {}}, {id: datto_rmm, capabilities: {}}, {id: omnissa, capabilities: {}}, {id: addigy, capabilities: {}}, {id: hexnode, capabilities: {}}]
+
       - id: github
         label: GitHub
         eligibility:
@@ -1840,7 +1966,8 @@ categories:
         kind: vendor
         group: devops
         note: Actions, Packages, Enterprise
-        subdomains: [actions, packages, enterprise, copilot, advanced_security, codespaces]
+        subdomains: [{id: actions, capabilities: {}}, {id: packages, capabilities: {}}, {id: enterprise, capabilities: {}}, {id: copilot, capabilities: {}}, {id: advanced_security, capabilities: {}}, {id: codespaces, capabilities: {}}]
+
       - id: hashicorp
         label: HashiCorp
         eligibility:
@@ -1849,7 +1976,8 @@ categories:
         kind: vendor
         group: devops
         note: Terraform, Vault, Consul, Nomad
-        subdomains: [terraform, vault, consul, nomad, boundary, packer]
+        subdomains: [{id: terraform, capabilities: {}}, {id: vault, capabilities: {}}, {id: consul, capabilities: {}}, {id: nomad, capabilities: {}}, {id: boundary, capabilities: {}}, {id: packer, capabilities: {}}]
+
       - id: other_devops_isv
         label: Other DevOps ISV
         eligibility:
@@ -1858,4 +1986,4 @@ categories:
         kind: bucket
         group: devops
         note: GitLab, JFrog, Argo, Jenkins, Docker, …
-        subdomains: [gitlab, jfrog, harness, circleci, pulumi, argo, flux, jenkins, azure_devops, docker]
+        subdomains: [{id: gitlab, capabilities: {}}, {id: jfrog, capabilities: {}}, {id: harness, capabilities: {}}, {id: circleci, capabilities: {}}, {id: pulumi, capabilities: {}}, {id: argo, capabilities: {}}, {id: flux, capabilities: {}}, {id: jenkins, capabilities: {}}, {id: azure_devops, capabilities: {}}, {id: docker, capabilities: {}}]

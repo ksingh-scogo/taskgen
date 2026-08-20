@@ -13,14 +13,16 @@ const REVIEW_TEXT_MAX_CHARS: usize = 800;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ReviewVerdict {
+pub enum ReviewOutcome {
     Accept,
+    Revise,
     Reject,
+    NeedsVerification,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ReviewReason {
+pub enum HardFailure {
     TechnicalInaccuracy,
     InventedPlatformFeature,
     InvalidCommandOrSyntax,
@@ -38,11 +40,124 @@ pub enum ReviewReason {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckStatus {
+    Pass,
+    Fail,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DimensionCheck {
+    pub status: CheckStatus,
+    pub rationale: String,
+    pub evidence_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewChecks {
+    pub coordinate_realization: DimensionCheck,
+    pub internal_consistency: DimensionCheck,
+    pub operational_quality: DimensionCheck,
+    pub safety: DimensionCheck,
+    pub technical_authenticity: DimensionCheck,
+}
+
+impl ReviewChecks {
+    fn values(&self) -> [&DimensionCheck; 5] {
+        [
+            &self.coordinate_realization,
+            &self.internal_consistency,
+            &self.operational_quality,
+            &self.safety,
+            &self.technical_authenticity,
+        ]
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct VerificationClaim {
+    pub claim_id: String,
+    pub claim: String,
+    pub candidate_evidence_paths: Vec<String>,
+    pub reference_query: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaimVerdict {
+    Supported,
+    Unsupported,
+    Unverified,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AdjudicationOutcome {
+    Accept,
+    Reject,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AdjudicatedClaim {
+    pub claim_id: String,
+    pub verdict: ClaimVerdict,
+    pub rationale: String,
+    pub citations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AdjudicationDecision {
+    pub schema_version: String,
+    pub claims: Vec<AdjudicatedClaim>,
+    pub outcome: AdjudicationOutcome,
+    pub summary: String,
+}
+
+impl AdjudicationDecision {
+    pub fn parse_and_validate(raw: &str) -> Result<Self> {
+        let trimmed = raw.trim();
+        let json_text = if trimmed.starts_with("```") {
+            let start = trimmed
+                .find('{')
+                .context("adjudication response code fence contains no JSON object")?;
+            let end = trimmed
+                .rfind('}')
+                .context("adjudication response code fence contains no complete JSON object")?;
+            &trimmed[start..=end]
+        } else {
+            trimmed
+        };
+        let value: Value = serde_json::from_str(json_text).context("invalid adjudication JSON")?;
+        schema::validate_instance(SchemaKind::PromptAdjudication, &value)
+            .context("adjudication JSON failed schema validation")?;
+        let decision: Self =
+            serde_json::from_value(value).context("invalid adjudication decision")?;
+        if decision.outcome == AdjudicationOutcome::Accept
+            && decision
+                .claims
+                .iter()
+                .any(|claim| claim.verdict != ClaimVerdict::Supported || claim.citations.is_empty())
+        {
+            bail!("accept adjudication contains an unsupported, unverified, or uncited claim");
+        }
+        Ok(decision)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ReviewDecision {
     pub schema_version: String,
-    pub verdict: ReviewVerdict,
-    pub reason_codes: Vec<ReviewReason>,
+    pub outcome: ReviewOutcome,
+    pub checks: ReviewChecks,
+    pub hard_failures: Vec<HardFailure>,
+    pub claims_requiring_verification: Vec<VerificationClaim>,
     pub summary: String,
     pub retry_guidance: String,
 }
@@ -74,10 +189,47 @@ impl ReviewDecision {
                 REVIEW_TEXT_MAX_CHARS,
             ),
         };
-        schema::validate_instance(SchemaKind::PromptReview, &value)
+        schema::validate_instance(SchemaKind::PromptReviewV3, &value)
             .context("review JSON failed schema validation")?;
-        let decision = serde_json::from_value(value).context("invalid review decision")?;
+        let decision: Self = serde_json::from_value(value).context("invalid review decision")?;
+        decision.validate_policy()?;
         Ok((decision, normalization))
+    }
+
+    fn validate_policy(&self) -> Result<()> {
+        let has_fail = self
+            .checks
+            .values()
+            .iter()
+            .any(|check| check.status == CheckStatus::Fail);
+        let has_unknown = self
+            .checks
+            .values()
+            .iter()
+            .any(|check| check.status == CheckStatus::Unknown);
+        match self.outcome {
+            ReviewOutcome::Accept => {
+                if has_fail || has_unknown || !self.hard_failures.is_empty() {
+                    bail!("accept review contains a failed, unknown, or hard-failure finding");
+                }
+            }
+            ReviewOutcome::Revise => {
+                if !has_fail || !self.hard_failures.is_empty() {
+                    bail!("revise review must contain a failed check and no hard failure");
+                }
+            }
+            ReviewOutcome::Reject => {
+                if !has_fail || self.hard_failures.is_empty() {
+                    bail!("reject review must prove a failed check and hard failure");
+                }
+            }
+            ReviewOutcome::NeedsVerification => {
+                if !has_unknown || self.claims_requiring_verification.is_empty() {
+                    bail!("needs_verification review requires an unknown check and a claim");
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -108,6 +260,7 @@ pub struct ReviewRequest {
     pub taxonomy_id: String,
     pub taxonomy_kind: String,
     pub system_prompt: String,
+    pub deterministic_checks: Option<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -151,6 +304,174 @@ impl ReviewAttemptError {
     }
 }
 
+struct StructuredResponse {
+    payload: Value,
+    content: String,
+    elapsed_ms: u64,
+}
+
+async fn request_structured_once(
+    provider: &ProviderConfig,
+    client: &reqwest::Client,
+    max_output_tokens: u64,
+    telemetry: &crate::telemetry::RequestTelemetry,
+    system_content: &str,
+    user_content: String,
+    operation: &str,
+) -> std::result::Result<StructuredResponse, ReviewAttemptError> {
+    let is_qwen = provider.model.to_ascii_lowercase().contains("qwen");
+    let user_content = if is_qwen {
+        format!("{user_content}\n/no_think")
+    } else {
+        user_content
+    };
+    let system_content = if is_qwen {
+        format!("{system_content}\n/no_think")
+    } else {
+        system_content.to_string()
+    };
+    let mut body = json!({
+        "model": provider.model,
+        "messages": [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_content}
+        ],
+        "max_completion_tokens": max_output_tokens
+    });
+    if !restricted_sampling(&provider.model) {
+        body["temperature"] = json!(0.0);
+    }
+    apply_model_reasoning_controls(&provider.model, &mut body);
+    let url = format!(
+        "{}/chat/completions",
+        provider.api_base.as_str().trim_end_matches('/')
+    );
+    let credential = provider.credentials.next();
+    let started = Instant::now();
+    let response = client
+        .post(url)
+        .bearer_auth(credential.expose())
+        .json(&body)
+        .send()
+        .await;
+    let response = match response {
+        Ok(response) => response,
+        Err(error) if error.is_timeout() => {
+            telemetry.record_timeout(elapsed_millis(started.elapsed()));
+            return Err(ReviewAttemptError::Retryable(
+                anyhow::anyhow!(error).context(format!("{operation} request timed out")),
+            ));
+        }
+        Err(error) => {
+            telemetry.record_error(elapsed_millis(started.elapsed()));
+            return Err(ReviewAttemptError::Retryable(
+                anyhow::anyhow!(error).context(format!("{operation} request failed")),
+            ));
+        }
+    };
+    let status = response.status();
+    let retry_after_seconds = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok());
+    let raw = response.text().await.map_err(|error| {
+        telemetry.record_error(elapsed_millis(started.elapsed()));
+        ReviewAttemptError::Retryable(
+            anyhow::anyhow!(error).context(format!("failed to read {operation} response")),
+        )
+    })?;
+    let raw = crate::provider::redact_provider_text(&raw, credential.expose());
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        telemetry.record_rate_limit(elapsed_millis(started.elapsed()));
+        return Err(ReviewAttemptError::RateLimit {
+            retry_after_seconds,
+            message: format!(
+                "{operation} API returned HTTP {status}: {}",
+                truncate(&raw, 500)
+            ),
+        });
+    }
+    if !status.is_success() {
+        telemetry.record_error(elapsed_millis(started.elapsed()));
+        let error = anyhow::anyhow!(
+            "{operation} API returned HTTP {status}: {}",
+            truncate(&raw, 500)
+        );
+        return if status.is_server_error() || status == reqwest::StatusCode::REQUEST_TIMEOUT {
+            Err(ReviewAttemptError::Retryable(error))
+        } else {
+            Err(ReviewAttemptError::Fatal(error))
+        };
+    }
+    let payload: Value = serde_json::from_str(&raw).map_err(|error| {
+        telemetry.record_error(elapsed_millis(started.elapsed()));
+        ReviewAttemptError::Retryable(anyhow::anyhow!(error).context("invalid structured API JSON"))
+    })?;
+    let content = extract_content(&payload).map_err(|error| {
+        telemetry.record_error(elapsed_millis(started.elapsed()));
+        ReviewAttemptError::Retryable(error)
+    })?;
+    Ok(StructuredResponse {
+        payload,
+        content,
+        elapsed_ms: elapsed_millis(started.elapsed()),
+    })
+}
+
+fn usage_tokens(payload: &Value) -> (u64, u64) {
+    let usage = payload.get("usage").cloned().unwrap_or(Value::Null);
+    (
+        usage
+            .get("prompt_tokens")
+            .or_else(|| usage.get("input_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        usage
+            .get("completion_tokens")
+            .or_else(|| usage.get("output_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+    )
+}
+
+async fn retry_structured<T, F, Fut>(
+    telemetry: &crate::telemetry::RequestTelemetry,
+    operation: &str,
+    mut attempt_fn: F,
+) -> Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = std::result::Result<T, ReviewAttemptError>>,
+{
+    let mut last_error = None;
+    for attempt in 0..3u32 {
+        match attempt_fn().await {
+            Ok(result) => return Ok(result),
+            Err(ReviewAttemptError::Fatal(error)) => return Err(error),
+            Err(error) => {
+                let delay = match &error {
+                    ReviewAttemptError::RateLimit {
+                        retry_after_seconds: Some(seconds),
+                        ..
+                    } => Duration::from_secs(*seconds),
+                    _ => {
+                        let base = 250u64 * 2u64.pow(attempt);
+                        let jitter = rand::random::<u64>() % 251;
+                        Duration::from_millis(base + jitter)
+                    }
+                };
+                last_error = Some(error.into_anyhow());
+                if attempt < 2 {
+                    telemetry.record_retry();
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
+    }
+    Err(last_error.context(format!("{operation} request failed without an error"))?)
+}
+
 impl ReviewClient {
     pub fn new(
         provider: ProviderConfig,
@@ -178,125 +499,35 @@ impl ReviewClient {
             "taxonomy_id": request.taxonomy_id,
             "taxonomy_kind": request.taxonomy_kind,
             "candidate": request.candidate,
+            "deterministic_checks": request.deterministic_checks,
         }))
         .map_err(|error| ReviewAttemptError::Fatal(error.into()))?;
-        let user_content = if self.provider.model.to_ascii_lowercase().contains("qwen") {
-            format!("{user_content}\n/no_think")
-        } else {
-            user_content
-        };
-        let system_content = if self.provider.model.to_ascii_lowercase().contains("qwen") {
-            format!("{}\n/no_think", request.system_prompt)
-        } else {
-            request.system_prompt.clone()
-        };
-        let mut body = json!({
-            "model": self.provider.model,
-            "messages": [
-                {"role": "system", "content": system_content},
-                {"role": "user", "content": user_content}
-            ],
-            "max_completion_tokens": self.max_output_tokens
-        });
-        if !restricted_sampling(&self.provider.model) {
-            body["temperature"] = json!(0.0);
-        }
-        apply_model_reasoning_controls(&self.provider.model, &mut body);
-        let url = format!(
-            "{}/chat/completions",
-            self.provider.api_base.as_str().trim_end_matches('/')
-        );
-        let credential = self.provider.credentials.next();
-        let started = Instant::now();
-        let response = self
-            .client
-            .post(url)
-            .bearer_auth(credential.expose())
-            .json(&body)
-            .send()
-            .await;
-        let response = match response {
-            Ok(response) => response,
-            Err(error) if error.is_timeout() => {
-                self.telemetry
-                    .record_timeout(elapsed_millis(started.elapsed()));
-                return Err(ReviewAttemptError::Retryable(
-                    anyhow::anyhow!(error).context("review request timed out"),
-                ));
-            }
-            Err(error) => {
-                self.telemetry
-                    .record_error(elapsed_millis(started.elapsed()));
-                return Err(ReviewAttemptError::Retryable(
-                    anyhow::anyhow!(error).context("review request failed"),
-                ));
-            }
-        };
-        let status = response.status();
-        let retry_after_seconds = response
-            .headers()
-            .get(reqwest::header::RETRY_AFTER)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.parse::<u64>().ok());
-        let raw = response.text().await.map_err(|error| {
-            self.telemetry
-                .record_error(elapsed_millis(started.elapsed()));
-            ReviewAttemptError::Retryable(
-                anyhow::anyhow!(error).context("failed to read review response"),
-            )
-        })?;
-        let raw = crate::provider::redact_provider_text(&raw, credential.expose());
-        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            self.telemetry
-                .record_rate_limit(elapsed_millis(started.elapsed()));
-            return Err(ReviewAttemptError::RateLimit {
-                retry_after_seconds,
-                message: format!("review API returned HTTP {status}: {}", truncate(&raw, 500)),
-            });
-        }
-        if !status.is_success() {
-            self.telemetry
-                .record_error(elapsed_millis(started.elapsed()));
-            let error =
-                anyhow::anyhow!("review API returned HTTP {status}: {}", truncate(&raw, 500));
-            return if status.is_server_error() || status == reqwest::StatusCode::REQUEST_TIMEOUT {
-                Err(ReviewAttemptError::Retryable(error))
-            } else {
-                Err(ReviewAttemptError::Fatal(error))
+        let response = request_structured_once(
+            &self.provider,
+            &self.client,
+            self.max_output_tokens,
+            &self.telemetry,
+            &request.system_prompt,
+            user_content,
+            "review",
+        )
+        .await?;
+        let (decision, normalization) =
+            match ReviewDecision::parse_and_validate_with_metadata(&response.content) {
+                Ok(value) => value,
+                Err(error) => {
+                    self.telemetry.record_error(response.elapsed_ms);
+                    return Err(ReviewAttemptError::Retryable(error));
+                }
             };
-        }
-        let parsed = (|| -> Result<(Value, ReviewDecision, ReviewNormalization)> {
-            let payload: Value = serde_json::from_str(&raw).context("invalid review API JSON")?;
-            let content = extract_content(&payload)?;
-            let (decision, normalization) =
-                ReviewDecision::parse_and_validate_with_metadata(&content)?;
-            Ok((payload, decision, normalization))
-        })();
-        let (payload, decision, normalization) = match parsed {
-            Ok(value) => value,
-            Err(error) => {
-                self.telemetry
-                    .record_error(elapsed_millis(started.elapsed()));
-                return Err(ReviewAttemptError::Retryable(error));
-            }
-        };
-        self.telemetry
-            .record_success(elapsed_millis(started.elapsed()));
-        let usage = payload.get("usage").cloned().unwrap_or(Value::Null);
+        self.telemetry.record_success(response.elapsed_ms);
+        let (input_tokens, output_tokens) = usage_tokens(&response.payload);
         Ok(ReviewResult {
             decision,
             normalization,
             model: self.provider.model.clone(),
-            input_tokens: usage
-                .get("prompt_tokens")
-                .or_else(|| usage.get("input_tokens"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0),
-            output_tokens: usage
-                .get("completion_tokens")
-                .or_else(|| usage.get("output_tokens"))
-                .and_then(Value::as_u64)
-                .unwrap_or(0),
+            input_tokens,
+            output_tokens,
         })
     }
 }
@@ -304,32 +535,120 @@ impl ReviewClient {
 #[async_trait]
 impl CandidateReviewer for ReviewClient {
     async fn review(&self, request: ReviewRequest) -> Result<ReviewResult> {
-        let mut last_error = None;
-        for attempt in 0..3u32 {
-            match self.request_once(&request).await {
-                Ok(result) => return Ok(result),
-                Err(ReviewAttemptError::Fatal(error)) => return Err(error),
-                Err(error) => {
-                    let delay = match &error {
-                        ReviewAttemptError::RateLimit {
-                            retry_after_seconds: Some(seconds),
-                            ..
-                        } => Duration::from_secs(*seconds),
-                        _ => {
-                            let base = 250u64 * 2u64.pow(attempt);
-                            let jitter = rand::random::<u64>() % 251;
-                            Duration::from_millis(base + jitter)
-                        }
-                    };
-                    last_error = Some(error.into_anyhow());
-                    if attempt < 2 {
-                        self.telemetry.record_retry();
-                        tokio::time::sleep(delay).await;
-                    }
-                }
-            }
+        retry_structured(&self.telemetry, "review", || self.request_once(&request)).await
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AdjudicationRequest {
+    pub candidate: Value,
+    pub review: ReviewDecision,
+    pub references: Vec<crate::references::ReferenceExcerpt>,
+    pub system_prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AdjudicationResult {
+    pub decision: AdjudicationDecision,
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+#[async_trait]
+pub trait CandidateAdjudicator: Send + Sync {
+    async fn adjudicate(&self, request: AdjudicationRequest) -> Result<AdjudicationResult>;
+}
+
+#[derive(Clone)]
+pub struct AdjudicationClient {
+    provider: ProviderConfig,
+    client: reqwest::Client,
+    max_output_tokens: u64,
+    telemetry: Arc<crate::telemetry::RequestTelemetry>,
+}
+
+impl AdjudicationClient {
+    pub fn new(
+        provider: ProviderConfig,
+        client: reqwest::Client,
+        max_output_tokens: u64,
+        telemetry: Arc<crate::telemetry::RequestTelemetry>,
+    ) -> Result<Self> {
+        if max_output_tokens == 0 {
+            bail!("adjudication max output tokens must be positive");
         }
-        Err(last_error.context("review request failed without an error")?)
+        Ok(Self {
+            provider,
+            client,
+            max_output_tokens,
+            telemetry,
+        })
+    }
+
+    async fn request_once(
+        &self,
+        request: &AdjudicationRequest,
+    ) -> std::result::Result<AdjudicationResult, ReviewAttemptError> {
+        let user_content = serde_json::to_string_pretty(&json!({
+            "instruction": "Adjudicate only the listed claims using cited candidate evidence or local references.",
+            "candidate": request.candidate,
+            "review": request.review,
+            "references": request.references,
+        }))
+        .map_err(|error| ReviewAttemptError::Fatal(error.into()))?;
+        let response = request_structured_once(
+            &self.provider,
+            &self.client,
+            self.max_output_tokens,
+            &self.telemetry,
+            &request.system_prompt,
+            user_content,
+            "adjudication",
+        )
+        .await?;
+        let decision = match AdjudicationDecision::parse_and_validate(&response.content) {
+            Ok(decision) => decision,
+            Err(error) => {
+                self.telemetry.record_error(response.elapsed_ms);
+                return Err(ReviewAttemptError::Retryable(error));
+            }
+        };
+        let requested: std::collections::HashSet<&str> = request
+            .review
+            .claims_requiring_verification
+            .iter()
+            .map(|claim| claim.claim_id.as_str())
+            .collect();
+        let returned: std::collections::HashSet<&str> = decision
+            .claims
+            .iter()
+            .map(|claim| claim.claim_id.as_str())
+            .collect();
+        if requested != returned {
+            self.telemetry.record_error(response.elapsed_ms);
+            return Err(ReviewAttemptError::Retryable(anyhow::anyhow!(
+                "adjudication claim IDs do not match the review request"
+            )));
+        }
+        self.telemetry.record_success(response.elapsed_ms);
+        let (input_tokens, output_tokens) = usage_tokens(&response.payload);
+        Ok(AdjudicationResult {
+            decision,
+            model: self.provider.model.clone(),
+            input_tokens,
+            output_tokens,
+        })
+    }
+}
+
+#[async_trait]
+impl CandidateAdjudicator for AdjudicationClient {
+    async fn adjudicate(&self, request: AdjudicationRequest) -> Result<AdjudicationResult> {
+        retry_structured(&self.telemetry, "adjudication", || {
+            self.request_once(&request)
+        })
+        .await
     }
 }
 
@@ -382,9 +701,6 @@ fn apply_model_reasoning_controls(model: &str, body: &mut Value) {
         body["enable_thinking"] = json!(false);
         body["thinking_budget"] = json!(0);
         body["reasoning_effort"] = json!("low");
-    } else if model.contains("deepseek-v4") {
-        body["include_reasoning"] = json!(false);
-        body["reasoning_effort"] = json!("low");
     }
 }
 
@@ -395,8 +711,8 @@ mod tests {
     #[test]
     fn bundled_review_prompts_state_schema_string_limits() {
         for prompt in [
-            include_str!("../prompts/itops-prompt-review-system-v2.txt"),
-            include_str!("../prompts/netops-prompt-review-system-v2.txt"),
+            include_str!("../prompts/itops-prompt-review-system-v3.txt"),
+            include_str!("../prompts/netops-prompt-review-system-v3.txt"),
         ] {
             assert!(prompt.contains("summary must be 1 to 800 characters"));
             assert!(prompt.contains("retry_guidance must be at most 800 characters"));
@@ -405,16 +721,16 @@ mod tests {
 
     #[test]
     fn netops_review_prompt_allows_clearly_normalized_generic_evidence() {
-        let prompt = include_str!("../prompts/netops-prompt-review-system-v2.txt");
+        let prompt = include_str!("../prompts/netops-prompt-review-system-v3.txt");
         assert!(prompt.contains("SD-WAN controllers and edges"));
-        assert!(prompt.contains("Do not reject these generic concepts merely because"));
+        assert!(prompt.contains("Do not reject normalized standards-based evidence"));
     }
 
     #[test]
     fn bundled_review_prompts_require_concrete_defects_instead_of_epistemic_rejection() {
         for prompt in [
-            include_str!("../prompts/itops-prompt-review-system-v2.txt"),
-            include_str!("../prompts/netops-prompt-review-system-v2.txt"),
+            include_str!("../prompts/itops-prompt-review-system-v3.txt"),
+            include_str!("../prompts/netops-prompt-review-system-v3.txt"),
         ] {
             assert!(prompt.contains("Do not reject merely because you lack external lookup"));
             assert!(
@@ -424,47 +740,47 @@ mod tests {
     }
 
     #[test]
-    fn accepted_review_has_no_reasons_or_retry_guidance() {
-        let raw = r#"{
-          "schema_version":"scogo.taskgen.prompt-review.v1",
-          "verdict":"accept",
-          "reason_codes":[],
-          "summary":"The prompt is operationally coherent.",
-          "retry_guidance":""
-        }"#;
+    fn review_v3_accept_has_all_passes_and_no_repair_fields() {
+        let raw = include_str!("../tests/fixtures/canonical/valid-review-v3.json");
         let decision = ReviewDecision::parse_and_validate(raw).unwrap();
-        assert_eq!(decision.verdict, ReviewVerdict::Accept);
+        assert_eq!(decision.outcome, ReviewOutcome::Accept);
     }
 
     #[test]
-    fn rejected_review_requires_reason_and_guidance() {
-        let raw = r#"{
-          "schema_version":"scogo.taskgen.prompt-review.v1",
-          "verdict":"reject",
-          "reason_codes":[],
-          "summary":"Bad prompt.",
-          "retry_guidance":""
-        }"#;
-        assert!(ReviewDecision::parse_and_validate(raw).is_err());
+    fn review_v3_reject_requires_failed_dimension_and_hard_failure() {
+        let mut value: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/canonical/valid-review-v3.json"
+        ))
+        .unwrap();
+        value["outcome"] = json!("reject");
+        assert!(ReviewDecision::parse_and_validate(&value.to_string()).is_err());
     }
 
     #[test]
     fn strips_json_code_fence_before_validation() {
         let raw = r#"```json
-        {"schema_version":"scogo.taskgen.prompt-review.v1","verdict":"accept","reason_codes":[],"summary":"Coherent.","retry_guidance":""}
+        {"schema_version":"scogo.taskgen.prompt-review.v3","outcome":"accept","checks":{"coordinate_realization":{"status":"pass","rationale":"Coordinates are material.","evidence_paths":["$.candidate.prompt"]},"internal_consistency":{"status":"pass","rationale":"Internally consistent.","evidence_paths":["$.candidate.prompt"]},"operational_quality":{"status":"pass","rationale":"Operationally actionable.","evidence_paths":["$.candidate.prompt"]},"safety":{"status":"pass","rationale":"Read-only first.","evidence_paths":["$.candidate.prompt"]},"technical_authenticity":{"status":"pass","rationale":"Supported by fixture.","evidence_paths":["$.candidate.prompt"]}},"hard_failures":[],"claims_requiring_verification":[],"summary":"Coherent.","retry_guidance":""}
         ```"#;
         assert_eq!(
-            ReviewDecision::parse_and_validate(raw).unwrap().verdict,
-            ReviewVerdict::Accept
+            ReviewDecision::parse_and_validate(raw).unwrap().outcome,
+            ReviewOutcome::Accept
         );
     }
 
     #[test]
     fn clips_overlong_explanatory_fields_before_schema_validation() {
         let raw = serde_json::json!({
-            "schema_version": "scogo.taskgen.prompt-review.v1",
-            "verdict": "reject",
-            "reason_codes": ["coordinate_mismatch"],
+            "schema_version": "scogo.taskgen.prompt-review.v3",
+            "outcome": "revise",
+            "checks": {
+                "coordinate_realization": {"status":"fail","rationale":"Mismatch.","evidence_paths":["$.candidate.prompt"]},
+                "internal_consistency": {"status":"pass","rationale":"Consistent.","evidence_paths":[]},
+                "operational_quality": {"status":"pass","rationale":"Operational.","evidence_paths":[]},
+                "safety": {"status":"pass","rationale":"Safe.","evidence_paths":[]},
+                "technical_authenticity": {"status":"pass","rationale":"Supported.","evidence_paths":[]}
+            },
+            "hard_failures": [],
+            "claims_requiring_verification": [],
             "summary": "s".repeat(1025),
             "retry_guidance": "r".repeat(901),
         })
@@ -479,6 +795,39 @@ mod tests {
     }
 
     #[test]
+    fn needs_verification_requires_unknown_check_and_claim() {
+        let mut value: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/canonical/valid-review-v3.json"
+        ))
+        .unwrap();
+        value["outcome"] = json!("needs_verification");
+        value["checks"]["technical_authenticity"]["status"] = json!("unknown");
+        value["claims_requiring_verification"] = json!([{
+            "claim_id":"claim-1",
+            "claim":"Vendor release X supports command Y.",
+            "candidate_evidence_paths":["$.candidate.prompt"],
+            "reference_query":"vendor release X command Y"
+        }]);
+        let decision = ReviewDecision::parse_and_validate(&value.to_string()).unwrap();
+        assert_eq!(decision.outcome, ReviewOutcome::NeedsVerification);
+    }
+
+    #[test]
+    fn adjudication_accept_requires_every_claim_supported_and_cited() {
+        let valid = include_str!("../tests/fixtures/canonical/valid-adjudication-v1.json");
+        assert_eq!(
+            AdjudicationDecision::parse_and_validate(valid)
+                .unwrap()
+                .outcome,
+            AdjudicationOutcome::Accept
+        );
+
+        let mut invalid: Value = serde_json::from_str(valid).unwrap();
+        invalid["claims"][0]["verdict"] = json!("unverified");
+        assert!(AdjudicationDecision::parse_and_validate(&invalid.to_string()).is_err());
+    }
+
+    #[test]
     fn restricted_review_models_are_detected_without_provider_prefix() {
         assert!(restricted_sampling("openai/gpt-5.4"));
         assert!(restricted_sampling("scogoai/gpt-5.6-luna-max"));
@@ -486,12 +835,12 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_v4_review_uses_bounded_hidden_reasoning() {
+    fn deepseek_v4_review_preserves_endpoint_reasoning_defaults() {
         let mut body = json!({});
         apply_model_reasoning_controls("deepseek-v4-flash-0731", &mut body);
 
-        assert_eq!(body["include_reasoning"], false);
-        assert_eq!(body["reasoning_effort"], "low");
+        assert!(body.get("include_reasoning").is_none());
+        assert!(body.get("reasoning_effort").is_none());
         assert!(body.get("thinking_token_budget").is_none());
     }
 
@@ -512,13 +861,10 @@ mod tests {
                 if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
                     ResponseTemplate::new(429).insert_header("retry-after", "0")
                 } else {
-                    let decision = serde_json::json!({
-                        "schema_version":"scogo.taskgen.prompt-review.v1",
-                        "verdict":"accept",
-                        "reason_codes":[],
-                        "summary":"Operationally coherent.",
-                        "retry_guidance":""
-                    });
+                    let decision: Value = serde_json::from_str(include_str!(
+                        "../tests/fixtures/canonical/valid-review-v3.json"
+                    ))
+                    .unwrap();
                     ResponseTemplate::new(200).set_body_json(serde_json::json!({
                         "choices":[{"message":{"content":decision.to_string()}}],
                         "usage":{"prompt_tokens":10,"completion_tokens":5}
@@ -553,11 +899,12 @@ mod tests {
                 taxonomy_id: "test-taxonomy".into(),
                 taxonomy_kind: "compositional".into(),
                 system_prompt: "Return the required JSON decision.".into(),
+                deterministic_checks: None,
             })
             .await
             .unwrap();
 
-        assert_eq!(result.decision.verdict, ReviewVerdict::Accept);
+        assert_eq!(result.decision.outcome, ReviewOutcome::Accept);
         let snapshot = telemetry.snapshot();
         assert_eq!(snapshot.requests, 2);
         assert_eq!(snapshot.rate_limits, 1);

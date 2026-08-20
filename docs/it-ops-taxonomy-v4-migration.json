@@ -1,6 +1,7 @@
 {
   "source_taxonomy": "scogo-itops-v3",
   "target_taxonomy": "scogo-itops-v4",
+  "target_schema_version": "scogo.taskgen.taxonomy.v3",
   "source_counts": {
     "categories": 14,
     "domains": 129,

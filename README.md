@@ -2,7 +2,7 @@
 
 `taskgen` creates reviewed, unique prompt seeds for teacher-model dataset generation through OpenAI-compatible APIs. It ships Scogo's compositional IT Operations and Sovereign Enterprise NetOps taxonomies.
 
-Taskgen owns prompt text, sampled coordinates, prompt-schema validation, local deduplication, and the configured model-review decision. It does not fabricate telemetry, tool results, live state, approvals, ground truth, remediation success, safety grades, or trainable teacher trajectories.
+Taskgen owns prompt text, sampled coordinates, capability compilation, deterministic checks, local deduplication, and configured review/adjudication decisions. A prompt may contain clearly supplied fictional scenario fixtures, but Taskgen never represents them as queried live state and never fabricates real approvals, remediation success, safety grades, ground truth, or trainable teacher trajectories.
 
 ## Core contract
 
@@ -17,7 +17,7 @@ taskgen generate -c N
   => no partial final dataset is published on failure
 ```
 
-`-c N` is not a request for N model attempts. Taskgen samples N subject slots lazily. A rejected prompt is repaired with the rejected artifact plus the review summary and guidance. After the configured repair budget, Taskgen recomposes the operational axes while preserving category, domain, subdomain, and language, and it never retries an already-attempted composition for that slot. If a subject has no unseen composition, the run fails early instead of silently dropping the hard subject or burning model calls on the same tuple.
+`-c N` is not a request for N model attempts. Taskgen runs explicit generation and review waves. It generates the current acceptance deficit, persists every candidate, reviews that pool independently, repairs only `revise` outcomes once, and samples fresh compatible coordinates for every remaining deficit. It publishes only after exactly N unique candidates are accepted. `--max-candidates` bounds the entire run and defaults to `max(100, 20 × count)`.
 
 The model reviewer is an auditable gate, not an infallible source of truth. Its model, prompt, token usage, decisions, rejection reasons, and retry guidance are retained in sidecars.
 
@@ -38,7 +38,7 @@ taskgen atif import --input <FILE> --output <FILE>
 
 ## Compositional taxonomies
 
-Both taxonomies use `schema_version: scogo.taskgen.taxonomy.v2`, `kind: compositional`, and the same sampling/validation implementation.
+Both taxonomies use `schema_version: scogo.taskgen.taxonomy.v3`, `kind: compositional`, and the same capability-aware sampling/validation implementation. Every subdomain is an object with an explicit `capabilities` mapping; the coordinate compiler rejects platform, mechanism, evidence, risk, or presentation values outside the inherited capability set before inference.
 
 | Taxonomy | ID | Categories | Domains | Subdomains |
 |---|---|---:|---:|---:|
@@ -96,7 +96,7 @@ taskgen generate \
 
 Generation-prompt precedence is `--system-prompt`, `--system-prompt-file`, `defaults.system_prompt_file`, then the built-in IT Ops prompt. The taxonomy defaults are `prompts/itops-taskgen-system-v2.txt` and `prompts/netops-taskgen-system-v2.txt`.
 
-### Mandatory reviewer
+### Mandatory staged reviewer
 
 With no review overrides, Taskgen makes a separate review call using the effective generation model, endpoint, and credential pool.
 
@@ -128,9 +128,27 @@ taskgen generate \
 
 A different normalized review endpoint requires explicit review credentials. Taskgen never sends generation credentials to another endpoint implicitly. `--keyfile` and `--review-keyfile` take precedence over single or ambient keys. CLI help hides environment-secret values.
 
-Reviewer-prompt precedence is `--review-system-prompt`, `--review-system-prompt-file`, `defaults.review_system_prompt_file`, then the built-in IT Ops reviewer. Malformed output, reviewer errors, or review rejection never become implicit acceptance.
+Reviewer-prompt precedence is `--review-system-prompt`, `--review-system-prompt-file`, `defaults.review_system_prompt_file`, then the built-in IT Ops reviewer. The v3 reviewer scores coordinate realization, internal consistency, operational quality, safety, and technical authenticity independently with `pass`, `fail`, or `unknown`. Its outcome is `accept`, `revise`, `reject`, or `needs_verification`; uncertainty is never silently converted into a technical failure. Malformed output and reviewer infrastructure errors are retried and never become implicit acceptance.
 
-Using the generation model as its own reviewer is the convenience default, not the recommended production release gate. It can share the generator's blind spots. For benchmark/release datasets, configure a stronger independently hosted `--review-model`, calibrate it against expert-labeled accept/reject cases, and retain human sampling for platform syntax, architecture, capacity, pricing, and causal claims.
+Only `needs_verification` invokes the adjudicator. By default it uses the reviewer model, endpoint, and credentials. `--review-reference-dir <DIR>` supplies a local `.md`, `.txt`, `.json`, `.yaml`, or `.yml` corpus; bounded deterministic retrieval excerpts are passed only to adjudication. A separate adjudicator uses `--adjudication-model`, `--adjudication-api-base`, `--adjudication-api-key`, or `--adjudication-keyfile`. Credentials are inherited only when the normalized endpoint is unchanged.
+
+Using the generation model as its own reviewer is the convenience default, not the recommended production release gate. It can share the generator's blind spots. For benchmark/release datasets, configure a calibrated independent `--review-model`, replay the frozen expert set with `taskgen review --gold-labels`, and retain human sampling for platform syntax, architecture, capacity, pricing, and causal claims.
+
+Standalone replay uses the same validation, review, and adjudication engine without regenerating candidates:
+
+```bash
+taskgen review \
+  --input data/runs/netops-001/candidates.jsonl \
+  --taxonomy docs/netops-taxonomy.yaml \
+  --api-base https://reviewer.example/v1 \
+  --api-key "$REVIEW_API_KEY" \
+  --model strong/reviewer \
+  --review-workers 5 \
+  --gold-labels data/review-gold.jsonl \
+  --run-dir data/runs/netops-review-002
+```
+
+Gold labels are JSONL records containing `candidate_id` and `expected_outcome`. `run.json` reports the confusion matrix, per-outcome precision/recall, false-accept rate, false-reject rate, invalid-response rate, and adjudication rate.
 
 ### Mandatory native dedup
 
@@ -154,16 +172,17 @@ A successful directory contains:
 ```text
 data/runs/netops-001/
 ├── tasks.jsonl
+├── candidates.jsonl
 ├── reviews.jsonl
 ├── rejected.jsonl
 └── run.json
 ```
 
-`run.json` is created with `status: running` before generation and atomically updated to `success` or `failed`. `tasks.jsonl` exists only after every staged row passes the task schema and the exact accepted count is reached. Success publication pre-serializes the final report and rolls the task rename back if the report cannot be committed. Incomplete runs retain `accepted.partial.jsonl`, reviews, rejections, and their terminal report in the same directory.
+`run.json` is created with `status: running` before generation and atomically updated to `success` or `failed`. `candidates.jsonl` is durable before review starts. `tasks.jsonl` exists only after every staged row passes the task schema, coordinate compiler, review/adjudication policy, and final deduplication and the exact accepted count is reached. Incomplete runs retain `accepted.partial.jsonl`, candidates, reviews, rejections, and their terminal report in the same directory.
 
 `--append-from <FILE> -c N` creates a new run containing the source records plus exactly N newly accepted records. The source dataset is never modified, and its records are loaded into the dedup index so new candidates cannot duplicate them.
 
-The report records start/end timestamps, duration in seconds and minutes, the effective coordinate seed, effective generation/review models, acceptance-worker concurrency, Tokio runtime threads, logical CPUs, request timing, retries, 429s, timeouts, rejection reasons, coordinate recompositions, candidate acceptance efficiency, accepted coordinate distributions, throughput, token usage, sanitized endpoint origins, and artifact size/SHA-256 metadata. It never records credentials.
+The report records start/end timestamps, duration, seed, generation/review/adjudication models, separate generation and review concurrency, top-up waves, review outcome counts, request timing, retries, 429s, timeouts, rejection reasons, coordinate replacements, candidate yield, accepted coordinate distributions, throughput, token usage, sanitized endpoint origins, and artifact size/SHA-256 metadata. It never records credentials.
 
 ### Prompt record
 
@@ -205,13 +224,18 @@ Every final line validates against `schemas/task-v2.schema.json`:
 | `-c, --count <N>` | `250` | Newly accepted records required for success |
 | `-w, --workers <N>` | `5` | Concurrent coordinate slots |
 | `--request-timeout-seconds <N>` | `120` | Per generation/review HTTP request timeout |
-| `--max-attempts-per-slot <N>` | `20` | Candidate ceiling for each slot |
+| `--max-candidates <N>` | `max(100, 20 × count)` | Global candidate ceiling across all top-up waves |
+| `--review-workers <N>` | `5` | Independent review-stage concurrency |
+| `--max-repairs-per-coordinate <0|1>` | `1` | Bounded repair count for `revise` only |
 | `--max-repairs-per-coordinate <N>` | `2` | Repairs before recomposing axes for the same subject |
 | `--review-model <MODEL>` | generation model | Separate review-call model |
 | `--review-api-base <URL>` | generation endpoint | Reviewer provider endpoint |
 | `--review-api-key <KEY>` | inherited on same endpoint | Reviewer credential |
 | `--review-keyfile <FILE>` | none | Reviewer keys, round-robin |
-| `--review-max-output-tokens <N>` | `1024` (`4096` for Qwen/DeepSeek-v4) | Reviewer completion limit |
+| `--review-max-output-tokens <N>` | `1024` | Structured reviewer completion limit |
+| `--review-reference-dir <DIR>` | none | Local corpus for selective adjudication |
+| `--adjudication-model <MODEL>` | reviewer model | Optional separate adjudicator |
+| `--adjudication-api-base <URL>` | reviewer endpoint | Optional separate adjudicator endpoint |
 | `--skip-review` | off | Skip all reviewer calls for smoke/performance diagnostics |
 | `--dedup-mode <MODE>` | `semantic` | `semantic` or `lexical` |
 | `--jaccard-threshold <F>` | `0.80` | Inclusive lexical threshold |
@@ -223,11 +247,11 @@ Every final line validates against `schemas/task-v2.schema.json`:
 | `--append-from <FILE>` | none | Seed a new run from an existing dataset and add exactly N records |
 | `--multilingual` | off | Sample one of eight languages |
 
-GPT-5, o-series, and Luna request bodies omit unsupported sampling fields. Qwen generation uses no/low-thinking controls. DeepSeek-v4 generation disables hidden reasoning for latency and uses a 4096-token default, while DeepSeek-v4 review uses bounded low reasoning to improve technical discrimination. Provider reasoning fields and raw successful response bodies are never stored; only final prompt or review content is parsed. Empty, truncated, overlong, or exposed-planning completions are rejected and replaced. A length-truncated completion is not retried unchanged: later slot attempts carry persistent at-most-300-word guidance while retaining the exact-count contract.
+GPT-5, o-series, and Luna request bodies omit unsupported sampling fields. Qwen generation uses explicit no/low-thinking controls. DeepSeek-v4 requests preserve the endpoint's configured reasoning defaults; generation uses a 4096-token default and structured review uses a 1024-token default. Provider reasoning fields and raw successful response bodies are never stored. Empty, truncated, overlong, or exposed-planning completions are rejected and replaced in a later top-up wave.
 
 ### Throughput tuning
 
-Keep review enabled for production datasets. `--skip-review` is an explicit diagnostic mode: generated prompts still pass schema validation and deduplication, `reviews.jsonl` remains empty, and `run.json` records review as skipped. To improve throughput, first calibrate a fast independent reviewer, then raise `--workers` gradually while watching `requests.*.rate_limits` and `efficiency.*` in `run.json`. Separate generation and review endpoints avoid sharing one provider quota. A higher worker count does not help after the serving engine reaches its sequence or token-throughput capacity. Lowering genuine rejection and coordinate-recomposition rates usually saves more time than blind retries because every rejected candidate costs both a generation and a review call. Artifact journals flush in bounded batches and are fully flushed and synced before final validation/publication.
+Keep review enabled for production datasets. `--skip-review` is an explicit diagnostic mode: generated prompts still pass schema, coordinate compilation, deterministic checks, and deduplication; `reviews.jsonl` remains empty; and `run.json` records review as skipped. Tune `--workers` and `--review-workers` independently. When one local endpoint serves both phases, the staged pipeline prevents generation and review from competing within the same wave. Lowering false rejection through capability constraints, the four-outcome rubric, and calibration usually saves more time than blind concurrency.
 
 ## Standalone Rust dedup
 
@@ -261,7 +285,8 @@ accepted Taskgen prompt seed
 Schemas:
 
 - `schemas/task-v2.schema.json`: Taskgen prompt seed.
-- `schemas/prompt-review-v1.schema.json`: model-review decision.
+- `schemas/prompt-review-v3.schema.json`: four-outcome rubric-review decision.
+- `schemas/prompt-adjudication-v1.schema.json`: selective claim adjudication.
 - `schemas/netops-teacher-trajectory-audit-v1.schema.json`: full canonical trajectory audit.
 - `schemas/netops-teacher-trajectory-sft-v1.schema.json`: accepted trainable projection only.
 

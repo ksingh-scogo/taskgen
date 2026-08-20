@@ -20,20 +20,21 @@ Taskgen candidate prompt
   -> canonical audit records may be exported as ATIF-v1.7
 ```
 
-Taskgen produces a prompt and sampled coordinates, then owns the configured prompt-level validation, deduplication, and model-review gate. A teacher produces candidate assistant messages and tool-call requests. Neither component owns live tool results, approval, ground truth, state hashes, verification results, safety grades, rewards, or trajectory acceptance.
+Taskgen produces a prompt and capability-compiled coordinates, persists the candidate, and owns deterministic prompt checks, deduplication, rubric review, and selective adjudication. Embedded logs, telemetry, configuration, or command output are explicitly supplied fictional scenario fixtures and must not imply live access. A teacher produces candidate assistant messages and tool-call requests. Neither component owns live tool results, approval, ground truth, state hashes, verification results, safety grades, rewards, or trajectory acceptance.
 
-A schema-valid candidate is not automatically publishable. Taskgen invokes a separate quality-review request that checks platform and protocol authenticity, causal and numerical consistency, coordinate realization, solvability under the declared evidence condition, and safety posture. The reviewer may default to the generation model, but it always receives a distinct system prompt and returns a strict decision object. Accepted decisions live in `<run-dir>/reviews.jsonl`; rejected candidates and retry guidance live in `<run-dir>/rejected.jsonl`. This prompt gate does not make a teacher trajectory correct, verified, or trainable.
+A schema-valid candidate is not automatically publishable. Taskgen invokes a separate rubric review for coordinate realization, internal consistency, operational quality, safety, and technical authenticity. Each dimension is `pass`, `fail`, or `unknown`; the outcome is `accept`, `revise`, `reject`, or `needs_verification`. Only `needs_verification` may invoke claim-level adjudication against supplied candidate evidence and an optional local reference corpus. All candidates live in `<run-dir>/candidates.jsonl`, all valid review decisions in `reviews.jsonl`, and rejected/error candidates in `rejected.jsonl`. This prompt gate does not make a teacher trajectory correct, verified, or trainable.
 
 ## Normative files
 
 | Artifact | Source of truth |
 |---|---|
 | Prompt-seed schema | `schemas/task-v2.schema.json` |
-| Prompt-review schema | `schemas/prompt-review-v1.schema.json` |
+| Prompt-review schema | `schemas/prompt-review-v3.schema.json` |
+| Prompt-adjudication schema | `schemas/prompt-adjudication-v1.schema.json` |
 | Canonical audit schema | `schemas/netops-teacher-trajectory-audit-v1.schema.json` |
 | Accepted SFT schema | `schemas/netops-teacher-trajectory-sft-v1.schema.json` |
 | Taskgen system prompt | `prompts/netops-taskgen-system-v2.txt` |
-| Taskgen review prompt | `prompts/netops-prompt-review-system-v2.txt` |
+| Taskgen review prompt | `prompts/netops-prompt-review-system-v3.txt` |
 | Teacher system prompt | `prompts/netops-teacher-system-v1.txt` |
 | NetOps sampling taxonomy | `docs/netops-taxonomy.yaml` |
 | Complete prompt fixture | `tests/fixtures/canonical/valid-task.json` |
@@ -257,7 +258,7 @@ Every release must prove:
 10. external imports stay unverified and unaccepted;
 11. JSONL conversion failure does not publish a partial destination;
 12. generated NetOps tasks validate before write;
-13. every accepted prompt has one accepted review manifest entry;
+13. every accepted prompt has one review manifest entry with final disposition `accepted`, including adjudication evidence when used;
 14. exact, lexical, semantic, and final serialized dedup gates reject duplicates;
 15. a successful `generate -c N` publishes exactly N new accepted prompts;
 16. incomplete generation retains work artifacts and does not replace the requested final output.

@@ -12,6 +12,7 @@ pub struct PublishedPaths {
     pub run_dir: PathBuf,
     pub output: PathBuf,
     pub partial: PathBuf,
+    pub candidates: PathBuf,
     pub reviews: PathBuf,
     pub rejected: PathBuf,
     pub run: PathBuf,
@@ -23,6 +24,7 @@ impl PublishedPaths {
             run_dir: run_dir.to_path_buf(),
             output: run_dir.join("tasks.jsonl"),
             partial: run_dir.join("accepted.partial.jsonl"),
+            candidates: run_dir.join("candidates.jsonl"),
             reviews: run_dir.join("reviews.jsonl"),
             rejected: run_dir.join("rejected.jsonl"),
             run: run_dir.join("run.json"),
@@ -57,9 +59,11 @@ pub struct RunArtifacts {
     published: PublishedPaths,
     accepted_path: PathBuf,
     accepted: BufWriter<File>,
+    candidates: BufWriter<File>,
     reviews: BufWriter<File>,
     rejected: BufWriter<File>,
     accepted_since_flush: usize,
+    candidates_since_flush: usize,
     reviews_since_flush: usize,
     rejected_since_flush: usize,
 }
@@ -101,6 +105,7 @@ impl RunArtifacts {
                 .append(true)
                 .open(&published.partial)?,
         );
+        let candidates = BufWriter::new(File::create(&published.candidates)?);
         let reviews = BufWriter::new(File::create(&published.reviews)?);
         let rejected = BufWriter::new(File::create(&published.rejected)?);
 
@@ -108,9 +113,11 @@ impl RunArtifacts {
             accepted_path: published.partial.clone(),
             published,
             accepted,
+            candidates,
             reviews,
             rejected,
             accepted_since_flush: 0,
+            candidates_since_flush: 0,
             reviews_since_flush: 0,
             rejected_since_flush: 0,
         })
@@ -130,6 +137,17 @@ impl RunArtifacts {
         if self.accepted_since_flush >= ARTIFACT_FLUSH_INTERVAL {
             self.accepted.flush()?;
             self.accepted_since_flush = 0;
+        }
+        Ok(())
+    }
+
+    pub fn write_candidate<T: Serialize>(&mut self, value: &T) -> Result<()> {
+        serde_json::to_writer(&mut self.candidates, value)?;
+        self.candidates.write_all(b"\n")?;
+        self.candidates_since_flush += 1;
+        if self.candidates_since_flush >= ARTIFACT_FLUSH_INTERVAL {
+            self.candidates.flush()?;
+            self.candidates_since_flush = 0;
         }
         Ok(())
     }
@@ -217,12 +235,15 @@ impl RunArtifacts {
 
     pub fn flush(&mut self) -> Result<()> {
         self.accepted.flush()?;
+        self.candidates.flush()?;
         self.reviews.flush()?;
         self.rejected.flush()?;
         self.accepted.get_ref().sync_all()?;
+        self.candidates.get_ref().sync_all()?;
         self.reviews.get_ref().sync_all()?;
         self.rejected.get_ref().sync_all()?;
         self.accepted_since_flush = 0;
+        self.candidates_since_flush = 0;
         self.reviews_since_flush = 0;
         self.rejected_since_flush = 0;
         Ok(())
@@ -397,6 +418,9 @@ mod tests {
             .write_accepted_line(r#"{"prompt":"accepted"}"#)
             .unwrap();
         artifacts
+            .write_candidate(&json!({"sequence":1,"prompt":"accepted"}))
+            .unwrap();
+        artifacts
             .write_review(&json!({"verdict":"accept"}))
             .unwrap();
         artifacts
@@ -411,10 +435,17 @@ mod tests {
             1
         );
         assert!(paths.reviews.exists());
+        assert!(paths.candidates.exists());
         assert!(paths.rejected.exists());
         assert!(paths.run.exists());
         assert!(!paths.partial.exists());
-        for path in [paths.output, paths.reviews, paths.rejected, paths.run] {
+        for path in [
+            paths.output,
+            paths.candidates,
+            paths.reviews,
+            paths.rejected,
+            paths.run,
+        ] {
             assert_eq!(path.parent(), Some(run_dir.as_path()));
         }
     }
