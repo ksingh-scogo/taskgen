@@ -22,7 +22,7 @@ Taskgen candidate prompt
 
 Taskgen produces a prompt and sampled coordinates, then owns the configured prompt-level validation, deduplication, and model-review gate. A teacher produces candidate assistant messages and tool-call requests. Neither component owns live tool results, approval, ground truth, state hashes, verification results, safety grades, rewards, or trajectory acceptance.
 
-A schema-valid candidate is not automatically publishable. Taskgen invokes a separate quality-review request that checks platform and protocol authenticity, causal and numerical consistency, coordinate realization, solvability under the declared evidence condition, and safety posture. The reviewer may default to the generation model, but it always receives a distinct system prompt and returns a strict decision object. Accepted decisions live in `<stem>.reviews.jsonl`; rejected candidates and retry guidance live in `<stem>.rejected.jsonl`. This prompt gate does not make a teacher trajectory correct, verified, or trainable.
+A schema-valid candidate is not automatically publishable. Taskgen invokes a separate quality-review request that checks platform and protocol authenticity, causal and numerical consistency, coordinate realization, solvability under the declared evidence condition, and safety posture. The reviewer may default to the generation model, but it always receives a distinct system prompt and returns a strict decision object. Accepted decisions live in `<run-dir>/reviews.jsonl`; rejected candidates and retry guidance live in `<run-dir>/rejected.jsonl`. This prompt gate does not make a teacher trajectory correct, verified, or trainable.
 
 ## Normative files
 

@@ -1,4 +1,5 @@
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
@@ -91,6 +92,26 @@ pub struct ReviewClient {
     provider: ProviderConfig,
     client: reqwest::Client,
     max_output_tokens: u64,
+    telemetry: Arc<crate::telemetry::RequestTelemetry>,
+}
+
+#[derive(Debug)]
+enum ReviewAttemptError {
+    RateLimit {
+        retry_after_seconds: Option<u64>,
+        message: String,
+    },
+    Retryable(anyhow::Error),
+    Fatal(anyhow::Error),
+}
+
+impl ReviewAttemptError {
+    fn into_anyhow(self) -> anyhow::Error {
+        match self {
+            Self::RateLimit { message, .. } => anyhow::anyhow!(message),
+            Self::Retryable(error) | Self::Fatal(error) => error,
+        }
+    }
 }
 
 impl ReviewClient {
@@ -98,6 +119,7 @@ impl ReviewClient {
         provider: ProviderConfig,
         client: reqwest::Client,
         max_output_tokens: u64,
+        telemetry: Arc<crate::telemetry::RequestTelemetry>,
     ) -> Result<Self> {
         if max_output_tokens == 0 {
             bail!("review max output tokens must be positive");
@@ -106,16 +128,21 @@ impl ReviewClient {
             provider,
             client,
             max_output_tokens,
+            telemetry,
         })
     }
 
-    async fn request_once(&self, request: &ReviewRequest) -> Result<ReviewResult> {
+    async fn request_once(
+        &self,
+        request: &ReviewRequest,
+    ) -> std::result::Result<ReviewResult, ReviewAttemptError> {
         let user_content = serde_json::to_string_pretty(&json!({
             "instruction": "Review this prompt seed against every required quality dimension. Return only the required JSON decision. Do not solve the task.",
             "taxonomy_id": request.taxonomy_id,
             "taxonomy_kind": request.taxonomy_kind,
             "candidate": request.candidate,
-        }))?;
+        }))
+        .map_err(|error| ReviewAttemptError::Fatal(error.into()))?;
         let user_content = if self.provider.model.to_ascii_lowercase().contains("qwen") {
             format!("{user_content}\n/no_think")
         } else {
@@ -147,25 +174,79 @@ impl ReviewClient {
             self.provider.api_base.as_str().trim_end_matches('/')
         );
         let credential = self.provider.credentials.next();
+        let started = Instant::now();
         let response = self
             .client
             .post(url)
             .bearer_auth(credential.expose())
             .json(&body)
             .send()
-            .await
-            .context("review request failed")?;
+            .await;
+        let response = match response {
+            Ok(response) => response,
+            Err(error) if error.is_timeout() => {
+                self.telemetry
+                    .record_timeout(elapsed_millis(started.elapsed()));
+                return Err(ReviewAttemptError::Retryable(
+                    anyhow::anyhow!(error).context("review request timed out"),
+                ));
+            }
+            Err(error) => {
+                self.telemetry
+                    .record_error(elapsed_millis(started.elapsed()));
+                return Err(ReviewAttemptError::Retryable(
+                    anyhow::anyhow!(error).context("review request failed"),
+                ));
+            }
+        };
         let status = response.status();
-        let raw = response
-            .text()
-            .await
-            .context("failed to read review response")?;
-        if !status.is_success() {
-            bail!("review API returned HTTP {status}: {}", truncate(&raw, 500));
+        let retry_after_seconds = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok());
+        let raw = response.text().await.map_err(|error| {
+            self.telemetry
+                .record_error(elapsed_millis(started.elapsed()));
+            ReviewAttemptError::Retryable(
+                anyhow::anyhow!(error).context("failed to read review response"),
+            )
+        })?;
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            self.telemetry
+                .record_rate_limit(elapsed_millis(started.elapsed()));
+            return Err(ReviewAttemptError::RateLimit {
+                retry_after_seconds,
+                message: format!("review API returned HTTP {status}: {}", truncate(&raw, 500)),
+            });
         }
-        let payload: Value = serde_json::from_str(&raw).context("invalid review API JSON")?;
-        let content = extract_content(&payload)?;
-        let decision = ReviewDecision::parse_and_validate(&content)?;
+        if !status.is_success() {
+            self.telemetry
+                .record_error(elapsed_millis(started.elapsed()));
+            let error =
+                anyhow::anyhow!("review API returned HTTP {status}: {}", truncate(&raw, 500));
+            return if status.is_server_error() || status == reqwest::StatusCode::REQUEST_TIMEOUT {
+                Err(ReviewAttemptError::Retryable(error))
+            } else {
+                Err(ReviewAttemptError::Fatal(error))
+            };
+        }
+        let parsed = (|| -> Result<(Value, ReviewDecision)> {
+            let payload: Value = serde_json::from_str(&raw).context("invalid review API JSON")?;
+            let content = extract_content(&payload)?;
+            let decision = ReviewDecision::parse_and_validate(&content)?;
+            Ok((payload, decision))
+        })();
+        let (payload, decision) = match parsed {
+            Ok(value) => value,
+            Err(error) => {
+                self.telemetry
+                    .record_error(elapsed_millis(started.elapsed()));
+                return Err(ReviewAttemptError::Retryable(error));
+            }
+        };
+        self.telemetry
+            .record_success(elapsed_millis(started.elapsed()));
         let usage = payload.get("usage").cloned().unwrap_or(Value::Null);
         Ok(ReviewResult {
             decision,
@@ -191,16 +272,33 @@ impl CandidateReviewer for ReviewClient {
         for attempt in 0..3u32 {
             match self.request_once(&request).await {
                 Ok(result) => return Ok(result),
+                Err(ReviewAttemptError::Fatal(error)) => return Err(error),
                 Err(error) => {
-                    last_error = Some(error);
+                    let delay = match &error {
+                        ReviewAttemptError::RateLimit {
+                            retry_after_seconds: Some(seconds),
+                            ..
+                        } => Duration::from_secs(*seconds),
+                        _ => {
+                            let base = 250u64 * 2u64.pow(attempt);
+                            let jitter = rand::random::<u64>() % 251;
+                            Duration::from_millis(base + jitter)
+                        }
+                    };
+                    last_error = Some(error.into_anyhow());
                     if attempt < 2 {
-                        tokio::time::sleep(Duration::from_millis(250 * 2u64.pow(attempt))).await;
+                        self.telemetry.record_retry();
+                        tokio::time::sleep(delay).await;
                     }
                 }
             }
         }
         Err(last_error.context("review request failed without an error")?)
     }
+}
+
+fn elapsed_millis(duration: Duration) -> u64 {
+    duration.as_millis().min(u64::MAX as u128) as u64
 }
 
 fn extract_content(payload: &Value) -> Result<String> {
@@ -287,5 +385,74 @@ mod tests {
         assert!(restricted_sampling("openai/gpt-5.4"));
         assert!(restricted_sampling("scogoai/gpt-5.6-luna-max"));
         assert!(!restricted_sampling("qwen/qwen3.8-max-free"));
+    }
+
+    #[tokio::test]
+    async fn reviewer_honors_rate_limit_and_records_retry_telemetry() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+        #[derive(Clone)]
+        struct RateLimitedOnce {
+            calls: Arc<AtomicUsize>,
+        }
+
+        impl Respond for RateLimitedOnce {
+            fn respond(&self, _request: &Request) -> ResponseTemplate {
+                if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    ResponseTemplate::new(429).insert_header("retry-after", "0")
+                } else {
+                    let decision = serde_json::json!({
+                        "schema_version":"scogo.taskgen.prompt-review.v1",
+                        "verdict":"accept",
+                        "reason_codes":[],
+                        "summary":"Operationally coherent.",
+                        "retry_guidance":""
+                    });
+                    ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "choices":[{"message":{"content":decision.to_string()}}],
+                        "usage":{"prompt_tokens":10,"completion_tokens":5}
+                    }))
+                }
+            }
+        }
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(RateLimitedOnce {
+                calls: Arc::new(AtomicUsize::new(0)),
+            })
+            .mount(&server)
+            .await;
+        let telemetry = Arc::new(crate::telemetry::RequestTelemetry::default());
+        let provider = ProviderConfig {
+            api_base: crate::provider::normalize_api_base(&format!("{}/v1", server.uri())).unwrap(),
+            model: "review-model".into(),
+            credentials: crate::provider::CredentialPool::new(vec![
+                crate::provider::SecretString::new("test-key"),
+            ])
+            .unwrap(),
+        };
+        let reviewer =
+            ReviewClient::new(provider, reqwest::Client::new(), 512, telemetry.clone()).unwrap();
+
+        let result = reviewer
+            .review(ReviewRequest {
+                candidate: serde_json::json!({"prompt":"Investigate read-only evidence."}),
+                taxonomy_id: "test-taxonomy".into(),
+                taxonomy_kind: "compositional".into(),
+                system_prompt: "Return the required JSON decision.".into(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result.decision.verdict, ReviewVerdict::Accept);
+        let snapshot = telemetry.snapshot();
+        assert_eq!(snapshot.requests, 2);
+        assert_eq!(snapshot.rate_limits, 1);
+        assert_eq!(snapshot.retries, 1);
     }
 }

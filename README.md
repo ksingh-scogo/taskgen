@@ -77,7 +77,7 @@ taskgen generate \
   --model teacher/model \
   --count 1000 \
   --workers 5 \
-  --output data/itops-prompts.jsonl
+  --run-dir data/runs/itops-001
 ```
 
 Enterprise NetOps:
@@ -91,7 +91,7 @@ taskgen generate \
   --count 1000 \
   --workers 5 \
   --seed 20260820 \
-  --output data/netops-prompts.jsonl
+  --run-dir data/runs/netops-001
 ```
 
 Generation-prompt precedence is `--system-prompt`, `--system-prompt-file`, `defaults.system_prompt_file`, then the built-in IT Ops prompt. The taxonomy defaults are `prompts/itops-taskgen-system-v2.txt` and `prompts/netops-taskgen-system-v2.txt`.
@@ -109,7 +109,7 @@ taskgen generate \
   --model fast/generator \
   --review-model strong/reviewer \
   --count 1000 \
-  --output data/tasks.jsonl
+  --run-dir data/runs/same-provider-001
 ```
 
 Different reviewer provider:
@@ -123,7 +123,7 @@ taskgen generate \
   --review-api-key "$REVIEW_API_KEY" \
   --review-model strong/reviewer \
   --count 1000 \
-  --output data/tasks.jsonl
+  --run-dir data/runs/split-provider-001
 ```
 
 A different normalized review endpoint requires explicit review credentials. Taskgen never sends generation credentials to another endpoint implicitly. `--keyfile` and `--review-keyfile` take precedence over single or ambient keys. CLI help hides environment-secret values.
@@ -145,20 +145,25 @@ Semantic mode uses local FastEmbed ONNX inference. English defaults to `sentence
 
 Use `--dedup-mode lexical` only when semantic inference is intentionally excluded. Exact and Jaccard checks remain mandatory.
 
-### Atomic outputs and append
+### Run directories, atomic output, and append
 
-For `data/netops.jsonl`, success publishes:
+Every invocation owns one directory. Supply `--run-dir <DIR>`, or omit it and Taskgen creates `taskgen-runs/<UTC timestamp>-<taxonomy ID>-<run ID>/`.
+
+A successful directory contains:
 
 ```text
-data/netops.jsonl
-data/netops.reviews.jsonl
-data/netops.rejected.jsonl
-data/netops.run.json
+data/runs/netops-001/
+├── tasks.jsonl
+├── reviews.jsonl
+├── rejected.jsonl
+└── run.json
 ```
 
-Incomplete runs retain a hidden run working directory next to the target and exit non-zero. They do not replace the requested final dataset.
+`run.json` is created with `status: running` before generation and atomically updated to `success` or `failed`. `tasks.jsonl` exists only after the exact accepted count is reached. Incomplete runs retain `accepted.partial.jsonl`, reviews, rejections, and their terminal report in the same directory.
 
-`--append -c N` adds exactly N accepted records. Existing records are staged into a replacement file and loaded into the dedup index, so new candidates cannot duplicate previous output.
+`--append-from <FILE> -c N` creates a new run containing the source records plus exactly N newly accepted records. The source dataset is never modified, and its records are loaded into the dedup index so new candidates cannot duplicate them.
+
+The report records start/end timestamps, duration in seconds and minutes, acceptance-worker concurrency, Tokio runtime threads, logical CPUs, request timing, retries, 429s, timeouts, rejection reasons, throughput, token usage, sanitized endpoint origins, and artifact size/SHA-256 metadata. It never records credentials.
 
 ### Prompt record
 
@@ -212,11 +217,15 @@ Every final line validates against `schemas/task-v2.schema.json`:
 | `--dedup-ngram <N>` | `5` | Lexical word n-gram size |
 | `--semantic-model <MODEL>` | language-dependent | Local FastEmbed model |
 | `--semantic-model-cache <DIR>` | FastEmbed default | Local model cache |
-| `--append` | off | Add exactly N to an existing dataset |
-| `--overwrite` | off | Replace an existing dataset only after success |
+| `--run-dir <DIR>` | generated under `taskgen-runs/` | Self-contained directory for this run |
+| `--append-from <FILE>` | none | Seed a new run from an existing dataset and add exactly N records |
 | `--multilingual` | off | Sample one of eight languages |
 
 GPT-5, o-series, and Luna request bodies omit unsupported sampling fields. Qwen requests use no/low-thinking controls, provider reasoning fields are discarded, and only final prompt content enters the dataset. Empty, truncated, overlong, or exposed-planning completions are rejected and replaced.
+
+### Throughput tuning
+
+Keep review enabled for production datasets. To improve throughput, first use a fast independent non-reasoning reviewer, then raise `--workers` gradually while watching `requests.*.rate_limits` in `run.json`. Separate generation and review endpoints avoid sharing one provider quota. A higher worker count does not help when it produces sustained 429s; reduce concurrency or use a provider route with higher limits. Reducing technical-review rejections can also outperform raw concurrency because each rejected candidate requires another generation and review cycle.
 
 ## Standalone Rust dedup
 

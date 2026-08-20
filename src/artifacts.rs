@@ -7,111 +7,113 @@ use serde::Serialize;
 
 #[derive(Debug, Clone)]
 pub struct PublishedPaths {
+    pub run_dir: PathBuf,
     pub output: PathBuf,
+    pub partial: PathBuf,
     pub reviews: PathBuf,
     pub rejected: PathBuf,
     pub run: PathBuf,
 }
 
 impl PublishedPaths {
-    pub fn for_output(output: &Path) -> Result<Self> {
-        let parent = output.parent().unwrap_or_else(|| Path::new("."));
-        let stem = output
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .context("output path must have a UTF-8 file stem")?;
-        Ok(Self {
-            output: output.to_path_buf(),
-            reviews: parent.join(format!("{stem}.reviews.jsonl")),
-            rejected: parent.join(format!("{stem}.rejected.jsonl")),
-            run: parent.join(format!("{stem}.run.json")),
-        })
+    pub fn for_run_dir(run_dir: &Path) -> Self {
+        Self {
+            run_dir: run_dir.to_path_buf(),
+            output: run_dir.join("tasks.jsonl"),
+            partial: run_dir.join("accepted.partial.jsonl"),
+            reviews: run_dir.join("reviews.jsonl"),
+            rejected: run_dir.join("rejected.jsonl"),
+            run: run_dir.join("run.json"),
+        }
     }
 }
 
+pub fn automatic_run_dir(root: &Path, timestamp: &str, taxonomy_id: &str, run_id: &str) -> PathBuf {
+    fn slug(value: &str) -> String {
+        value
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
+                    character
+                } else {
+                    '-'
+                }
+            })
+            .collect()
+    }
+
+    root.join(format!(
+        "{}-{}-{}",
+        slug(timestamp),
+        slug(taxonomy_id),
+        slug(run_id)
+    ))
+}
+
+#[derive(Debug)]
 pub struct RunArtifacts {
     published: PublishedPaths,
-    work_dir: PathBuf,
     accepted_path: PathBuf,
-    reviews_path: PathBuf,
-    rejected_path: PathBuf,
-    run_path: PathBuf,
     accepted: BufWriter<File>,
     reviews: BufWriter<File>,
     rejected: BufWriter<File>,
 }
 
 impl RunArtifacts {
-    pub fn create(output: &Path, append: bool, overwrite: bool) -> Result<Self> {
-        if output.exists() && !append && !overwrite {
-            bail!(
-                "output already exists: {} (use --overwrite or --append)",
-                output.display()
-            );
+    pub fn create<T: Serialize>(
+        run_dir: &Path,
+        append_from: Option<&Path>,
+        initial_report: &T,
+    ) -> Result<Self> {
+        if run_dir.exists() {
+            let mut entries = fs::read_dir(run_dir).with_context(|| {
+                format!("failed to inspect run directory: {}", run_dir.display())
+            })?;
+            if entries.next().transpose()?.is_some() {
+                bail!("run directory is not empty: {}", run_dir.display());
+            }
+        } else {
+            fs::create_dir_all(run_dir).with_context(|| {
+                format!("failed to create run directory: {}", run_dir.display())
+            })?;
         }
-        if append && !output.exists() {
-            bail!(
-                "cannot append because output does not exist: {}",
-                output.display()
-            );
-        }
-        let published = PublishedPaths::for_output(output)?;
-        let parent = output.parent().unwrap_or_else(|| Path::new("."));
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create output directory: {}", parent.display()))?;
-        let stem = output.file_stem().and_then(|value| value.to_str()).unwrap();
-        let nonce: u64 = rand::random();
-        let work_dir = parent.join(format!(
-            ".{stem}.taskgen-{}-{nonce:016x}",
-            std::process::id()
-        ));
-        fs::create_dir(&work_dir).with_context(|| {
-            format!(
-                "failed to create run work directory: {}",
-                work_dir.display()
-            )
-        })?;
 
-        let accepted_path = work_dir.join("accepted.jsonl");
-        let reviews_path = work_dir.join("reviews.jsonl");
-        let rejected_path = work_dir.join("rejected.jsonl");
-        let run_path = work_dir.join("run.json");
-        if append {
-            fs::copy(output, &accepted_path).with_context(|| {
+        let published = PublishedPaths::for_run_dir(run_dir);
+        write_json_atomic(&published.run, initial_report)?;
+        if let Some(source) = append_from {
+            fs::copy(source, &published.partial).with_context(|| {
                 format!(
-                    "failed to stage existing output for append: {}",
-                    output.display()
+                    "failed to stage existing append dataset: {}",
+                    source.display()
                 )
             })?;
+        } else {
+            File::create(&published.partial)?;
         }
         let accepted = BufWriter::new(
             OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(&accepted_path)?,
+                .open(&published.partial)?,
         );
-        let reviews = BufWriter::new(File::create(&reviews_path)?);
-        let rejected = BufWriter::new(File::create(&rejected_path)?);
+        let reviews = BufWriter::new(File::create(&published.reviews)?);
+        let rejected = BufWriter::new(File::create(&published.rejected)?);
 
         Ok(Self {
+            accepted_path: published.partial.clone(),
             published,
-            work_dir,
-            accepted_path,
-            reviews_path,
-            rejected_path,
-            run_path,
             accepted,
             reviews,
             rejected,
         })
     }
 
-    pub fn work_dir(&self) -> &Path {
-        &self.work_dir
-    }
-
     pub fn accepted_path(&self) -> &Path {
         &self.accepted_path
+    }
+
+    pub fn paths(&self) -> &PublishedPaths {
+        &self.published
     }
 
     pub fn write_accepted_line(&mut self, line: &str) -> Result<()> {
@@ -135,25 +137,36 @@ impl RunArtifacts {
     }
 
     pub fn publish<T: Serialize>(mut self, report: &T) -> Result<PublishedPaths> {
+        self.flush()?;
+        fs::rename(&self.accepted_path, &self.published.output)?;
+        write_json_atomic(&self.published.run, report)?;
+        Ok(self.published)
+    }
+
+    pub fn finish_incomplete<T: Serialize>(mut self, report: &T) -> Result<PublishedPaths> {
+        self.flush()?;
+        write_json_atomic(&self.published.run, report)?;
+        Ok(self.published)
+    }
+
+    fn flush(&mut self) -> Result<()> {
         self.accepted.flush()?;
         self.reviews.flush()?;
         self.rejected.flush()?;
-        let mut run = BufWriter::new(File::create(&self.run_path)?);
-        serde_json::to_writer_pretty(&mut run, report)?;
-        run.write_all(b"\n")?;
-        run.flush()?;
-        drop(run);
-        drop(self.accepted);
-        drop(self.reviews);
-        drop(self.rejected);
-
-        fs::rename(&self.reviews_path, &self.published.reviews)?;
-        fs::rename(&self.rejected_path, &self.published.rejected)?;
-        fs::rename(&self.run_path, &self.published.run)?;
-        fs::rename(&self.accepted_path, &self.published.output)?;
-        fs::remove_dir(&self.work_dir)?;
-        Ok(self.published)
+        Ok(())
     }
+}
+
+fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let temporary = parent.join(".run.json.tmp");
+    let mut writer = BufWriter::new(File::create(&temporary)?);
+    serde_json::to_writer_pretty(&mut writer, value)?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+    drop(writer);
+    fs::rename(&temporary, path)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -162,25 +175,51 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn incomplete_run_never_touches_final_output() {
-        let temp = tempfile::tempdir().unwrap();
-        let output = temp.path().join("tasks.jsonl");
-        let work_dir = {
-            let mut artifacts = RunArtifacts::create(&output, false, false).unwrap();
-            artifacts
-                .write_accepted_line(r#"{"prompt":"partial"}"#)
-                .unwrap();
-            artifacts.work_dir().to_path_buf()
-        };
-        assert!(!output.exists());
-        assert!(work_dir.exists());
+    fn automatic_run_directory_is_timestamped_and_taxonomy_specific() {
+        let root = Path::new("taskgen-runs");
+        let path = automatic_run_dir(
+            root,
+            "20260820T143501Z",
+            "scogo-enterprise-netops-v2",
+            "a81f9c2d",
+        );
+        assert_eq!(
+            path,
+            PathBuf::from("taskgen-runs/20260820T143501Z-scogo-enterprise-netops-v2-a81f9c2d")
+        );
     }
 
     #[test]
-    fn publish_writes_sidecars_then_complete_dataset() {
+    fn incomplete_run_retains_partial_data_and_terminal_report() {
         let temp = tempfile::tempdir().unwrap();
-        let output = temp.path().join("tasks.jsonl");
-        let mut artifacts = RunArtifacts::create(&output, false, false).unwrap();
+        let run_dir = temp.path().join("run-001");
+        let mut artifacts =
+            RunArtifacts::create(&run_dir, None, &json!({"status":"running"})).unwrap();
+        artifacts
+            .write_accepted_line(r#"{"prompt":"partial"}"#)
+            .unwrap();
+        artifacts
+            .finish_incomplete(&json!({"status":"failed","terminal_error":"quota"}))
+            .unwrap();
+
+        let paths = PublishedPaths::for_run_dir(&run_dir);
+        assert!(!paths.output.exists());
+        assert_eq!(
+            fs::read_to_string(paths.partial).unwrap(),
+            "{\"prompt\":\"partial\"}\n"
+        );
+        let report: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(paths.run).unwrap()).unwrap();
+        assert_eq!(report["status"], "failed");
+        assert_eq!(report["terminal_error"], "quota");
+    }
+
+    #[test]
+    fn successful_run_publishes_every_artifact_inside_one_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run-002");
+        let mut artifacts =
+            RunArtifacts::create(&run_dir, None, &json!({"status":"running"})).unwrap();
         artifacts
             .write_accepted_line(r#"{"prompt":"accepted"}"#)
             .unwrap();
@@ -190,22 +229,53 @@ mod tests {
         artifacts
             .write_rejection(&json!({"reason":"duplicate"}))
             .unwrap();
-        let paths = artifacts.publish(&json!({"accepted":1})).unwrap();
-        assert_eq!(fs::read_to_string(paths.output).unwrap().lines().count(), 1);
+        let paths = artifacts
+            .publish(&json!({"status":"success","accepted":1}))
+            .unwrap();
+        assert_eq!(paths.run_dir, run_dir);
+        assert_eq!(
+            fs::read_to_string(&paths.output).unwrap().lines().count(),
+            1
+        );
         assert!(paths.reviews.exists());
         assert!(paths.rejected.exists());
         assert!(paths.run.exists());
+        assert!(!paths.partial.exists());
+        for path in [paths.output, paths.reviews, paths.rejected, paths.run] {
+            assert_eq!(path.parent(), Some(run_dir.as_path()));
+        }
     }
 
     #[test]
-    fn append_stages_existing_records_without_modifying_final_until_publish() {
+    fn append_from_stages_existing_records_without_modifying_the_source() {
         let temp = tempfile::tempdir().unwrap();
-        let output = temp.path().join("tasks.jsonl");
-        fs::write(&output, "old\n").unwrap();
-        let mut artifacts = RunArtifacts::create(&output, true, false).unwrap();
+        let source = temp.path().join("existing.jsonl");
+        let run_dir = temp.path().join("run-003");
+        fs::write(&source, "old\n").unwrap();
+        let mut artifacts =
+            RunArtifacts::create(&run_dir, Some(&source), &json!({"status":"running"})).unwrap();
         artifacts.write_accepted_line("new").unwrap();
-        assert_eq!(fs::read_to_string(&output).unwrap(), "old\n");
-        artifacts.publish(&json!({"accepted":1})).unwrap();
-        assert_eq!(fs::read_to_string(&output).unwrap(), "old\nnew\n");
+        assert_eq!(fs::read_to_string(&source).unwrap(), "old\n");
+        let paths = artifacts
+            .publish(&json!({"status":"success","accepted":1}))
+            .unwrap();
+        assert_eq!(fs::read_to_string(paths.output).unwrap(), "old\nnew\n");
+    }
+
+    #[test]
+    fn non_empty_run_directory_is_never_reused() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("occupied");
+        fs::create_dir(&run_dir).unwrap();
+        fs::write(run_dir.join("keep.txt"), "user data").unwrap();
+
+        let error = RunArtifacts::create(&run_dir, None, &json!({"status":"running"}))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("not empty"), "{error}");
+        assert_eq!(
+            fs::read_to_string(run_dir.join("keep.txt")).unwrap(),
+            "user data"
+        );
     }
 }

@@ -152,22 +152,22 @@ This preserves the requested coordinate distribution. Top-up by sampling brand-n
 
 ### 3.5 Final output is an atomic success artifact
 
-Taskgen writes accepted records and audit events to a run-specific working directory next to the requested output. The pre-existing final output is not modified while a run is incomplete.
+Taskgen writes accepted records and audit events to one self-contained run directory. The user may supply `--run-dir`; otherwise Taskgen creates a timestamped directory under `taskgen-runs/`.
 
-For `data/netops.jsonl`, successful publication creates:
+Successful publication creates:
 
 ```text
-data/netops.jsonl
-data/netops.reviews.jsonl
-data/netops.rejected.jsonl
-data/netops.run.json
+<run-dir>/tasks.jsonl
+<run-dir>/reviews.jsonl
+<run-dir>/rejected.jsonl
+<run-dir>/run.json
 ```
 
-On success, sidecars are flushed and renamed first; the final dataset is renamed last. Therefore, the presence of the newly published final dataset implies that the accepted count and sidecars were finalized.
+`run.json` begins with `status: running`. On success, sidecars are flushed and the staged accepted dataset is atomically renamed to `tasks.jsonl`; the report is then atomically updated to `success`.
 
-On failure, the run-specific working directory is retained and its path is printed. It contains partial accepted records and all audit events, but the partial dataset is never presented at the requested final output path.
+On failure, the same directory retains `accepted.partial.jsonl`, all audit events, and a terminal `status: failed` report. Partial data is never presented as `tasks.jsonl`.
 
-For `--append`, `-c N` means `N` additional accepted records. Taskgen loads the existing final file into the validation and dedup indexes, builds a complete replacement file containing existing records plus the `N` new records, and atomically replaces the original only on success. Existing records do not count toward `N`. A new candidate that duplicates an existing record is rejected and replaced.
+For `--append-from <FILE>`, `-c N` means `N` additional accepted records. Taskgen loads the source file into the validation and dedup indexes and creates a new run containing the existing records plus the `N` new records. The source is never modified. Existing records do not count toward `N`; a new candidate that duplicates an existing record is rejected and replaced.
 
 ## 4. Command-line contract
 
@@ -183,7 +183,7 @@ taskgen generate \
   --model teacher/model \
   --count 1000 \
   --workers 5 \
-  --output data/netops.jsonl
+  --run-dir data/runs/netops-001
 ```
 
 The reviewer uses `teacher/model`, the same endpoint, and the same credential pool.
@@ -197,7 +197,7 @@ taskgen generate \
   --model fast/generator \
   --review-model strong/reviewer \
   --count 1000 \
-  --output data/itops.jsonl
+  --run-dir data/runs/itops-001
 ```
 
 Different review provider:
@@ -211,7 +211,7 @@ taskgen generate \
   --review-api-key "$REVIEW_API_KEY" \
   --review-model strong/reviewer \
   --count 1000 \
-  --output data/netops.jsonl
+  --run-dir data/runs/netops-split-review-001
 ```
 
 New and changed generation flags:
@@ -235,7 +235,8 @@ New and changed generation flags:
 | `--semantic-model-cache <DIR>` | FastEmbed default | Local embedding-model cache |
 | `--review-input-price <F>` | none | Reviewer input price per million tokens |
 | `--review-output-price <F>` | none | Reviewer output price per million tokens |
-| `--overwrite` | off | Replace an existing non-append output only after success |
+| `--run-dir <DIR>` | timestamped directory under `taskgen-runs/` | Self-contained run destination |
+| `--append-from <FILE>` | none | Read an existing dataset into a new run and add exactly N accepted records |
 
 Removed generation flags:
 
@@ -512,15 +513,18 @@ The quality-review form includes the parsed reviewer decision. Invalid JSONL in 
 
 ### 9.2 Run report
 
-`<stem>.run.json` contains:
+`<run-dir>/run.json` contains:
 
-- run ID, timestamps, command version, taxonomy ID and kind;
+- run ID, start/end timestamps, duration seconds/minutes, command version, taxonomy ID and kind;
+- acceptance-worker count, Tokio runtime-worker count, and logical CPU count;
 - requested new count, existing count, accepted new count, and published total;
 - sampled and accepted coordinate distributions;
 - total candidate attempts and attempts per slot;
 - rejection counts by gate and reason;
 - generation and review model/endpoint-origin configuration;
 - generation and review token usage and priced cost;
+- generation/review request counts, retries, 429s, timeouts, errors, and aggregate request time;
+- tasks-per-minute and candidates-per-minute throughput;
 - dedup mode, n-gram size, thresholds, embedding model, and model cache identity;
 - output and sidecar SHA-256 hashes;
 - completion status and, for incomplete runs, the terminal reason.
@@ -535,7 +539,7 @@ No secret, full credential, authorization header, or proxy credential is permitt
 - A rejected candidate is normal pipeline behavior, not a command error.
 - Exhausting `--max-attempts-per-slot` is a command error naming the slot and coordinate in the run report.
 - Exhausting the configured budget before `N` is a command error.
-- SIGINT/SIGTERM stops scheduling new work, lets in-flight journal writes finish, records an incomplete run, retains the workdir, and exits non-zero.
+- SIGINT/SIGTERM stops scheduling new work, lets in-flight journal writes finish, records an incomplete run, retains the run directory, and exits non-zero.
 - Output write, fsync, schema, or final-count validation failure prevents publication.
 - A successful exit requires that the newly accepted count equals `N` and every final row reparses and revalidates.
 

@@ -189,7 +189,7 @@ jobs:
             echo '```bash'
             echo "curl -fsSL -o taskgen https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/taskgen-linux-arm64"
             echo "chmod +x taskgen"
-            echo "./taskgen generate --api-key \"\$OPENAI_API_KEY\" -c 50000 -w 20 --append -o /data/itops.jsonl"
+            echo "./taskgen generate --api-key \"\$OPENAI_API_KEY\" -c 50000 -w 20 --run-dir /data/taskgen-runs/itops-001"
             echo '```'
             if [ "$MACOS_STATUS" = "success" ]; then
               echo

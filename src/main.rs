@@ -1,7 +1,7 @@
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -16,6 +16,7 @@ use rand::SeedableRng;
 use rand::prelude::*;
 use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 pub mod artifacts;
 pub mod atif;
@@ -24,6 +25,7 @@ pub mod provider;
 pub mod review;
 pub mod schema;
 pub mod taxonomy;
+pub mod telemetry;
 
 const DEFAULT_SYSTEM_PROMPT: &str = r#"Write prompts as if a competent on-call asked a question at 2am — Slack, PagerDuty, a war-room thread, or an SSH session. They might be tired or frustrated, but they're competent. They state symptoms, what they already checked, and what they're afraid of. Don't be a child. Don't be a robot. Don't write a formal runbook. Be a human who forgot to be formal.
 Good casual: "zabbix is paging every 30s on the same host, I already restarted the agent, still flapping—mute or real disk?", "canary's eating error budget and CAB's frozen till Monday, rollback or ride it?", "BGP to DR flapped twice, underlay looks fine, overlay SLA class is red"
@@ -247,6 +249,16 @@ enum TaxonomyCommand {
     },
 }
 
+fn parse_positive_usize(value: &str) -> std::result::Result<usize, String> {
+    let parsed = value
+        .parse::<usize>()
+        .map_err(|_| format!("'{value}' is not a positive integer"))?;
+    if parsed == 0 {
+        return Err("value must be greater than zero".into());
+    }
+    Ok(parsed)
+}
+
 #[derive(ClapArgs, Debug, Clone)]
 struct GenerateArgs {
     #[arg(long, default_value = "https://api.openai.com/v1")]
@@ -270,7 +282,8 @@ struct GenerateArgs {
     #[arg(long)]
     seed: Option<u64>,
 
-    #[arg(short, long, default_value_t = 250)]
+    /// Number of newly accepted records required for success.
+    #[arg(short, long, default_value_t = 250, value_parser = parse_positive_usize)]
     count: usize,
 
     #[arg(long)]
@@ -285,17 +298,20 @@ struct GenerateArgs {
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     max_output_tokens: Option<u64>,
 
-    #[arg(short, long, default_value_t = 5)]
+    /// Maximum number of taxonomy-coordinate slots processed concurrently.
+    #[arg(short, long, default_value_t = 5, value_parser = parse_positive_usize)]
     workers: usize,
 
     #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..))]
     request_timeout_seconds: u64,
 
-    #[arg(short, long, default_value = "output.jsonl")]
-    output: PathBuf,
-
+    /// Directory containing every artifact for this run. Generated automatically when omitted.
     #[arg(long)]
-    append: bool,
+    run_dir: Option<PathBuf>,
+
+    /// Existing task JSONL to copy into this new run before adding the requested records.
+    #[arg(long)]
+    append_from: Option<PathBuf>,
 
     #[arg(long)]
     proxies: Option<PathBuf>,
@@ -347,9 +363,6 @@ struct GenerateArgs {
 
     #[arg(long)]
     semantic_model_cache: Option<PathBuf>,
-
-    #[arg(long)]
-    overwrite: bool,
 
     #[arg(long)]
     free_models: bool,
@@ -1152,6 +1165,7 @@ struct GenerateTaskRequest<'a> {
     cancel: &'a AtomicBool,
     consecutive_timeouts: &'a AtomicUsize,
     progress: &'a ProgressBar,
+    telemetry: &'a telemetry::RequestTelemetry,
 }
 
 async fn generate_task(
@@ -1171,6 +1185,7 @@ async fn generate_task(
         cancel,
         consecutive_timeouts,
         progress,
+        telemetry,
     } = request;
     let mut task_message = task_user_message(sample, language);
     if let Some(guidance) = retry_guidance.filter(|value| !value.trim().is_empty()) {
@@ -1210,14 +1225,19 @@ async fn generate_task(
             return Err(ApiError::Other(anyhow::anyhow!("cancelled")));
         }
 
+        let request_started = std::time::Instant::now();
         match api_request(client, &url, api_key, &body).await {
             Ok(result) => {
                 consecutive_timeouts.store(0, Ordering::Relaxed);
                 if let Err(error) = validate_generated_prompt(&result.0) {
+                    telemetry.record_error(
+                        request_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                    );
                     retries += 1;
                     if retries > MAX_RETRIES {
                         return Err(ApiError::InvalidCompletion(error.to_string()));
                     }
+                    telemetry.record_retry();
                     progress.suspend(|| {
                         eprintln!(
                             "[CONTENT] invalid completion, retrying ({retries}/{MAX_RETRIES}): {error}"
@@ -1225,13 +1245,20 @@ async fn generate_task(
                     });
                     continue;
                 }
+                telemetry.record_success(
+                    request_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                );
                 return Ok(result);
             }
             Err(ApiError::RateLimit(retry_after)) => {
+                telemetry.record_rate_limit(
+                    request_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                );
                 retries += 1;
                 if retries > MAX_RETRIES {
                     return Err(ApiError::RateLimit(retry_after));
                 }
+                telemetry.record_retry();
                 let wait = retry_after.unwrap_or_else(|| 2u64.pow(retries).min(60));
                 progress.suspend(|| {
                     eprintln!(
@@ -1242,6 +1269,9 @@ async fn generate_task(
                 tokio::time::sleep(tokio::time::Duration::from_secs(wait)).await;
             }
             Err(ApiError::Timeout) => {
+                telemetry.record_timeout(
+                    request_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                );
                 let count = consecutive_timeouts.fetch_add(1, Ordering::Relaxed) + 1;
                 if count >= 5 {
                     progress.suspend(|| {
@@ -1257,6 +1287,7 @@ async fn generate_task(
                 if retries > MAX_RETRIES {
                     return Err(ApiError::Timeout);
                 }
+                telemetry.record_retry();
                 let wait = 2u64.pow(retries).min(30);
                 progress.suspend(|| {
                     eprintln!(
@@ -1267,10 +1298,14 @@ async fn generate_task(
                 tokio::time::sleep(tokio::time::Duration::from_secs(wait)).await;
             }
             Err(ApiError::Transient(status, body)) => {
+                telemetry.record_error(
+                    request_started.elapsed().as_millis().min(u64::MAX as u128) as u64
+                );
                 retries += 1;
                 if retries > MAX_RETRIES {
                     return Err(ApiError::Transient(status, body));
                 }
+                telemetry.record_retry();
                 let wait = 2u64.pow(retries).min(30);
                 progress.suspend(|| {
                     eprintln!(
@@ -1280,10 +1315,14 @@ async fn generate_task(
                 tokio::time::sleep(tokio::time::Duration::from_secs(wait)).await;
             }
             Err(ApiError::InvalidCompletion(message)) => {
+                telemetry.record_error(
+                    request_started.elapsed().as_millis().min(u64::MAX as u128) as u64
+                );
                 retries += 1;
                 if retries > MAX_RETRIES {
                     return Err(ApiError::InvalidCompletion(message));
                 }
+                telemetry.record_retry();
                 progress.suspend(|| {
                     eprintln!(
                         "[CONTENT] invalid completion, retrying ({retries}/{MAX_RETRIES}): {message}"
@@ -1291,13 +1330,21 @@ async fn generate_task(
                 });
             }
             Err(ApiError::Billing(msg)) => {
+                telemetry.record_error(
+                    request_started.elapsed().as_millis().min(u64::MAX as u128) as u64
+                );
                 progress.suspend(|| {
                     eprintln!("[FATAL] billing error, shutting down gracefully: {}", msg);
                 });
                 cancel.store(true, Ordering::Relaxed);
                 return Err(ApiError::Billing(msg));
             }
-            Err(e) => return Err(e),
+            Err(e) => {
+                telemetry.record_error(
+                    request_started.elapsed().as_millis().min(u64::MAX as u128) as u64
+                );
+                return Err(e);
+            }
         }
     }
 }
@@ -1762,9 +1809,240 @@ fn review_cost(stats: &AtomicStats, input_price: Option<f64>, output_price: Opti
     }
 }
 
+struct GenerationReportContext<'a> {
+    run_id: &'a str,
+    started_at: chrono::DateTime<chrono::Utc>,
+    args: &'a GenerateArgs,
+    taxonomy: &'a taxonomy::TaxonomyCatalog,
+    generation_provider: &'a provider::ProviderConfig,
+    review_provider: &'a provider::ProviderConfig,
+    semantic_model_id: &'a str,
+    existing_records: usize,
+    paths: &'a artifacts::PublishedPaths,
+}
+
+struct GenerationReportOutcome<'a> {
+    status: &'a str,
+    terminal_error: Option<&'a str>,
+    elapsed: std::time::Duration,
+    final_records: usize,
+    stats: &'a AtomicStats,
+    generation_requests: telemetry::RequestTelemetrySnapshot,
+    review_requests: telemetry::RequestTelemetrySnapshot,
+}
+
+fn runtime_worker_threads() -> usize {
+    std::env::var("TOKIO_WORKER_THREADS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|value| value.get())
+                .unwrap_or(1)
+        })
+}
+
+fn artifact_descriptor(path: &std::path::Path, published_name: &str) -> Result<serde_json::Value> {
+    let metadata = std::fs::metadata(path)
+        .with_context(|| format!("failed to inspect run artifact: {}", path.display()))?;
+    let mut file = File::open(path)
+        .with_context(|| format!("failed to hash run artifact: {}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(serde_json::json!({
+        "file": published_name,
+        "bytes": metadata.len(),
+        "sha256": format!("{:x}", hasher.finalize()),
+    }))
+}
+
+fn rejection_summary(path: &std::path::Path) -> Result<serde_json::Value> {
+    let mut by_stage: std::collections::BTreeMap<String, u64> = Default::default();
+    let mut by_reason: std::collections::BTreeMap<String, u64> = Default::default();
+    for (index, line) in BufReader::new(File::open(path)?).lines().enumerate() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let value: serde_json::Value = serde_json::from_str(&line).with_context(|| {
+            format!(
+                "invalid rejection event at {}:{}",
+                path.display(),
+                index + 1
+            )
+        })?;
+        if let Some(stage) = value.get("stage").and_then(serde_json::Value::as_str) {
+            *by_stage.entry(stage.to_string()).or_default() += 1;
+        }
+        if let Some(reasons) = value
+            .get("decision")
+            .and_then(|decision| decision.get("reason_codes"))
+            .and_then(serde_json::Value::as_array)
+        {
+            for reason in reasons.iter().filter_map(serde_json::Value::as_str) {
+                *by_reason.entry(reason.to_string()).or_default() += 1;
+            }
+        }
+    }
+    Ok(serde_json::json!({"by_stage": by_stage, "by_reason": by_reason}))
+}
+
+fn generation_run_report(
+    context: &GenerationReportContext<'_>,
+    outcome: GenerationReportOutcome<'_>,
+) -> Result<serde_json::Value> {
+    let completed_at = chrono::Utc::now();
+    let duration_seconds = outcome.elapsed.as_secs_f64();
+    let duration_minutes = duration_seconds / 60.0;
+    let accepted = outcome.stats.tasks.load(Ordering::Relaxed);
+    let candidate_attempts = outcome.stats.attempts.load(Ordering::Relaxed);
+    let task_artifact = if outcome.status == "success" {
+        artifact_descriptor(&context.paths.partial, "tasks.jsonl")?
+    } else {
+        artifact_descriptor(&context.paths.partial, "accepted.partial.jsonl")?
+    };
+    let logical_cpus = std::thread::available_parallelism()
+        .map(|value| value.get())
+        .unwrap_or(1);
+
+    Ok(serde_json::json!({
+        "schema_version": "scogo.taskgen.run.v2",
+        "command_version": env!("CARGO_PKG_VERSION"),
+        "run_id": context.run_id,
+        "status": outcome.status,
+        "terminal_error": outcome.terminal_error,
+        "started_at": context.started_at.to_rfc3339(),
+        "completed_at": completed_at.to_rfc3339(),
+        "duration_seconds": duration_seconds,
+        "duration_minutes": duration_minutes,
+        "run_directory": context.paths.run_dir,
+        "taxonomy_id": context.taxonomy.id(),
+        "taxonomy_kind": format!("{:?}", context.taxonomy.kind()).to_ascii_lowercase(),
+        "requested_new_records": context.args.count,
+        "accepted_new_records": accepted,
+        "existing_records": context.existing_records,
+        "final_records": outcome.final_records,
+        "candidate_attempts": candidate_attempts,
+        "rejected_candidates": outcome.stats.errors.load(Ordering::Relaxed),
+        "concurrency": {
+            "acceptance_workers": context.args.workers,
+            "runtime": "tokio-multi-thread",
+            "runtime_worker_threads": runtime_worker_threads(),
+            "logical_cpus": logical_cpus,
+        },
+        "generation": {
+            "model": context.args.model,
+            "endpoint_origin": context.generation_provider.api_base.origin().ascii_serialization(),
+            "input_tokens": outcome.stats.input_tokens.load(Ordering::Relaxed),
+            "output_tokens": outcome.stats.output_tokens.load(Ordering::Relaxed),
+            "priced_cost": generation_cost(outcome.stats, context.args.input_price, context.args.output_price),
+        },
+        "review": {
+            "model": context.review_provider.model,
+            "endpoint_origin": context.review_provider.api_base.origin().ascii_serialization(),
+            "input_tokens": outcome.stats.review_input_tokens.load(Ordering::Relaxed),
+            "output_tokens": outcome.stats.review_output_tokens.load(Ordering::Relaxed),
+            "priced_cost": review_cost(
+                outcome.stats,
+                context.args.review_input_price.or(context.args.input_price),
+                context.args.review_output_price.or(context.args.output_price),
+            ),
+        },
+        "timing": {
+            "generation_total_ms": outcome.generation_requests.total_ms,
+            "review_total_ms": outcome.review_requests.total_ms,
+        },
+        "requests": {
+            "generation": outcome.generation_requests,
+            "review": outcome.review_requests,
+        },
+        "throughput": {
+            "tasks_per_minute": if duration_minutes > 0.0 { accepted as f64 / duration_minutes } else { 0.0 },
+            "candidates_per_minute": if duration_minutes > 0.0 { candidate_attempts as f64 / duration_minutes } else { 0.0 },
+        },
+        "rejections": rejection_summary(&context.paths.rejected)?,
+        "dedup": {
+            "mode": context.args.dedup_mode,
+            "ngram": context.args.dedup_ngram,
+            "jaccard_threshold": context.args.jaccard_threshold,
+            "semantic_threshold": context.args.semantic_threshold,
+            "semantic_model": context.semantic_model_id,
+        },
+        "artifacts": {
+            "tasks": task_artifact,
+            "reviews": artifact_descriptor(&context.paths.reviews, "reviews.jsonl")?,
+            "rejected": artifact_descriptor(&context.paths.rejected, "rejected.jsonl")?,
+            "run": {"file":"run.json"},
+        },
+    }))
+}
+
+fn select_terminal_error(
+    execution_error: Option<String>,
+    signal_reason: Option<&str>,
+    accepted: usize,
+    requested: usize,
+    staged: usize,
+    expected_staged: usize,
+) -> Option<String> {
+    if let Some(signal) = signal_reason {
+        return Some(format!("run interrupted by {signal}"));
+    }
+    execution_error
+        .or_else(|| {
+            (accepted != requested)
+                .then(|| format!("generation accepted {accepted} records, expected {requested}"))
+        })
+        .or_else(|| {
+            (staged != expected_staged).then(|| {
+                format!("staged dataset contains {staged} records, expected {expected_staged}")
+            })
+        })
+}
+
+fn spawn_shutdown_listener(
+    cancel: Arc<AtomicBool>,
+    signal_reason: Arc<std::sync::Mutex<Option<String>>>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        #[cfg(unix)]
+        let reason = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
+            Ok(mut terminate) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => "SIGINT",
+                    _ = terminate.recv() => "SIGTERM",
+                }
+            }
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+                "SIGINT"
+            }
+        };
+        #[cfg(not(unix))]
+        let reason = {
+            let _ = tokio::signal::ctrl_c().await;
+            "SIGINT"
+        };
+
+        *signal_reason.lock().unwrap() = Some(reason.to_string());
+        cancel.store(true, Ordering::Relaxed);
+    })
+}
+
 async fn run_generate(args: GenerateArgs) -> Result<()> {
     use review::CandidateReviewer;
 
+    let started_at = chrono::Utc::now();
+    let started_clock = std::time::Instant::now();
     let taxonomy = match args.taxonomy.as_deref() {
         Some(path) => taxonomy::TaxonomyCatalog::from_path(path)?,
         None => taxonomy::TaxonomyCatalog::embedded_itops()?,
@@ -1837,8 +2115,8 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             None
         };
     let mut dedup_index = dedup::DedupIndex::new(dedup_config.clone(), embedder.clone())?;
-    let existing = if args.append {
-        seed_existing_dedup(&args.output, &mut dedup_index, embedder.as_ref()).await?
+    let existing = if let Some(source) = args.append_from.as_deref() {
+        seed_existing_dedup(source, &mut dedup_index, embedder.as_ref()).await?
     } else {
         0
     };
@@ -1846,10 +2124,6 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         println!("Loaded {existing} existing tasks into the append dedup index");
     }
 
-    let artifacts = artifacts::RunArtifacts::create(&args.output, args.append, args.overwrite)?;
-    let work_dir = artifacts.work_dir().to_path_buf();
-    println!("Run work directory: {}", work_dir.display());
-    let artifacts = Arc::new(std::sync::Mutex::new(Some(artifacts)));
     let dedup_index = Arc::new(std::sync::Mutex::new(dedup_index));
 
     let clients: Arc<Vec<reqwest::Client>> = Arc::new(match &args.proxies {
@@ -1901,21 +2175,51 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         })
         .collect::<Result<_>>()?;
     let slots = Arc::new(slots);
+    let progress_style = ProgressStyle::default_bar()
+        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} | {msg}")?
+        .progress_chars("##-");
+
+    let run_id = format!("{:08x}", rand::random::<u32>());
+    let timestamp = started_at.format("%Y%m%dT%H%M%SZ").to_string();
+    let run_dir = args.run_dir.clone().unwrap_or_else(|| {
+        artifacts::automatic_run_dir(
+            std::path::Path::new("taskgen-runs"),
+            &timestamp,
+            taxonomy.id(),
+            &run_id,
+        )
+    });
+    let initial_report = serde_json::json!({
+        "schema_version": "scogo.taskgen.run.v2",
+        "run_id": run_id,
+        "status": "running",
+        "started_at": started_at.to_rfc3339(),
+        "taxonomy_id": taxonomy.id(),
+        "taxonomy_kind": format!("{:?}", taxonomy.kind()).to_ascii_lowercase(),
+        "requested_new_records": args.count,
+        "concurrency": {
+            "acceptance_workers": args.workers,
+            "runtime": "tokio-multi-thread",
+            "runtime_worker_threads": runtime_worker_threads(),
+            "logical_cpus": std::thread::available_parallelism().map(|value| value.get()).unwrap_or(1),
+        }
+    });
+    let artifacts =
+        artifacts::RunArtifacts::create(&run_dir, args.append_from.as_deref(), &initial_report)?;
+    let run_paths = artifacts.paths().clone();
+    println!("Run directory: {}", run_dir.display());
+    let artifacts = Arc::new(std::sync::Mutex::new(Some(artifacts)));
 
     let stats = Arc::new(AtomicStats::new());
+    let generation_telemetry = Arc::new(telemetry::RequestTelemetry::default());
+    let review_telemetry = Arc::new(telemetry::RequestTelemetry::default());
     let cancel = Arc::new(AtomicBool::new(false));
+    let signal_reason = Arc::new(std::sync::Mutex::new(None));
+    let shutdown_listener = spawn_shutdown_listener(cancel.clone(), signal_reason.clone());
     let consecutive_timeouts = Arc::new(AtomicUsize::new(0));
     let pb = ProgressBar::new(args.count as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template(
-                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} | {msg}",
-            )?
-            .progress_chars("##-"),
-    );
+    pb.set_style(progress_style);
     pb.set_message("waiting for accepted prompts");
-    let started_at = chrono::Utc::now();
-
     let workers = args.workers;
     let results: Vec<Result<()>> = stream::iter(0..args.count)
         .map(|slot_index| {
@@ -1930,6 +2234,8 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             let dedup_index = dedup_index.clone();
             let embedder = embedder.clone();
             let stats = stats.clone();
+            let generation_telemetry = generation_telemetry.clone();
+            let review_telemetry = review_telemetry.clone();
             let cancel = cancel.clone();
             let consecutive_timeouts = consecutive_timeouts.clone();
             let pb = pb.clone();
@@ -1995,6 +2301,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                         cancel: &cancel,
                         consecutive_timeouts: &consecutive_timeouts,
                         progress: &pb,
+                        telemetry: &generation_telemetry,
                     })
                     .await;
                     let (prompt, input_tokens, output_tokens) = match generated {
@@ -2083,6 +2390,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                         effective_review_provider,
                         client.clone(),
                         review_max_output_tokens,
+                        review_telemetry.clone(),
                     )?;
                     let review = match reviewer
                         .review(review::ReviewRequest {
@@ -2191,24 +2499,13 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         .buffer_unordered(workers)
         .collect()
         .await;
+    shutdown_listener.abort();
 
-    if let Some(error) = results.into_iter().find_map(Result::err) {
-        cancel.store(true, Ordering::Relaxed);
-        pb.abandon_with_message("incomplete; final output not published");
-        bail!(
-            "generation incomplete: {error}. Partial audit artifacts retained at {}",
-            work_dir.display()
-        );
-    }
+    let execution_error = results
+        .into_iter()
+        .find_map(Result::err)
+        .map(|error| format!("generation incomplete: {error}"));
     let accepted = stats.tasks.load(Ordering::Relaxed);
-    if accepted != args.count {
-        pb.abandon_with_message("incomplete; final output not published");
-        bail!(
-            "generation accepted {accepted} records, expected {}. Partial artifacts retained at {}",
-            args.count,
-            work_dir.display()
-        );
-    }
     let staged_path = artifacts
         .lock()
         .unwrap()
@@ -2217,41 +2514,60 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         .accepted_path()
         .to_path_buf();
     let staged_count = count_existing_tasks(&staged_path);
-    if staged_count != existing + args.count {
-        pb.abandon_with_message("staged count mismatch; final output not published");
+    let terminal_error = select_terminal_error(
+        execution_error,
+        signal_reason.lock().unwrap().as_deref(),
+        accepted,
+        args.count,
+        staged_count,
+        existing + args.count,
+    );
+    let report_context = GenerationReportContext {
+        run_id: &run_id,
+        started_at,
+        args: &args,
+        taxonomy: &taxonomy,
+        generation_provider: &generation_provider,
+        review_provider: &review_provider,
+        semantic_model_id: effective_semantic_model.model_id(),
+        existing_records: existing,
+        paths: &run_paths,
+    };
+    if let Some(terminal_error) = terminal_error {
+        cancel.store(true, Ordering::Relaxed);
+        pb.abandon_with_message("incomplete; final output not published");
+        let report = generation_run_report(
+            &report_context,
+            GenerationReportOutcome {
+                status: "failed",
+                terminal_error: Some(&terminal_error),
+                elapsed: started_clock.elapsed(),
+                final_records: staged_count,
+                stats: &stats,
+                generation_requests: generation_telemetry.snapshot(),
+                review_requests: review_telemetry.snapshot(),
+            },
+        )?;
+        let run = artifacts.lock().unwrap().take().unwrap();
+        run.finish_incomplete(&report)?;
         bail!(
-            "staged dataset contains {staged_count} records, expected {}. Partial artifacts retained at {}",
-            existing + args.count,
-            work_dir.display()
+            "{terminal_error}. Partial audit artifacts retained at {}",
+            run_dir.display()
         );
     }
 
-    let report = serde_json::json!({
-        "schema_version": "scogo.taskgen.run.v1",
-        "status": "success",
-        "started_at": started_at.to_rfc3339(),
-        "completed_at": chrono::Utc::now().to_rfc3339(),
-        "taxonomy_id": taxonomy.id(),
-        "requested_new_records": args.count,
-        "accepted_new_records": accepted,
-        "existing_records": existing,
-        "final_records": staged_count,
-        "candidate_attempts": stats.attempts.load(Ordering::Relaxed),
-        "rejected_candidates": stats.errors.load(Ordering::Relaxed),
-        "generation_model": args.model,
-        "review_model": review_provider.model,
-        "generation_input_tokens": stats.input_tokens.load(Ordering::Relaxed),
-        "generation_output_tokens": stats.output_tokens.load(Ordering::Relaxed),
-        "review_input_tokens": stats.review_input_tokens.load(Ordering::Relaxed),
-        "review_output_tokens": stats.review_output_tokens.load(Ordering::Relaxed),
-        "dedup": {
-            "mode": args.dedup_mode,
-            "ngram": args.dedup_ngram,
-            "jaccard_threshold": args.jaccard_threshold,
-            "semantic_threshold": args.semantic_threshold,
-            "semantic_model": effective_semantic_model.model_id(),
-        }
-    });
+    let report = generation_run_report(
+        &report_context,
+        GenerationReportOutcome {
+            status: "success",
+            terminal_error: None,
+            elapsed: started_clock.elapsed(),
+            final_records: staged_count,
+            stats: &stats,
+            generation_requests: generation_telemetry.snapshot(),
+            review_requests: review_telemetry.snapshot(),
+        },
+    )?;
     let run = artifacts.lock().unwrap().take().unwrap();
     let published = run.publish(&report)?;
     let final_count = count_existing_tasks(&published.output);
@@ -2612,6 +2928,61 @@ mod tests {
     }
 
     #[test]
+    fn generation_uses_run_directory_and_append_source_contract() {
+        let cli = Cli::try_parse_from([
+            "taskgen",
+            "generate",
+            "--api-key",
+            "test-key",
+            "--run-dir",
+            "runs/netops-001",
+            "--append-from",
+            "existing.jsonl",
+        ])
+        .unwrap();
+        let Command::Generate(args) = cli.command else {
+            panic!("expected generate command");
+        };
+        assert_eq!(args.run_dir, Some(PathBuf::from("runs/netops-001")));
+        assert_eq!(args.append_from, Some(PathBuf::from("existing.jsonl")));
+        assert!(
+            Cli::try_parse_from([
+                "taskgen",
+                "generate",
+                "--api-key",
+                "test-key",
+                "--output",
+                "legacy.jsonl",
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn generation_rejects_zero_count_and_zero_workers() {
+        for args in [
+            ["taskgen", "generate", "--api-key", "x", "--count", "0"],
+            ["taskgen", "generate", "--api-key", "x", "--workers", "0"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
+    }
+
+    #[test]
+    fn signal_reason_overrides_secondary_slot_cancellation_error() {
+        let reason = select_terminal_error(
+            Some("generation incomplete: slot cancelled".into()),
+            Some("SIGTERM"),
+            3,
+            10,
+            3,
+            10,
+        )
+        .unwrap();
+        assert_eq!(reason, "run interrupted by SIGTERM");
+    }
+
+    #[test]
     fn readme_documents_netops_and_atif_contracts() {
         let readme = include_str!("../README.md");
         for required in [
@@ -2883,7 +3254,7 @@ mod tests {
             .await;
 
         let temp = tempfile::tempdir().unwrap();
-        let output = temp.path().join("tasks.jsonl");
+        let run_dir = temp.path().join("run-001");
         let cli = Cli::try_parse_from([
             "taskgen",
             "generate",
@@ -2903,8 +3274,8 @@ mod tests {
             "lexical",
             "--max-attempts-per-slot",
             "5",
-            "--output",
-            output.to_str().unwrap(),
+            "--run-dir",
+            run_dir.to_str().unwrap(),
         ])
         .unwrap();
         let Command::Generate(args) = cli.command else {
@@ -2912,8 +3283,14 @@ mod tests {
         };
         run_generate(*args).await.unwrap();
 
-        let paths = artifacts::PublishedPaths::for_output(&output).unwrap();
-        assert_eq!(std::fs::read_to_string(&output).unwrap().lines().count(), 2);
+        let paths = artifacts::PublishedPaths::for_run_dir(&run_dir);
+        assert_eq!(
+            std::fs::read_to_string(&paths.output)
+                .unwrap()
+                .lines()
+                .count(),
+            2
+        );
         assert_eq!(
             std::fs::read_to_string(paths.reviews)
                 .unwrap()
@@ -2932,7 +3309,112 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(paths.run).unwrap()).unwrap();
         assert_eq!(report["accepted_new_records"], 2);
         assert_eq!(report["final_records"], 2);
-        assert!(generations.load(Ordering::SeqCst) >= 3);
-        assert!(reviews.load(Ordering::SeqCst) >= 3);
+        assert_eq!(report["status"], "success");
+        assert_eq!(report["concurrency"]["acceptance_workers"], 2);
+        assert!(report["started_at"].as_str().is_some());
+        assert!(report["completed_at"].as_str().is_some());
+        assert!(report["duration_seconds"].as_f64().unwrap() >= 0.0);
+        assert!(report["duration_minutes"].as_f64().unwrap() >= 0.0);
+        assert!(report["throughput"]["tasks_per_minute"].as_f64().unwrap() >= 0.0);
+        assert!(report["timing"]["generation_total_ms"].as_u64().is_some());
+        assert!(report["timing"]["review_total_ms"].as_u64().is_some());
+        let generation_calls = generations.load(Ordering::SeqCst);
+        let review_calls = reviews.load(Ordering::SeqCst);
+        assert_eq!(
+            report["requests"]["generation"]["requests"],
+            generation_calls
+        );
+        assert_eq!(report["requests"]["review"]["requests"], review_calls);
+        assert_eq!(
+            report["rejections"]["by_reason"]["ambiguous_or_unanswerable"],
+            1
+        );
+        assert_eq!(report["artifacts"]["tasks"]["file"], "tasks.jsonl");
+        assert_eq!(
+            report["artifacts"]["tasks"]["sha256"]
+                .as_str()
+                .unwrap()
+                .len(),
+            64
+        );
+        assert!(generation_calls >= 3);
+        assert!(review_calls >= 3);
+    }
+
+    #[tokio::test]
+    async fn failed_generation_finishes_report_and_keeps_partial_artifacts() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+        #[derive(Clone)]
+        struct FailingReviewer;
+
+        impl Respond for FailingReviewer {
+            fn respond(&self, request: &Request) -> ResponseTemplate {
+                let body = String::from_utf8_lossy(&request.body);
+                if body.contains("Review this prompt seed") {
+                    return ResponseTemplate::new(400).set_body_string("review unavailable");
+                }
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices":[{"finish_reason":"stop","message":{"content":
+                        "Latency changed after maintenance and two read-only telemetry sources disagree; which evidence should the on-call collect next?"
+                    }}],
+                    "usage":{"prompt_tokens":20,"completion_tokens":12}
+                }))
+            }
+        }
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(FailingReviewer)
+            .mount(&server)
+            .await;
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("failed-run");
+        let cli = Cli::try_parse_from([
+            "taskgen",
+            "generate",
+            "--api-base",
+            &format!("{}/v1", server.uri()),
+            "--api-key",
+            "test-key",
+            "--model",
+            "test-model",
+            "--taxonomy",
+            "docs/netops-taxonomy.yaml",
+            "--count",
+            "1",
+            "--workers",
+            "1",
+            "--dedup-mode",
+            "lexical",
+            "--max-attempts-per-slot",
+            "1",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+        ])
+        .unwrap();
+        let Command::Generate(args) = cli.command else {
+            panic!("expected generate command");
+        };
+
+        assert!(run_generate(*args).await.is_err());
+        let paths = artifacts::PublishedPaths::for_run_dir(&run_dir);
+        assert!(!paths.output.exists());
+        assert!(paths.partial.exists());
+        assert!(paths.reviews.exists());
+        assert!(paths.rejected.exists());
+        let report: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(paths.run).unwrap()).unwrap();
+        assert_eq!(report["status"], "failed");
+        assert!(report["completed_at"].as_str().is_some());
+        assert!(report["duration_seconds"].as_f64().unwrap() >= 0.0);
+        assert!(
+            report["terminal_error"]
+                .as_str()
+                .unwrap()
+                .contains("exhausted")
+        );
     }
 }
