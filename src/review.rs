@@ -335,13 +335,17 @@ async fn request_structured_once(
         "messages": [
             {"role": "system", "content": system_content},
             {"role": "user", "content": user_content}
-        ],
-        "max_completion_tokens": max_output_tokens
+        ]
     });
-    if !restricted_sampling(&provider.model) {
+    if restricted_sampling(&provider.model) {
+        body["max_completion_tokens"] = json!(max_output_tokens);
+    } else {
+        body["max_tokens"] = json!(max_output_tokens);
         body["temperature"] = json!(0.0);
     }
     apply_model_reasoning_controls(&provider.model, &mut body);
+    apply_model_response_schema(&provider.model, &mut body, operation)
+        .map_err(ReviewAttemptError::Fatal)?;
     let url = format!(
         "{}/chat/completions",
         provider.api_base.as_str().trim_end_matches('/')
@@ -697,10 +701,82 @@ fn restricted_sampling(model: &str) -> bool {
 
 fn apply_model_reasoning_controls(model: &str, body: &mut Value) {
     let model = model.to_ascii_lowercase();
-    if model.contains("qwen") {
+    if model.contains("qwen") || model.contains("deepseek-v4") {
         body["enable_thinking"] = json!(false);
         body["thinking_budget"] = json!(0);
-        body["reasoning_effort"] = json!("low");
+        body["reasoning_effort"] = json!("none");
+        body["include_reasoning"] = json!(false);
+        body["chat_template_kwargs"] = json!({
+            "enable_thinking": false,
+            "thinking": false
+        });
+    }
+}
+
+fn apply_model_response_schema(model: &str, body: &mut Value, operation: &str) -> Result<()> {
+    if !model.to_ascii_lowercase().contains("deepseek-v4") {
+        return Ok(());
+    }
+    let (name, raw_schema) = match operation {
+        "review" => (
+            "prompt_review_v3",
+            include_str!("../schemas/prompt-review-v3.schema.json"),
+        ),
+        "adjudication" => (
+            "prompt_adjudication_v1",
+            include_str!("../schemas/prompt-adjudication-v1.schema.json"),
+        ),
+        other => bail!("unsupported structured review operation: {other}"),
+    };
+    let mut schema: Value = serde_json::from_str(raw_schema)
+        .with_context(|| format!("failed to parse bundled {operation} JSON schema"))?;
+    relax_vllm_decoder_schema(&mut schema);
+    body["response_format"] = json!({
+        "type": "json_schema",
+        "json_schema": {
+            "name": name,
+            "schema": schema
+        }
+    });
+    Ok(())
+}
+
+fn relax_vllm_decoder_schema(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            for unsupported in [
+                "$schema",
+                "$id",
+                "title",
+                "allOf",
+                "if",
+                "then",
+                "else",
+                "uniqueItems",
+            ] {
+                object.remove(unsupported);
+            }
+            for child in object.values_mut() {
+                relax_vllm_decoder_schema(child);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                relax_vllm_decoder_schema(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+fn schema_contains_key(value: &Value, key: &str) -> bool {
+    match value {
+        Value::Object(object) => {
+            object.contains_key(key) || object.values().any(|child| schema_contains_key(child, key))
+        }
+        Value::Array(items) => items.iter().any(|item| schema_contains_key(item, key)),
+        _ => false,
     }
 }
 
@@ -835,13 +911,53 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_v4_review_preserves_endpoint_reasoning_defaults() {
+    fn deepseek_v4_review_uses_bounded_direct_structured_output() {
         let mut body = json!({});
         apply_model_reasoning_controls("deepseek-v4-flash-0731", &mut body);
+        apply_model_response_schema("deepseek-v4-flash-0731", &mut body, "review").unwrap();
 
-        assert!(body.get("include_reasoning").is_none());
-        assert!(body.get("reasoning_effort").is_none());
-        assert!(body.get("thinking_token_budget").is_none());
+        assert_eq!(body["enable_thinking"], false);
+        assert_eq!(body["thinking_budget"], 0);
+        assert_eq!(body["reasoning_effort"], "none");
+        assert_eq!(body["include_reasoning"], false);
+        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+        assert_eq!(body["chat_template_kwargs"]["thinking"], false);
+        assert_eq!(body["response_format"]["type"], "json_schema");
+        assert_eq!(
+            body["response_format"]["json_schema"]["name"],
+            "prompt_review_v3"
+        );
+        assert!(
+            body["response_format"]["json_schema"]["schema"]
+                .get("allOf")
+                .is_none()
+        );
+        assert!(!schema_contains_key(
+            &body["response_format"]["json_schema"]["schema"],
+            "uniqueItems"
+        ));
+    }
+
+    #[test]
+    fn deepseek_v4_adjudication_uses_its_own_schema() {
+        let mut body = json!({});
+        apply_model_response_schema("deepseek-v4-flash-0731", &mut body, "adjudication").unwrap();
+        assert_eq!(
+            body["response_format"]["json_schema"]["name"],
+            "prompt_adjudication_v1"
+        );
+        assert!(
+            body["response_format"]["json_schema"]["schema"]
+                .get("allOf")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn other_review_models_do_not_force_vllm_response_format() {
+        let mut body = json!({});
+        apply_model_response_schema("gpt-4o-mini", &mut body, "review").unwrap();
+        assert!(body.get("response_format").is_none());
     }
 
     #[tokio::test]

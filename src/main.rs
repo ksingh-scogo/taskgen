@@ -16,6 +16,7 @@ use rand::SeedableRng;
 use rand::prelude::*;
 use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 pub mod artifacts;
@@ -786,6 +787,10 @@ struct ChatRequest {
     reasoning_effort: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     include_reasoning: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_template_kwargs: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stop: Option<Vec<String>>,
     /// Omniroute/GPT-5 default to SSE unless this is explicit.
     stream: bool,
 }
@@ -802,6 +807,10 @@ fn restricted_sampling(model: &str) -> bool {
         || name.starts_with("o4")
 }
 
+fn is_deepseek_v4(model: &str) -> bool {
+    model.to_ascii_lowercase().contains("deepseek-v4")
+}
+
 fn chat_request(
     model: &str,
     messages: Vec<ChatMessage>,
@@ -810,10 +819,19 @@ fn chat_request(
 ) -> ChatRequest {
     let normalized_model = model.to_ascii_lowercase();
     let is_qwen = normalized_model.contains("qwen");
-    let enable_thinking = is_qwen.then_some(false);
+    let deepseek_v4 = is_deepseek_v4(model);
+    let bounded_direct = is_qwen || deepseek_v4;
+    let enable_thinking = bounded_direct.then_some(false);
     let thinking_budget = enable_thinking.map(|_| 0);
-    let reasoning_effort = is_qwen.then(|| "low".to_string());
-    let include_reasoning = None;
+    let reasoning_effort = bounded_direct.then(|| "none".to_string());
+    let include_reasoning = bounded_direct.then_some(false);
+    let chat_template_kwargs = bounded_direct.then(|| {
+        json!({
+            "enable_thinking": false,
+            "thinking": false
+        })
+    });
+    let stop = deepseek_v4.then(|| vec!["<END_TASK>".to_string()]);
     if restricted_sampling(model) {
         ChatRequest {
             model: model.to_string(),
@@ -825,6 +843,8 @@ fn chat_request(
             thinking_budget,
             reasoning_effort,
             include_reasoning,
+            chat_template_kwargs,
+            stop,
             stream: false,
         }
     } else {
@@ -838,6 +858,8 @@ fn chat_request(
             thinking_budget,
             reasoning_effort,
             include_reasoning,
+            chat_template_kwargs,
+            stop,
             stream: false,
         }
     }
@@ -963,6 +985,12 @@ fn validate_generated_prompt(prompt: &str) -> Result<()> {
         bail!("generated content contains model planning instead of a standalone prompt");
     }
     let word_count = trimmed.split_whitespace().count();
+    if word_count < 15 {
+        bail!("generated prompt is too short for an operational task ({word_count} words)");
+    }
+    if !matches!(trimmed.chars().last(), Some('.' | '!' | '?')) {
+        bail!("generated prompt does not end with terminal punctuation");
+    }
     if word_count > 800 {
         bail!("generated prompt exceeds the 800-word limit ({word_count} words)");
     }
@@ -983,7 +1011,9 @@ fn generation_max_output_tokens(model: &str, requested: Option<u64>) -> u64 {
     let normalized_model = model.to_ascii_lowercase();
     if let Some(requested) = requested {
         requested
-    } else if normalized_model.contains("qwen") || normalized_model.contains("deepseek-v4") {
+    } else if normalized_model.contains("deepseek-v4") {
+        2048
+    } else if normalized_model.contains("qwen") {
         4096
     } else {
         2048
@@ -1616,6 +1646,10 @@ async fn generate_task(
     let user_msg = model_user_message(model, &task_message);
     let system = if model.to_ascii_lowercase().contains("qwen") {
         format!("{system_prompt}\n/no_think")
+    } else if is_deepseek_v4(model) {
+        format!(
+            "{system_prompt}\n\nKeep the final standalone task under 400 words. After its final sentence and terminal punctuation, emit the exact marker <END_TASK>. The API removes that marker from the returned prompt. Do not emit anything after it."
+        )
     } else {
         system_prompt.to_string()
     };
@@ -1648,7 +1682,8 @@ async fn generate_task(
         match api_request(client, &url, api_key, &body).await {
             Ok(result) => {
                 consecutive_availability_failures.store(0, Ordering::Relaxed);
-                if let Err(error) = validate_generated_prompt(&result.0) {
+                let prompt = result.0.trim().to_string();
+                if let Err(error) = validate_generated_prompt(&prompt) {
                     telemetry.record_error(
                         request_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
                     );
@@ -1667,7 +1702,7 @@ async fn generate_task(
                 telemetry.record_success(
                     request_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
                 );
-                return Ok(result);
+                return Ok((prompt, result.1, result.2));
             }
             Err(ApiError::RateLimit(retry_after)) => {
                 telemetry.record_rate_limit(
@@ -3997,23 +4032,31 @@ mod tests {
             serde_json::to_value(chat_request("qwen/qwen3.8-max-free", vec![], 0.9, 2048)).unwrap();
         assert_eq!(qwen["enable_thinking"], false);
         assert_eq!(qwen["thinking_budget"], 0);
-        assert_eq!(qwen["reasoning_effort"], "low");
+        assert_eq!(qwen["reasoning_effort"], "none");
+        assert_eq!(qwen["chat_template_kwargs"]["enable_thinking"], false);
+        assert_eq!(qwen["chat_template_kwargs"]["thinking"], false);
 
         let other = serde_json::to_value(chat_request("gpt-4o-mini", vec![], 0.9, 2048)).unwrap();
         assert!(other.get("enable_thinking").is_none());
         assert!(other.get("thinking_budget").is_none());
         assert!(other.get("reasoning_effort").is_none());
+        assert!(other.get("chat_template_kwargs").is_none());
     }
 
     #[test]
-    fn deepseek_v4_request_preserves_endpoint_reasoning_defaults() {
+    fn deepseek_v4_request_uses_bounded_direct_generation() {
         let request =
             serde_json::to_value(chat_request("deepseek-v4-flash-0731", vec![], 0.2, 2048))
                 .unwrap();
 
-        assert!(request.get("include_reasoning").is_none());
-        assert!(request.get("reasoning_effort").is_none());
-        assert!(request.get("thinking_token_budget").is_none());
+        assert_eq!(request["enable_thinking"], false);
+        assert_eq!(request["thinking_budget"], 0);
+        assert_eq!(request["reasoning_effort"], "none");
+        assert_eq!(request["include_reasoning"], false);
+        assert_eq!(request["chat_template_kwargs"]["enable_thinking"], false);
+        assert_eq!(request["chat_template_kwargs"]["thinking"], false);
+        assert!(request.get("response_format").is_none());
+        assert_eq!(request["stop"][0], "<END_TASK>");
     }
 
     #[test]
@@ -4024,7 +4067,7 @@ mod tests {
         );
         assert_eq!(
             generation_max_output_tokens("deepseek-v4-flash-0731", None),
-            4096
+            2048
         );
         assert_eq!(generation_max_output_tokens("gpt-4o-mini", None), 2048);
     }
@@ -4107,7 +4150,14 @@ mod tests {
                 .is_err()
         );
         assert!(validate_generated_prompt(&vec!["word"; 801].join(" ")).is_err());
-        assert!(validate_generated_prompt("Investigate why the BGP session is flapping.").is_ok());
+        assert!(validate_generated_prompt("Investigate why the BGP session is flapping").is_err());
+        assert!(validate_generated_prompt("?").is_err());
+        assert!(
+            validate_generated_prompt(
+                "Investigate why the supplied BGP session fixture is flapping, separate observations from hypotheses, request the missing live routing state, and provide a read-only verification plan."
+            )
+            .is_ok()
+        );
     }
 
     #[test]
