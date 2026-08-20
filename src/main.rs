@@ -1219,6 +1219,21 @@ fn is_billing_error(status: reqwest::StatusCode, body: &str) -> bool {
         || lower.contains("budget")
 }
 
+fn transport_error_diagnostic(error: &reqwest::Error) -> String {
+    let mut diagnostic = error.to_string();
+    let mut source = std::error::Error::source(error);
+    for _ in 0..8 {
+        let Some(cause) = source else { break };
+        let cause_message = cause.to_string();
+        if !diagnostic.contains(&cause_message) {
+            diagnostic.push_str(": ");
+            diagnostic.push_str(&cause_message);
+        }
+        source = cause.source();
+    }
+    diagnostic
+}
+
 async fn api_request(
     client: &reqwest::Client,
     url: &str,
@@ -1240,7 +1255,7 @@ async fn api_request(
             if e.is_timeout() {
                 return Err(ApiError::Timeout);
             }
-            return Err(ApiError::Transport(e.to_string()));
+            return Err(ApiError::Transport(transport_error_diagnostic(&e)));
         }
     };
 
@@ -3057,7 +3072,15 @@ mod tests {
         )
         .await;
 
-        assert!(matches!(result, Err(ApiError::Transport(_))));
+        let Err(ApiError::Transport(message)) = result else {
+            panic!("expected transport error");
+        };
+        assert!(
+            message.to_ascii_lowercase().contains("connection refused")
+                || message.contains("os error 61"),
+            "transport diagnostic omitted the socket cause: {message}"
+        );
+        assert!(!message.contains("test-key"), "{message}");
     }
 
     #[test]
