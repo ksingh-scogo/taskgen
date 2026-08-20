@@ -114,7 +114,7 @@ New generation flags:
 | `--taxonomy <FILE>` | Load and validate a runtime taxonomy. When omitted, use the embedded general IT Ops taxonomy. |
 | `--system-prompt-file <FILE>` | Read the complete system prompt as UTF-8. Mutually exclusive with `--system-prompt`. |
 | `--seed <U64>` | Optional reproducible coordinate sampling seed. It does not make remote model output deterministic. |
-| `--max-output-tokens <N>` | Optional positive provider completion-token budget. Defaults to 2048, or 4096 for Qwen models whose private reasoning may consume this budget. |
+| `--max-output-tokens <N>` | Optional positive provider completion-token budget. Defaults to 2048, or 4096 for Qwen and DeepSeek-v4. DeepSeek-v4 generation disables hidden reasoning; its reviewer uses bounded low reasoning and a separate 4096-token default. |
 
 System-prompt precedence is:
 

@@ -107,6 +107,14 @@ pub fn normalize_api_base(raw: &str) -> Result<Url> {
     Ok(url)
 }
 
+pub fn redact_provider_text(text: &str, credential: &str) -> String {
+    if credential.is_empty() {
+        text.to_string()
+    } else {
+        text.replace(credential, "[REDACTED]")
+    }
+}
+
 pub fn resolve_review_provider(
     generation: &ProviderConfig,
     review: ProviderOverrides,

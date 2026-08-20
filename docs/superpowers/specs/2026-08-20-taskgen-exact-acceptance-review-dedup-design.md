@@ -2,7 +2,7 @@
 
 Date: 2026-08-20
 
-Status: implemented and live-canary verified on 2026-08-20
+Status: implemented; subject-preserving repair amendment added on 2026-08-20
 
 Branch: `codex/netops-taxonomy-atif` from `origin/master`
 
@@ -18,7 +18,7 @@ A successful command must publish exactly `N` new records that pass all of these
 4. a separate model-based operational-quality review; and
 5. a final atomic dedup check at acceptance time.
 
-If any candidate fails a gate, Taskgen records the rejection and generates a replacement for the same pre-sampled task coordinate. If the configured attempt limit, budget, provider availability, local semantic model, output I/O, or shutdown signal prevents Taskgen from reaching `N`, the command exits non-zero and does not publish an incomplete final output as a success.
+If any candidate fails a gate, Taskgen records the rejection. It first repairs the rejected artifact using the review findings. When the repair budget is exhausted, it recomposes the operational axes for the same category/domain/subdomain subject and language. If the configured attempt limit, budget, provider availability, local semantic model, output I/O, or shutdown signal prevents Taskgen from reaching `N`, the command exits non-zero and does not publish an incomplete final output as a success.
 
 The quality contract is therefore:
 
@@ -41,7 +41,7 @@ Included:
 - port the useful behavior of `scripts/dedup_jsonl.py` into Rust;
 - make deduplication part of acceptance so dropped duplicates are replaced;
 - retain a standalone Rust dedup command for already-generated JSONL;
-- preserve the requested taxonomy distribution by retrying the same sampled coordinate;
+- preserve the sampled category/domain/subdomain distribution while allowing bounded operational-axis recomposition;
 - publish the final output atomically only after the exact accepted count is reached;
 - retain accepted-review, rejection, and run-summary audit artifacts;
 - apply the same architecture to the unified compositional IT Ops and NetOps taxonomy schema.
@@ -135,20 +135,21 @@ FastEmbed documents local ONNX inference, both selected built-in models, cosine-
 
 The implementation is accepted only if release builds remain valid for the repository's Linux ARM64 and macOS ARM64 targets. A dependency or native-runtime failure on either target blocks completion; it is not silently downgraded to lexical-only dedup.
 
-### 3.4 The sampled coordinate, not the failed text, owns a slot
+### 3.4 The sampled subject, not the failed text, owns a slot
 
-Taskgen pre-samples exactly `N` coordinate slots using the selected taxonomy, distribution, difficulty distribution, language mode, and seed. Each slot remains pending until one candidate for that same coordinate is accepted.
+Taskgen deterministically samples one category/domain/subdomain subject and language per slot. Slots are sampled lazily so very large requested counts do not require preallocating all coordinates. Each slot remains pending until a candidate for that subject is accepted. The initial candidate and `--max-repairs-per-coordinate` repair attempts use one operational coordinate. The next attempt recomposes task family, environment, platform scope/platforms, incident mechanism, evidence condition/bundle, action risk, difficulty, and presentation while preserving the subject and language. A slot tracks every attempted composition and bounded resampling must return an unseen tuple.
 
 ```text
-slot 17: sampled coordinates
-  attempt 1 -> reviewer reject
-  attempt 2 -> semantic duplicate
-  attempt 3 -> accepted
+slot 17: sampled subject
+  coordinate A attempt 1 -> reviewer reject
+  coordinate A repair 1  -> reviewer reject
+  coordinate A repair 2  -> reviewer reject
+  coordinate B attempt 1 -> accepted
 ```
 
-This preserves the requested coordinate distribution. Top-up by sampling brand-new coordinates is rejected because it allows hard coordinates to disappear and distorts the original sample.
+This preserves hard-subject coverage while preventing one pathological operational coordinate from consuming all 20 attempts. Top-up by sampling a brand-new subject remains rejected because it allows hard domains or subdomains to disappear. If the subject has no unseen composition, Taskgen fails that slot early rather than repeating the tuple or changing the subject.
 
-`--max-attempts-per-slot` defaults to `20`. Provider-level transient retries do not consume a new candidate attempt until the request either yields a candidate or reaches its transport retry limit. Every generated candidate that fails validation, review, or dedup consumes one slot attempt.
+`--max-attempts-per-slot` defaults to `20` and `--max-repairs-per-coordinate` defaults to `2`. Provider-level transient retries do not consume a new candidate attempt until the request either yields a candidate or reaches its transport retry limit. Every generated candidate that fails validation, review, or dedup consumes one slot attempt.
 
 ### 3.5 Final output is an atomic success artifact
 
@@ -163,11 +164,11 @@ Successful publication creates:
 <run-dir>/run.json
 ```
 
-`run.json` begins with `status: running`. On success, sidecars are flushed and the staged accepted dataset is atomically renamed to `tasks.jsonl`; the report is then atomically updated to `success`.
+`run.json` begins with `status: running`. Artifact journals use bounded buffered flushes during generation. On success, task/review/rejection files are flushed and synced, every staged task is schema-validated and counted, and the final success report is completely serialized and synced to a temporary file. Taskgen then atomically renames the staged dataset to `tasks.jsonl`, syncs the run directory, commits the prepared report, and syncs the directory again. A report-commit failure rolls the dataset back to `accepted.partial.jsonl`.
 
 On failure, the same directory retains `accepted.partial.jsonl`, all audit events, and a terminal `status: failed` report. Partial data is never presented as `tasks.jsonl`.
 
-For `--append-from <FILE>`, `-c N` means `N` additional accepted records. Taskgen loads the source file into the validation and dedup indexes and creates a new run containing the existing records plus the `N` new records. The source is never modified. Existing records do not count toward `N`; a new candidate that duplicates an existing record is rejected and replaced.
+For `--append-from <FILE>`, `-c N` means `N` additional accepted records. Taskgen validates every source row and loads it into the dedup index before creating a run containing the existing records plus the `N` new records. A duplicate already present in the append source is a preflight error. The source is never modified. Existing records do not count toward `N`; a new candidate that duplicates an existing record is rejected and replaced.
 
 ## 4. Command-line contract
 
@@ -224,9 +225,10 @@ New and changed generation flags:
 | `--review-keyfile <FILE>` | none | Reviewer credentials, one per line, round-robin |
 | `--review-system-prompt <TEXT>` | taxonomy/built-in | Complete inline reviewer prompt |
 | `--review-system-prompt-file <FILE>` | taxonomy/built-in | Complete UTF-8 reviewer prompt file |
-| `--review-max-output-tokens <N>` | `1024`; `4096` for Qwen | Positive reviewer completion-token limit |
+| `--review-max-output-tokens <N>` | `1024`; `4096` for Qwen/DeepSeek-v4 | Positive reviewer completion-token limit |
 | `--request-timeout-seconds <N>` | `120` | Positive per-generation/review HTTP request timeout |
 | `--max-attempts-per-slot <N>` | `20` | Positive candidate-attempt ceiling per coordinate slot |
+| `--max-repairs-per-coordinate <N>` | `2` | Repairs before recomposing operational axes for the same subject |
 | `--dedup-mode <MODE>` | `semantic` | `semantic` or `lexical`; dedup cannot be disabled |
 | `--jaccard-threshold <F>` | `0.80` | Inclusive lexical duplicate threshold in `[0,1]` |
 | `--semantic-threshold <F>` | `0.90` | Inclusive cosine duplicate threshold in `[0,1]` |
@@ -314,6 +316,8 @@ The reviewer receives:
 - a strict instruction to reject unsupported assertions while accepting tasks that deliberately require live evidence, tool calls, or abstention before a diagnosis.
 
 The reviewer does not receive API credentials, previous hidden reasoning, or the teacher system prompt.
+
+Reviewer rejection is evidence-bound: a rejection must identify a specific material defect and locate the offending claim. Lack of external lookup, possible vendor variation, or reviewer uncertainty alone is not a rejection reason. Plausible claims framed for live-tool verification remain valid evidence-seeking tasks. Deterministic normalization of overlong reviewer explanations is recorded in accepted/rejected audit events.
 
 ### 6.2 Required checks
 
@@ -473,7 +477,7 @@ attempt/budget/provider/I/O/shutdown exhaustion -> RETAIN_WORKDIR -> NONZERO
 
 The progress bar advances on accepted slots, not attempted candidates. Its message reports accepted, pending, rejected by gate, candidate attempts, and token/cost totals.
 
-The generator may use the previous review `retry_guidance` for the same slot only. Dedup rejections provide a neutral instruction to produce a materially different incident while preserving every sampled coordinate; they do not paste a complete accepted prompt into the next generation request.
+The generator receives the rejected prompt, review summary, and `retry_guidance` as clearly delimited untrusted feedback. The generation system prompt and mandatory coordinates remain authoritative. Dedup rejections receive the rejected duplicate plus a neutral instruction to produce a materially different incident.
 
 ## 9. Audit artifacts
 
@@ -518,10 +522,10 @@ The quality-review form includes the parsed reviewer decision. Invalid JSONL in 
 - run ID, start/end timestamps, duration seconds/minutes, command version, taxonomy ID and kind;
 - acceptance-worker count, Tokio runtime-worker count, and logical CPU count;
 - requested new count, existing count, accepted new count, and published total;
-- sampled and accepted coordinate distributions;
+- accepted category/domain/subdomain/difficulty and operational-coordinate distributions;
 - total candidate attempts and attempts per slot;
 - rejection counts by gate and reason;
-- generation and review model/endpoint-origin configuration;
+- generation and review model/endpoint-origin configuration, including the effective dynamic free-model inventory;
 - generation and review token usage and priced cost;
 - generation/review request counts, retries, 429s, timeouts, errors, and aggregate request time;
 - tasks-per-minute and candidates-per-minute throughput;
@@ -583,7 +587,7 @@ Implementation is incomplete until all of these pass.
 - Jaccard and cosine threshold boundaries are inclusive;
 - deterministic dedup survivor selection;
 - acceptance coordinator prevents a concurrent duplicate race;
-- same sampled coordinate is reused after every rejection;
+- repair attempts retain one coordinate and exhausted repair budgets recompose axes without changing category/domain/subdomain/language;
 - accepted progress cannot exceed or stop below `N` on success.
 
 ### 12.2 Integration tests with fake providers

@@ -17,7 +17,7 @@ taskgen generate -c N
   => no partial final dataset is published on failure
 ```
 
-`-c N` is not a request for N model attempts. Taskgen pre-samples N immutable taxonomy coordinate slots and retries each rejected slot until it receives an accepted replacement or `--max-attempts-per-slot` is exhausted. This preserves the sampled distribution instead of silently dropping hard subjects.
+`-c N` is not a request for N model attempts. Taskgen samples N subject slots lazily. A rejected prompt is repaired with the rejected artifact plus the review summary and guidance. After the configured repair budget, Taskgen recomposes the operational axes while preserving category, domain, subdomain, and language, and it never retries an already-attempted composition for that slot. If a subject has no unseen composition, the run fails early instead of silently dropping the hard subject or burning model calls on the same tuple.
 
 The model reviewer is an auditable gate, not an infallible source of truth. Its model, prompt, token usage, decisions, rejection reasons, and retry guidance are retained in sidecars.
 
@@ -64,7 +64,7 @@ taskgen taxonomy validate --taxonomy docs/it-ops-taxonomy.yaml
 taskgen taxonomy validate --taxonomy docs/netops-taxonomy.yaml
 ```
 
-Validation rejects v1/hierarchical taxonomies, duplicate or unknown IDs, unreachable coordinate combinations, invalid platform cardinality, empty eligible sets, and invalid weights.
+Validation rejects v1/hierarchical taxonomies, duplicate or unknown IDs, unreachable coordinate combinations, invalid platform cardinality, empty eligible sets, and invalid weights. Eligibility resolves from subdomain to domain to category to the global catalog. A subdomain may narrow any axis and may declare an exact `platforms` allow-list; exact platforms must belong to its resolved platform groups.
 
 ## Generate prompts
 
@@ -159,11 +159,11 @@ data/runs/netops-001/
 └── run.json
 ```
 
-`run.json` is created with `status: running` before generation and atomically updated to `success` or `failed`. `tasks.jsonl` exists only after the exact accepted count is reached. Incomplete runs retain `accepted.partial.jsonl`, reviews, rejections, and their terminal report in the same directory.
+`run.json` is created with `status: running` before generation and atomically updated to `success` or `failed`. `tasks.jsonl` exists only after every staged row passes the task schema and the exact accepted count is reached. Success publication pre-serializes the final report and rolls the task rename back if the report cannot be committed. Incomplete runs retain `accepted.partial.jsonl`, reviews, rejections, and their terminal report in the same directory.
 
 `--append-from <FILE> -c N` creates a new run containing the source records plus exactly N newly accepted records. The source dataset is never modified, and its records are loaded into the dedup index so new candidates cannot duplicate them.
 
-The report records start/end timestamps, duration in seconds and minutes, acceptance-worker concurrency, Tokio runtime threads, logical CPUs, request timing, retries, 429s, timeouts, rejection reasons, throughput, token usage, sanitized endpoint origins, and artifact size/SHA-256 metadata. It never records credentials.
+The report records start/end timestamps, duration in seconds and minutes, the effective coordinate seed, effective generation/review models, acceptance-worker concurrency, Tokio runtime threads, logical CPUs, request timing, retries, 429s, timeouts, rejection reasons, coordinate recompositions, candidate acceptance efficiency, accepted coordinate distributions, throughput, token usage, sanitized endpoint origins, and artifact size/SHA-256 metadata. It never records credentials.
 
 ### Prompt record
 
@@ -206,11 +206,12 @@ Every final line validates against `schemas/task-v2.schema.json`:
 | `-w, --workers <N>` | `5` | Concurrent coordinate slots |
 | `--request-timeout-seconds <N>` | `120` | Per generation/review HTTP request timeout |
 | `--max-attempts-per-slot <N>` | `20` | Candidate ceiling for each slot |
+| `--max-repairs-per-coordinate <N>` | `2` | Repairs before recomposing axes for the same subject |
 | `--review-model <MODEL>` | generation model | Separate review-call model |
 | `--review-api-base <URL>` | generation endpoint | Reviewer provider endpoint |
 | `--review-api-key <KEY>` | inherited on same endpoint | Reviewer credential |
 | `--review-keyfile <FILE>` | none | Reviewer keys, round-robin |
-| `--review-max-output-tokens <N>` | `1024` (`4096` for Qwen) | Reviewer completion limit |
+| `--review-max-output-tokens <N>` | `1024` (`4096` for Qwen/DeepSeek-v4) | Reviewer completion limit |
 | `--dedup-mode <MODE>` | `semantic` | `semantic` or `lexical` |
 | `--jaccard-threshold <F>` | `0.80` | Inclusive lexical threshold |
 | `--semantic-threshold <F>` | `0.90` | Inclusive cosine threshold |
@@ -221,11 +222,11 @@ Every final line validates against `schemas/task-v2.schema.json`:
 | `--append-from <FILE>` | none | Seed a new run from an existing dataset and add exactly N records |
 | `--multilingual` | off | Sample one of eight languages |
 
-GPT-5, o-series, and Luna request bodies omit unsupported sampling fields. Qwen requests use no/low-thinking controls, provider reasoning fields are discarded, and only final prompt content enters the dataset. Empty, truncated, overlong, or exposed-planning completions are rejected and replaced.
+GPT-5, o-series, and Luna request bodies omit unsupported sampling fields. Qwen generation uses no/low-thinking controls. DeepSeek-v4 generation disables hidden reasoning for latency and uses a 4096-token default, while DeepSeek-v4 review uses bounded low reasoning to improve technical discrimination. Provider reasoning fields and raw successful response bodies are never stored; only final prompt or review content is parsed. Empty, truncated, overlong, or exposed-planning completions are rejected and replaced. A length-truncated completion is not retried unchanged: later slot attempts carry persistent at-most-300-word guidance while retaining the exact-count contract.
 
 ### Throughput tuning
 
-Keep review enabled for production datasets. To improve throughput, first use a fast independent non-reasoning reviewer, then raise `--workers` gradually while watching `requests.*.rate_limits` in `run.json`. Separate generation and review endpoints avoid sharing one provider quota. A higher worker count does not help when it produces sustained 429s; reduce concurrency or use a provider route with higher limits. Reducing technical-review rejections can also outperform raw concurrency because each rejected candidate requires another generation and review cycle.
+Keep review enabled for production datasets. To improve throughput, first calibrate a fast independent reviewer, then raise `--workers` gradually while watching `requests.*.rate_limits` and `efficiency.*` in `run.json`. Separate generation and review endpoints avoid sharing one provider quota. A higher worker count does not help after the serving engine reaches its sequence or token-throughput capacity. Lowering genuine rejection and coordinate-recomposition rates usually saves more time than blind retries because every rejected candidate costs both a generation and a review call. Artifact journals flush in bounded batches and are fully flushed and synced before final validation/publication.
 
 ## Standalone Rust dedup
 

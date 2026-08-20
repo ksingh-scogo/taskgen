@@ -101,6 +101,11 @@ platform_groups:
       - {id: a10_thunder, label: A10 Thunder, weight: 0.10}
       - {id: traefik, label: Traefik, weight: 0.08}
       - {id: cloudflare, label: Cloudflare, weight: 0.08}
+  - id: sdn_virtualization
+    weight: 1.0
+    platforms:
+      - {id: cisco_aci, label: Cisco ACI, weight: 0.50}
+      - {id: vmware_nsx, label: VMware NSX, weight: 0.50}
   - id: cloud
     weight: 1.0
     platforms:
@@ -369,7 +374,7 @@ categories:
           environments: [campus, branch, hybrid, remote_access, enterprise_wireless, ot, edge, lab_staging]
           incident_mechanisms: [misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, control_plane_failure, software_defect, certificate_identity_failure, observability_gap, multi_fault]
           evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, config_oper_state, topology_state, multi_source, ticket_runbook, iac_diff_plan, intentionally_missing]
-        subdomains: [dot1x, mac_auth_bypass, eap_methods, radius, nac_certificates, posture, profiling, guest_byod, dynamic_vlan_assignment, downloadable_acl, quarantine, change_of_authorization, supplicant, switch_ap_integration, identity_sources, fail_open_fail_closed, tacacs_device_admin, security_group_tags, microsegmentation, iot_onboarding, nac_policy_drift, nac_high_availability]
+        subdomains: [dot1x, mac_auth_bypass, {id: eap_methods, eligibility: {platform_groups: [nac, wireless]}}, radius, nac_certificates, posture, profiling, guest_byod, dynamic_vlan_assignment, downloadable_acl, quarantine, change_of_authorization, supplicant, switch_ap_integration, identity_sources, fail_open_fail_closed, tacacs_device_admin, security_group_tags, microsegmentation, iot_onboarding, nac_policy_drift, nac_high_availability]
       - id: application_delivery
         label: Application Delivery
         weight: 0.04
@@ -378,16 +383,16 @@ categories:
           environments: [data_center, hybrid, cloud, multicloud, kubernetes, edge, lab_staging]
           incident_mechanisms: [misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, control_plane_failure, data_plane_failure, asymmetric_path, convergence_failure, software_defect, certificate_identity_failure, capacity_oversubscription, external_provider_failure, observability_gap, multi_fault]
           evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, config_oper_state, topology_state, multi_source, ticket_runbook, iac_diff_plan, intentionally_missing]
-        subdomains: [l4_l7_load_balancing, pools_members, health_monitors, balancing_algorithms, persistence_stickiness, tls_termination_reencrypt, certificate_chain_sni, http2_http3, reverse_proxy, waf_integration, gslb, dns_load_balancing, anycast_delivery, ingress_api_gateway, connection_draining, rate_limiting, header_rewriting, source_ip_proxy_protocol, websocket, grpc, content_switching, autoscaling_capacity, adc_high_availability, config_sync]
+        subdomains: [l4_l7_load_balancing, pools_members, health_monitors, balancing_algorithms, persistence_stickiness, tls_termination_reencrypt, certificate_chain_sni, http2_http3, reverse_proxy, waf_integration, gslb, dns_load_balancing, anycast_delivery, ingress_api_gateway, connection_draining, rate_limiting, header_rewriting, source_ip_proxy_protocol, websocket, grpc, content_switching, autoscaling_capacity, adc_high_availability, {id: config_sync, eligibility: {platform_groups: [application_delivery]}}]
       - id: datacenter_fabric
         label: Data Center Fabric
         weight: 0.03
         eligibility:
-          platform_groups: [routing_switching, open_networking, ai_hpc]
+          platform_groups: [routing_switching, open_networking, ai_hpc, sdn_virtualization]
           environments: [data_center, hybrid, cloud, multicloud, ai_hpc, lab_staging]
           incident_mechanisms: [physical_degradation, misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, control_plane_failure, data_plane_failure, asymmetric_path, convergence_failure, software_defect, capacity_oversubscription, observability_gap, multi_fault]
           evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, routing_tables, config_oper_state, topology_state, multi_source, iac_diff_plan, intentionally_missing]
-        subdomains: [leaf_spine, evpn_vxlan_control_plane, l2_l3_vni, anycast_gateway, bgp_underlay, evpn_route_types, evpn_multihoming_esi, mlag_vpc, fabric_mtu, fabric_ecmp, border_leaf, data_center_interconnect, vrf_route_leaking, multicast_replication, arp_suppression, endpoint_mobility, fabric_automation_controller, aci_policy, storage_fabric_integration, fabric_convergence, fabric_maintenance_upgrade]
+        subdomains: [leaf_spine, evpn_vxlan_control_plane, l2_l3_vni, anycast_gateway, bgp_underlay, evpn_route_types, evpn_multihoming_esi, mlag_vpc, fabric_mtu, fabric_ecmp, border_leaf, data_center_interconnect, vrf_route_leaking, multicast_replication, arp_suppression, endpoint_mobility, fabric_automation_controller, {id: aci_policy, eligibility: {platform_scopes: [single_platform], platforms: [cisco_aci]}}, storage_fabric_integration, fabric_convergence, fabric_maintenance_upgrade]
       - id: cloud_hybrid_networking
         label: Cloud and Hybrid Networking
         weight: 0.07
@@ -405,16 +410,16 @@ categories:
           environments: [data_center, hybrid, cloud, multicloud, kubernetes, edge, lab_staging]
           incident_mechanisms: [misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, control_plane_failure, data_plane_failure, asymmetric_path, convergence_failure, software_defect, certificate_identity_failure, capacity_oversubscription, observability_gap, multi_fault]
           evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, routing_tables, config_oper_state, topology_state, multi_source, ticket_runbook, iac_diff_plan, intentionally_missing]
-        subdomains: [cni_lifecycle, pod_ipam, clusterip_services, kube_proxy_iptables_ipvs_nft, networkpolicy, ingress, gateway_api, service_loadbalancer, coredns, overlay_underlay, kubernetes_mtu, node_to_pod, pod_to_pod, kubernetes_egress_nat, kubernetes_dual_stack, service_mesh, sidecar_ambient_mesh, mesh_mtls, multicluster_networking, bgp_service_advertisement, cilium_ebpf, calico, cloud_cni_prefix_delegation, endpoint_slices, hairpin_hostnetwork, kubernetes_network_observability]
+        subdomains: [cni_lifecycle, pod_ipam, clusterip_services, kube_proxy_iptables_ipvs_nft, networkpolicy, ingress, gateway_api, service_loadbalancer, coredns, overlay_underlay, kubernetes_mtu, node_to_pod, pod_to_pod, kubernetes_egress_nat, kubernetes_dual_stack, service_mesh, sidecar_ambient_mesh, mesh_mtls, multicluster_networking, bgp_service_advertisement, {id: cilium_ebpf, eligibility: {platform_scopes: [single_platform], platforms: [cilium]}}, {id: calico, eligibility: {platform_scopes: [single_platform], platforms: [calico]}}, {id: cloud_cni_prefix_delegation, eligibility: {platform_scopes: [single_platform], platforms: [aws_vpc_cni]}}, endpoint_slices, hairpin_hostnetwork, kubernetes_network_observability]
       - id: sdn_network_virtualization
         label: SDN and Network Virtualization
         weight: 0.03
         eligibility:
-          platform_groups: [routing_switching, open_networking, cloud, automation_observability]
+          platform_groups: [routing_switching, open_networking, cloud, automation_observability, sdn_virtualization]
           environments: [campus, branch, data_center, hybrid, cloud, multicloud, kubernetes, edge, lab_staging]
           incident_mechanisms: [misconfiguration, configuration_drift, resource_exhaustion, protocol_state_failure, policy_conflict, dependency_failure, control_plane_failure, data_plane_failure, asymmetric_path, convergence_failure, software_defect, observability_gap, multi_fault]
           evidence_bundles: [config_only, telemetry_timeseries, logs_events, packet_capture, routing_tables, config_oper_state, topology_state, multi_source, iac_diff_plan, intentionally_missing]
-        subdomains: [controller_availability, northbound_southbound_apis, openflow, netconf_yang, gnmi, sdn_overlays, vmware_nsx, aci_controller, intent_policy, network_virtualization, distributed_routing, overlay_gateways, vtep, tenant_isolation, controller_state_reconciliation, policy_compilation, service_insertion, virtual_switches_ovs, sdn_upgrades, controller_telemetry]
+        subdomains: [controller_availability, northbound_southbound_apis, openflow, netconf_yang, gnmi, sdn_overlays, {id: vmware_nsx, eligibility: {platform_scopes: [single_platform], platforms: [vmware_nsx]}}, {id: aci_controller, eligibility: {platform_scopes: [single_platform], platforms: [cisco_aci]}}, intent_policy, network_virtualization, distributed_routing, overlay_gateways, vtep, tenant_isolation, controller_state_reconciliation, policy_compilation, service_insertion, virtual_switches_ovs, sdn_upgrades, controller_telemetry]
       - id: network_performance_qos
         label: Network Performance and QoS
         weight: 0.04

@@ -9,6 +9,8 @@ use serde_json::{Value, json};
 use crate::provider::ProviderConfig;
 use crate::schema::{self, SchemaKind};
 
+const REVIEW_TEXT_MAX_CHARS: usize = 800;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ReviewVerdict {
@@ -47,6 +49,10 @@ pub struct ReviewDecision {
 
 impl ReviewDecision {
     pub fn parse_and_validate(raw: &str) -> Result<Self> {
+        Self::parse_and_validate_with_metadata(raw).map(|(decision, _)| decision)
+    }
+
+    fn parse_and_validate_with_metadata(raw: &str) -> Result<(Self, ReviewNormalization)> {
         let trimmed = raw.trim();
         let json_text = if trimmed.starts_with("```") {
             let start = trimmed
@@ -59,11 +65,41 @@ impl ReviewDecision {
         } else {
             trimmed
         };
-        let value: Value = serde_json::from_str(json_text).context("invalid review JSON")?;
+        let mut value: Value = serde_json::from_str(json_text).context("invalid review JSON")?;
+        let normalization = ReviewNormalization {
+            summary_truncated: clip_string_field(&mut value, "summary", REVIEW_TEXT_MAX_CHARS),
+            retry_guidance_truncated: clip_string_field(
+                &mut value,
+                "retry_guidance",
+                REVIEW_TEXT_MAX_CHARS,
+            ),
+        };
         schema::validate_instance(SchemaKind::PromptReview, &value)
             .context("review JSON failed schema validation")?;
-        serde_json::from_value(value).context("invalid review decision")
+        let decision = serde_json::from_value(value).context("invalid review decision")?;
+        Ok((decision, normalization))
     }
+}
+
+fn clip_string_field(value: &mut Value, field: &str, max_chars: usize) -> bool {
+    let Some(slot) = value.get_mut(field) else {
+        return false;
+    };
+    let Some(text) = slot.as_str() else {
+        return false;
+    };
+    if text.chars().count() <= max_chars {
+        return false;
+    }
+    let clipped = text.chars().take(max_chars).collect::<String>();
+    *slot = Value::String(clipped);
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReviewNormalization {
+    pub summary_truncated: bool,
+    pub retry_guidance_truncated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +113,7 @@ pub struct ReviewRequest {
 #[derive(Debug, Clone)]
 pub struct ReviewResult {
     pub decision: ReviewDecision,
+    pub normalization: ReviewNormalization,
     pub model: String,
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -164,11 +201,7 @@ impl ReviewClient {
         if !restricted_sampling(&self.provider.model) {
             body["temperature"] = json!(0.0);
         }
-        if self.provider.model.to_ascii_lowercase().contains("qwen") {
-            body["enable_thinking"] = json!(false);
-            body["thinking_budget"] = json!(0);
-            body["reasoning_effort"] = json!("low");
-        }
+        apply_model_reasoning_controls(&self.provider.model, &mut body);
         let url = format!(
             "{}/chat/completions",
             self.provider.api_base.as_str().trim_end_matches('/')
@@ -212,6 +245,7 @@ impl ReviewClient {
                 anyhow::anyhow!(error).context("failed to read review response"),
             )
         })?;
+        let raw = crate::provider::redact_provider_text(&raw, credential.expose());
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             self.telemetry
                 .record_rate_limit(elapsed_millis(started.elapsed()));
@@ -231,13 +265,14 @@ impl ReviewClient {
                 Err(ReviewAttemptError::Fatal(error))
             };
         }
-        let parsed = (|| -> Result<(Value, ReviewDecision)> {
+        let parsed = (|| -> Result<(Value, ReviewDecision, ReviewNormalization)> {
             let payload: Value = serde_json::from_str(&raw).context("invalid review API JSON")?;
             let content = extract_content(&payload)?;
-            let decision = ReviewDecision::parse_and_validate(&content)?;
-            Ok((payload, decision))
+            let (decision, normalization) =
+                ReviewDecision::parse_and_validate_with_metadata(&content)?;
+            Ok((payload, decision, normalization))
         })();
-        let (payload, decision) = match parsed {
+        let (payload, decision, normalization) = match parsed {
             Ok(value) => value,
             Err(error) => {
                 self.telemetry
@@ -250,6 +285,7 @@ impl ReviewClient {
         let usage = payload.get("usage").cloned().unwrap_or(Value::Null);
         Ok(ReviewResult {
             decision,
+            normalization,
             model: self.provider.model.clone(),
             input_tokens: usage
                 .get("prompt_tokens")
@@ -340,9 +376,52 @@ fn restricted_sampling(model: &str) -> bool {
         || name.starts_with("o4")
 }
 
+fn apply_model_reasoning_controls(model: &str, body: &mut Value) {
+    let model = model.to_ascii_lowercase();
+    if model.contains("qwen") {
+        body["enable_thinking"] = json!(false);
+        body["thinking_budget"] = json!(0);
+        body["reasoning_effort"] = json!("low");
+    } else if model.contains("deepseek-v4") {
+        body["include_reasoning"] = json!(false);
+        body["reasoning_effort"] = json!("low");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundled_review_prompts_state_schema_string_limits() {
+        for prompt in [
+            include_str!("../prompts/itops-prompt-review-system-v2.txt"),
+            include_str!("../prompts/netops-prompt-review-system-v2.txt"),
+        ] {
+            assert!(prompt.contains("summary must be 1 to 800 characters"));
+            assert!(prompt.contains("retry_guidance must be at most 800 characters"));
+        }
+    }
+
+    #[test]
+    fn netops_review_prompt_allows_clearly_normalized_generic_evidence() {
+        let prompt = include_str!("../prompts/netops-prompt-review-system-v2.txt");
+        assert!(prompt.contains("SD-WAN controllers and edges"));
+        assert!(prompt.contains("Do not reject these generic concepts merely because"));
+    }
+
+    #[test]
+    fn bundled_review_prompts_require_concrete_defects_instead_of_epistemic_rejection() {
+        for prompt in [
+            include_str!("../prompts/itops-prompt-review-system-v2.txt"),
+            include_str!("../prompts/netops-prompt-review-system-v2.txt"),
+        ] {
+            assert!(prompt.contains("Do not reject merely because you lack external lookup"));
+            assert!(
+                prompt.contains("A rejection must identify at least one specific material defect")
+            );
+        }
+    }
 
     #[test]
     fn accepted_review_has_no_reasons_or_retry_guidance() {
@@ -381,10 +460,39 @@ mod tests {
     }
 
     #[test]
+    fn clips_overlong_explanatory_fields_before_schema_validation() {
+        let raw = serde_json::json!({
+            "schema_version": "scogo.taskgen.prompt-review.v1",
+            "verdict": "reject",
+            "reason_codes": ["coordinate_mismatch"],
+            "summary": "s".repeat(1025),
+            "retry_guidance": "r".repeat(901),
+        })
+        .to_string();
+
+        let (decision, normalization) =
+            ReviewDecision::parse_and_validate_with_metadata(&raw).unwrap();
+        assert_eq!(decision.summary.chars().count(), 800);
+        assert_eq!(decision.retry_guidance.chars().count(), 800);
+        assert!(normalization.summary_truncated);
+        assert!(normalization.retry_guidance_truncated);
+    }
+
+    #[test]
     fn restricted_review_models_are_detected_without_provider_prefix() {
         assert!(restricted_sampling("openai/gpt-5.4"));
         assert!(restricted_sampling("scogoai/gpt-5.6-luna-max"));
         assert!(!restricted_sampling("qwen/qwen3.8-max-free"));
+    }
+
+    #[test]
+    fn deepseek_v4_review_uses_bounded_hidden_reasoning() {
+        let mut body = json!({});
+        apply_model_reasoning_controls("deepseek-v4-flash-0731", &mut body);
+
+        assert_eq!(body["include_reasoning"], false);
+        assert_eq!(body["reasoning_effort"], "low");
+        assert!(body.get("thinking_token_budget").is_none());
     }
 
     #[tokio::test]

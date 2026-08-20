@@ -464,9 +464,10 @@ Migration rules:
 4. use uniform domains within each category initially, matching current sampling;
 5. map category-level eligibility from the category's operational scope;
 6. add narrower domain overrides for platform groups, environments, task families, evidence bundles, and action risks where broad defaults would create invalid combinations;
-7. convert OEM/ISV product lines into platform eligibility while retaining product-specific task coverage;
-8. validate that every category/domain/subdomain is reachable by sampling;
-9. produce a machine-readable migration report proving no category, domain label, or subdomain was lost.
+7. allow subdomain overrides for every eligibility axis plus an exact `platforms` allow-list when a technology is vendor-bound;
+8. convert OEM/ISV product lines into platform eligibility while retaining product-specific task coverage;
+9. validate that every category/domain/subdomain is reachable by sampling;
+10. produce a machine-readable migration report proving no category, domain label, or subdomain was lost.
 
 The migration report contains:
 
@@ -552,11 +553,15 @@ The taxonomy-specific reviewer verifies coordinate fidelity and rejects implausi
 Static validation proves:
 
 - category/domain/subdomain membership;
-- coordinate membership and eligibility;
-- platform group membership and platform-scope cardinality;
-- difficulty bounds;
+- coordinate membership and subdomain-to-domain-to-category eligibility precedence;
+- exact subdomain platform allow-lists remain inside resolved platform groups;
+- platform group membership, supported platform-scope identifiers, and positive-weight platform capacity;
+- every resolved axis has positive sampling weight;
+- task-family difficulty bounds intersect a positive-weight default difficulty;
 - complete non-empty prompt content;
 - schema shape.
+
+CLI category overrides must include every category exactly once. CLI difficulty overrides are checked against every positive-weight task family reachable from every positive-weight selected category before the run directory or any provider request is created.
 
 Model review remains responsible for semantic authenticity, causality, product syntax, evidence coherence, and operational realism.
 

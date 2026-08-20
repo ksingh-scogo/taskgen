@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
+const ARTIFACT_FLUSH_INTERVAL: usize = 256;
+
 #[derive(Debug, Clone)]
 pub struct PublishedPaths {
     pub run_dir: PathBuf,
@@ -57,6 +59,9 @@ pub struct RunArtifacts {
     accepted: BufWriter<File>,
     reviews: BufWriter<File>,
     rejected: BufWriter<File>,
+    accepted_since_flush: usize,
+    reviews_since_flush: usize,
+    rejected_since_flush: usize,
 }
 
 impl RunArtifacts {
@@ -105,6 +110,9 @@ impl RunArtifacts {
             accepted,
             reviews,
             rejected,
+            accepted_since_flush: 0,
+            reviews_since_flush: 0,
+            rejected_since_flush: 0,
         })
     }
 
@@ -118,28 +126,86 @@ impl RunArtifacts {
 
     pub fn write_accepted_line(&mut self, line: &str) -> Result<()> {
         writeln!(self.accepted, "{}", line.trim_end())?;
-        self.accepted.flush()?;
+        self.accepted_since_flush += 1;
+        if self.accepted_since_flush >= ARTIFACT_FLUSH_INTERVAL {
+            self.accepted.flush()?;
+            self.accepted_since_flush = 0;
+        }
         Ok(())
     }
 
     pub fn write_review<T: Serialize>(&mut self, value: &T) -> Result<()> {
         serde_json::to_writer(&mut self.reviews, value)?;
         self.reviews.write_all(b"\n")?;
-        self.reviews.flush()?;
+        self.reviews_since_flush += 1;
+        if self.reviews_since_flush >= ARTIFACT_FLUSH_INTERVAL {
+            self.reviews.flush()?;
+            self.reviews_since_flush = 0;
+        }
         Ok(())
     }
 
     pub fn write_rejection<T: Serialize>(&mut self, value: &T) -> Result<()> {
         serde_json::to_writer(&mut self.rejected, value)?;
         self.rejected.write_all(b"\n")?;
-        self.rejected.flush()?;
+        self.rejected_since_flush += 1;
+        if self.rejected_since_flush >= ARTIFACT_FLUSH_INTERVAL {
+            self.rejected.flush()?;
+            self.rejected_since_flush = 0;
+        }
         Ok(())
     }
 
     pub fn publish<T: Serialize>(mut self, report: &T) -> Result<PublishedPaths> {
         self.flush()?;
-        fs::rename(&self.accepted_path, &self.published.output)?;
-        write_json_atomic(&self.published.run, report)?;
+        let report_temporary = write_json_temporary(&self.published.run, report)?;
+        if let Err(error) = fs::rename(&self.accepted_path, &self.published.output) {
+            let _ = fs::remove_file(&report_temporary);
+            return Err(error.into());
+        }
+        if let Err(sync_error) = sync_directory(&self.published.run_dir) {
+            let rollback_errors = rollback_publication(&self.published, None);
+            let _ = fs::remove_file(&report_temporary);
+            return publication_error(
+                "failed to sync published tasks",
+                sync_error,
+                rollback_errors,
+            );
+        }
+
+        let running_report_backup = self.published.run_dir.join(".run.json.running");
+        if let Err(backup_error) = copy_and_sync(&self.published.run, &running_report_backup) {
+            let rollback_errors = rollback_publication(&self.published, None);
+            let _ = fs::remove_file(&report_temporary);
+            let _ = fs::remove_file(&running_report_backup);
+            return publication_error(
+                "failed to preserve the running report",
+                backup_error,
+                rollback_errors,
+            );
+        }
+        if let Err(report_error) = fs::rename(&report_temporary, &self.published.run) {
+            let rollback_errors = rollback_publication(&self.published, None);
+            let _ = fs::remove_file(&report_temporary);
+            let _ = fs::remove_file(&running_report_backup);
+            return publication_error(
+                "failed to publish run report",
+                report_error,
+                rollback_errors,
+            );
+        }
+        if let Err(sync_error) = sync_directory(&self.published.run_dir) {
+            let rollback_errors =
+                rollback_publication(&self.published, Some(&running_report_backup));
+            let _ = fs::remove_file(&report_temporary);
+            return publication_error(
+                "failed to durably commit published tasks and report",
+                sync_error,
+                rollback_errors,
+            );
+        }
+        let _ = fs::remove_file(&running_report_backup);
+        let _ = sync_directory(&self.published.run_dir);
         Ok(self.published)
     }
 
@@ -149,30 +215,119 @@ impl RunArtifacts {
         Ok(self.published)
     }
 
-    fn flush(&mut self) -> Result<()> {
+    pub fn flush(&mut self) -> Result<()> {
         self.accepted.flush()?;
         self.reviews.flush()?;
         self.rejected.flush()?;
+        self.accepted.get_ref().sync_all()?;
+        self.reviews.get_ref().sync_all()?;
+        self.rejected.get_ref().sync_all()?;
+        self.accepted_since_flush = 0;
+        self.reviews_since_flush = 0;
+        self.rejected_since_flush = 0;
         Ok(())
     }
 }
 
 fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    let temporary = write_json_temporary(path, value)?;
+    fs::rename(&temporary, path)?;
+    sync_directory(path.parent().unwrap_or_else(|| Path::new(".")))?;
+    Ok(())
+}
+
+fn write_json_temporary<T: Serialize>(path: &Path, value: &T) -> Result<PathBuf> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let temporary = parent.join(".run.json.tmp");
-    let mut writer = BufWriter::new(File::create(&temporary)?);
-    serde_json::to_writer_pretty(&mut writer, value)?;
-    writer.write_all(b"\n")?;
-    writer.flush()?;
-    drop(writer);
-    fs::rename(&temporary, path)?;
-    Ok(())
+    let result = (|| -> Result<()> {
+        let mut writer = BufWriter::new(File::create(&temporary)?);
+        serde_json::to_writer_pretty(&mut writer, value)?;
+        writer.write_all(b"\n")?;
+        writer.flush()?;
+        writer.get_ref().sync_all()?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    Ok(temporary)
+}
+
+fn sync_directory(path: &Path) -> Result<()> {
+    File::open(path)
+        .with_context(|| format!("failed to open artifact directory: {}", path.display()))?
+        .sync_all()
+        .with_context(|| format!("failed to sync artifact directory: {}", path.display()))
+}
+
+fn copy_and_sync(source: &Path, destination: &Path) -> Result<()> {
+    fs::copy(source, destination).with_context(|| {
+        format!(
+            "failed to copy {} to {}",
+            source.display(),
+            destination.display()
+        )
+    })?;
+    File::open(destination)
+        .with_context(|| format!("failed to open report backup: {}", destination.display()))?
+        .sync_all()
+        .with_context(|| format!("failed to sync report backup: {}", destination.display()))?;
+    sync_directory(destination.parent().unwrap_or_else(|| Path::new(".")))
+}
+
+fn rollback_publication(
+    paths: &PublishedPaths,
+    running_report_backup: Option<&Path>,
+) -> Vec<String> {
+    let mut errors = Vec::new();
+    if paths.output.exists()
+        && let Err(error) = fs::rename(&paths.output, &paths.partial)
+    {
+        errors.push(format!("failed to restore partial tasks: {error}"));
+    }
+    if let Some(backup) = running_report_backup
+        && backup.exists()
+        && let Err(error) = fs::rename(backup, &paths.run)
+    {
+        errors.push(format!("failed to restore running report: {error}"));
+    }
+    if let Err(error) = sync_directory(&paths.run_dir) {
+        errors.push(format!("failed to sync publication rollback: {error:#}"));
+    }
+    errors
+}
+
+fn publication_error(
+    operation: &str,
+    error: impl std::fmt::Display,
+    rollback_errors: Vec<String>,
+) -> Result<PublishedPaths> {
+    if rollback_errors.is_empty() {
+        bail!("{operation}: {error}");
+    }
+    bail!(
+        "{operation}: {error}; rollback errors: {}",
+        rollback_errors.join("; ")
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Serializer;
     use serde_json::json;
+
+    struct FailingReport;
+
+    impl Serialize for FailingReport {
+        fn serialize<S>(&self, _serializer: S) -> std::result::Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            Err(serde::ser::Error::custom("intentional report failure"))
+        }
+    }
 
     #[test]
     fn automatic_run_directory_is_timestamped_and_taxonomy_specific() {
@@ -187,6 +342,24 @@ mod tests {
             path,
             PathBuf::from("taskgen-runs/20260820T143501Z-scogo-enterprise-netops-v2-a81f9c2d")
         );
+    }
+
+    #[test]
+    fn report_failure_never_publishes_final_tasks() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("report-failure");
+        let initial = json!({"status":"running"});
+        let mut run = RunArtifacts::create(&run_dir, None, &initial).unwrap();
+        run.write_accepted_line(r#"{"prompt":"valid staged record"}"#)
+            .unwrap();
+
+        assert!(run.publish(&FailingReport).is_err());
+        assert!(!run_dir.join("tasks.jsonl").exists());
+        assert!(run_dir.join("accepted.partial.jsonl").exists());
+        assert!(!run_dir.join(".run.json.tmp").exists());
+        let report: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(run_dir.join("run.json")).unwrap()).unwrap();
+        assert_eq!(report["status"], "running");
     }
 
     #[test]
@@ -244,6 +417,38 @@ mod tests {
         for path in [paths.output, paths.reviews, paths.rejected, paths.run] {
             assert_eq!(path.parent(), Some(run_dir.as_path()));
         }
+    }
+
+    #[test]
+    fn batched_artifact_writes_are_fully_flushed_at_completion() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("batched-run");
+        let mut artifacts =
+            RunArtifacts::create(&run_dir, None, &json!({"status":"running"})).unwrap();
+        for index in 0..(ARTIFACT_FLUSH_INTERVAL + 17) {
+            artifacts
+                .write_accepted_line(&format!(r#"{{"prompt":"accepted-{index}"}}"#))
+                .unwrap();
+            artifacts.write_review(&json!({"index":index})).unwrap();
+            artifacts.write_rejection(&json!({"index":index})).unwrap();
+        }
+
+        let paths = artifacts
+            .finish_incomplete(&json!({"status":"failed"}))
+            .unwrap();
+        let expected = ARTIFACT_FLUSH_INTERVAL + 17;
+        assert_eq!(
+            fs::read_to_string(paths.partial).unwrap().lines().count(),
+            expected
+        );
+        assert_eq!(
+            fs::read_to_string(paths.reviews).unwrap().lines().count(),
+            expected
+        );
+        assert_eq!(
+            fs::read_to_string(paths.rejected).unwrap().lines().count(),
+            expected
+        );
     }
 
     #[test]
