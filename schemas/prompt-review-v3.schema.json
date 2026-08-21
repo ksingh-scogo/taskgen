@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scogo.ai/schemas/taskgen-prompt-review-v3.schema.json",
+  "title": "Scogo Taskgen Prompt Review v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "outcome",
+    "checks",
+    "hard_failures",
+    "claims_requiring_verification",
+    "summary",
+    "retry_guidance"
+  ],
+  "properties": {
+    "schema_version": {"const": "scogo.taskgen.prompt-review.v3"},
+    "outcome": {"enum": ["accept", "revise", "reject", "needs_verification"]},
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "coordinate_realization",
+        "internal_consistency",
+        "operational_quality",
+        "safety",
+        "technical_authenticity"
+      ],
+      "properties": {
+        "coordinate_realization": {"$ref": "#/$defs/check"},
+        "internal_consistency": {"$ref": "#/$defs/check"},
+        "operational_quality": {"$ref": "#/$defs/check"},
+        "safety": {"$ref": "#/$defs/check"},
+        "technical_authenticity": {"$ref": "#/$defs/check"}
+      }
+    },
+    "hard_failures": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 8,
+      "items": {"$ref": "#/$defs/hard_failure"}
+    },
+    "claims_requiring_verification": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 8,
+      "items": {"$ref": "#/$defs/verification_claim"}
+    },
+    "summary": {"type": "string", "minLength": 1, "maxLength": 800},
+    "retry_guidance": {"type": "string", "maxLength": 800}
+  },
+  "$defs": {
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "rationale", "evidence_paths"],
+      "properties": {
+        "status": {"enum": ["pass", "fail", "unknown"]},
+        "rationale": {"type": "string", "minLength": 1, "maxLength": 500},
+        "evidence_paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 12,
+          "items": {"type": "string", "minLength": 1, "maxLength": 200}
+        }
+      }
+    },
+    "hard_failure": {
+      "enum": [
+        "technical_inaccuracy",
+        "invented_platform_feature",
+        "invalid_command_or_syntax",
+        "protocol_or_architecture_error",
+        "unsupported_causality",
+        "numerical_or_temporal_inconsistency",
+        "internal_contradiction",
+        "coordinate_mismatch",
+        "insufficient_or_invalid_evidence",
+        "not_operational",
+        "unsafe_or_unapproved_change",
+        "hidden_answer_or_solution_leakage",
+        "scope_violation",
+        "ambiguous_or_unanswerable"
+      ]
+    },
+    "verification_claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "claim", "candidate_evidence_paths", "reference_query"],
+      "properties": {
+        "claim_id": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$"},
+        "claim": {"type": "string", "minLength": 1, "maxLength": 500},
+        "candidate_evidence_paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 12,
+          "items": {"type": "string", "minLength": 1, "maxLength": 200}
+        },
+        "reference_query": {"type": "string", "minLength": 1, "maxLength": 300}
+      }
+    },
+    "all_pass_checks": {
+      "type": "object",
+      "properties": {
+        "coordinate_realization": {"properties": {"status": {"const": "pass"}}},
+        "internal_consistency": {"properties": {"status": {"const": "pass"}}},
+        "operational_quality": {"properties": {"status": {"const": "pass"}}},
+        "safety": {"properties": {"status": {"const": "pass"}}},
+        "technical_authenticity": {"properties": {"status": {"const": "pass"}}}
+      }
+    },
+    "any_failed_check": {
+      "anyOf": [
+        {"properties": {"coordinate_realization": {"properties": {"status": {"const": "fail"}}}}},
+        {"properties": {"internal_consistency": {"properties": {"status": {"const": "fail"}}}}},
+        {"properties": {"operational_quality": {"properties": {"status": {"const": "fail"}}}}},
+        {"properties": {"safety": {"properties": {"status": {"const": "fail"}}}}},
+        {"properties": {"technical_authenticity": {"properties": {"status": {"const": "fail"}}}}}
+      ]
+    },
+    "any_unknown_check": {
+      "anyOf": [
+        {"properties": {"coordinate_realization": {"properties": {"status": {"const": "unknown"}}}}},
+        {"properties": {"internal_consistency": {"properties": {"status": {"const": "unknown"}}}}},
+        {"properties": {"operational_quality": {"properties": {"status": {"const": "unknown"}}}}},
+        {"properties": {"safety": {"properties": {"status": {"const": "unknown"}}}}},
+        {"properties": {"technical_authenticity": {"properties": {"status": {"const": "unknown"}}}}}
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"outcome": {"const": "accept"}}},
+      "then": {
+        "properties": {
+          "checks": {"$ref": "#/$defs/all_pass_checks"},
+          "hard_failures": {"maxItems": 0},
+          "claims_requiring_verification": {"maxItems": 0},
+          "retry_guidance": {"maxLength": 0}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"outcome": {"const": "revise"}}},
+      "then": {
+        "properties": {
+          "checks": {"$ref": "#/$defs/any_failed_check"},
+          "hard_failures": {"maxItems": 0},
+          "claims_requiring_verification": {"maxItems": 0},
+          "retry_guidance": {"minLength": 1}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"outcome": {"const": "reject"}}},
+      "then": {
+        "properties": {
+          "checks": {"$ref": "#/$defs/any_failed_check"},
+          "hard_failures": {"minItems": 1},
+          "claims_requiring_verification": {"maxItems": 0},
+          "retry_guidance": {"minLength": 1}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"outcome": {"const": "needs_verification"}}},
+      "then": {
+        "properties": {
+          "checks": {"$ref": "#/$defs/any_unknown_check"},
+          "hard_failures": {"maxItems": 0},
+          "claims_requiring_verification": {"minItems": 1},
+          "retry_guidance": {"maxLength": 0}
+        }
+      }
+    }
+  ]
+}

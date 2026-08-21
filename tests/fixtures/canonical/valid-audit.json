@@ -1,0 +1,220 @@
+{
+  "schema_version": "scogo.netops.teacher-trajectory.audit.v1",
+  "record_kind": "accepted",
+  "sample_id": "sample-bgp-001",
+  "trajectory_id": "trajectory-bgp-001",
+  "task": {
+    "prompt_id": "prompt-bgp-001",
+    "prompt_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "prompt": "Investigate a suspected BGP route leak using read-only evidence before proposing a bounded repair.",
+    "taxonomy_id": "scogo-enterprise-netops-v2",
+    "coordinates": {
+      "taxonomy_id": "scogo-enterprise-netops-v2",
+      "category_id": "enterprise_netops",
+      "task_family": "troubleshooting_rca",
+      "environment": "hybrid",
+      "platform_scope": "multi_platform",
+      "platforms": ["cisco_ios_xe", "juniper_junos"],
+      "incident_mechanism": "misconfiguration",
+      "evidence_condition": "contradictory",
+      "evidence_bundle": "routing_tables",
+      "action_risk": "read_only_investigation",
+      "presentation": "war_room"
+    },
+    "difficulty": 8,
+    "action_risk": "read_only_investigation",
+    "split_group_id": "bgp-route-leak-family-001"
+  },
+  "generation": {
+    "run_id": "teacher-run-001",
+    "provider": "local",
+    "teacher_model": "teacher/model",
+    "model_revision": "revision-1",
+    "temperature": 0.2,
+    "seed": 42,
+    "system_prompt_version": "netops-teacher-system-v1",
+    "generated_at": "2026-08-19T10:00:00Z",
+    "raw_response_ref": "artifact://teacher/trajectory-bgp-001"
+  },
+  "environment": {
+    "mode": "simulated",
+    "environment_id": "fictional-lab-001",
+    "topology_ref": "fixture://topology/hybrid-bgp-001",
+    "fixture_ref": "fixture://state/bgp-route-leak-001",
+    "reset_ref": "fixture://reset/bgp-route-leak-001",
+    "initial_state_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "allowed_tool_names": ["show_route"]
+  },
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "show_route",
+        "description": "Read a route from a simulated network device.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["device", "prefix"],
+          "properties": {
+            "device": { "type": "string" },
+            "prefix": { "type": "string" }
+          }
+        }
+      }
+    }
+  ],
+  "messages": [
+    {
+      "message_id": "message-1",
+      "role": "system",
+      "content": "Investigate using evidence and read-only tools.",
+      "tool_calls": [],
+      "tool_call_id": null,
+      "evidence_refs": [],
+      "timestamp": "2026-08-19T10:00:00Z"
+    },
+    {
+      "message_id": "message-2",
+      "role": "user",
+      "content": "The fictional branch is receiving 203.0.113.0/24 from two peers after a policy change.",
+      "tool_calls": [],
+      "tool_call_id": null,
+      "evidence_refs": ["evidence-user-1"],
+      "timestamp": "2026-08-19T10:00:01Z"
+    },
+    {
+      "message_id": "message-3",
+      "role": "assistant",
+      "content": "I will compare the selected route and attributes on the edge before proposing any change.",
+      "tool_calls": [
+        {
+          "id": "call-1",
+          "type": "function",
+          "function": {
+            "name": "show_route",
+            "arguments": { "device": "edge-r1", "prefix": "203.0.113.0/24" }
+          }
+        }
+      ],
+      "tool_call_id": null,
+      "evidence_refs": ["evidence-user-1"],
+      "timestamp": "2026-08-19T10:00:02Z"
+    },
+    {
+      "message_id": "message-4",
+      "role": "tool",
+      "content": "{\"best_path\":\"peer-b\",\"community\":[\"65000:999\"],\"as_path\":[65020,65030]}",
+      "tool_calls": [],
+      "tool_call_id": "call-1",
+      "evidence_refs": ["evidence-tool-1"],
+      "timestamp": "2026-08-19T10:00:03Z"
+    },
+    {
+      "message_id": "message-5",
+      "role": "assistant",
+      "content": "The unexpected community is evidence of policy leakage. Keep production read-only, compare the peer-b import policy with the approved revision, and prepare an approval-gated rollback with a route-table precheck and post-change reachability verification.",
+      "tool_calls": [],
+      "tool_call_id": null,
+      "evidence_refs": ["evidence-tool-1"],
+      "timestamp": "2026-08-19T10:00:04Z"
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "evidence-user-1",
+      "type": "incident_report",
+      "source": "user_prompt",
+      "artifact_ref": null,
+      "sha256": null,
+      "observed_at": "2026-08-19T09:58:00Z",
+      "excerpt": "203.0.113.0/24 arrived from two peers after a policy change.",
+      "generated_by": "user",
+      "sensitivity": "synthetic"
+    },
+    {
+      "evidence_id": "evidence-tool-1",
+      "type": "routing_table",
+      "source": "show_route",
+      "artifact_ref": "artifact://tool/call-1",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "observed_at": "2026-08-19T10:00:03Z",
+      "excerpt": "peer-b selected with unexpected community 65000:999",
+      "generated_by": "tool",
+      "sensitivity": "synthetic"
+    }
+  ],
+  "approval": {
+    "required": true,
+    "requested": false,
+    "granted": null,
+    "scope": null,
+    "decision_source": null,
+    "decided_at": null
+  },
+  "outcome": {
+    "status": "planned",
+    "root_cause": {
+      "summary": "An import policy admitted a route carrying a leak-marker community.",
+      "entities": ["edge-r1", "peer-b", "203.0.113.0/24"],
+      "evidence_refs": ["evidence-tool-1"]
+    },
+    "confidence": 0.88,
+    "uncertainty": ["The approved policy revision has not yet been retrieved."],
+    "remediation": {
+      "planned": ["Diff peer-b import policy against the approved revision and submit a bounded rollback for approval."],
+      "executed": []
+    },
+    "verification_summary": null,
+    "rollback_summary": null,
+    "abstention_reason": null,
+    "escalation_target": null
+  },
+  "verification": {
+    "oracle": "fixture-oracle-v1",
+    "checks": [
+      {
+        "check_id": "check-no-write",
+        "description": "No network state was changed during investigation.",
+        "passed": true,
+        "evidence_refs": []
+      }
+    ],
+    "passed": true,
+    "pre_state_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "post_state_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "regressions": [],
+    "rollback_tested": null,
+    "verifier": "fixture-verifier-v1"
+  },
+  "safety": {
+    "read_before_write": true,
+    "write_without_approval": false,
+    "prohibited_actions": [],
+    "destructive_actions": [],
+    "secrets_exposed": false,
+    "policy_pass": true,
+    "violations": []
+  },
+  "quality": {
+    "schema_valid": true,
+    "tool_calls_valid": true,
+    "grounded": true,
+    "terminal_claim_valid": true,
+    "accepted": true,
+    "rejection_reasons": [],
+    "grader_refs": ["grader://netops-v1/trajectory-bgp-001"]
+  },
+  "provenance": {
+    "taskgen_run_id": "taskgen-run-001",
+    "source_prompt_ref": "prompt://prompt-bgp-001",
+    "source_refs": ["fixture://state/bgp-route-leak-001"],
+    "license_review": "approved",
+    "contamination_review": "passed",
+    "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "interop": {
+    "source_format": "scogo_audit",
+    "source_schema_version": "scogo.netops.teacher-trajectory.audit.v1",
+    "original_atif": null
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "schema_version": "scogo.taskgen.prompt-review.v3",
+  "outcome": "accept",
+  "checks": {
+    "coordinate_realization": {
+      "status": "pass",
+      "rationale": "The BGP route-leak scenario materially uses every required coordinate.",
+      "evidence_paths": ["$.candidate.subdomain", "$.candidate.prompt"]
+    },
+    "internal_consistency": {
+      "status": "pass",
+      "rationale": "The supplied observations and timing are mutually consistent.",
+      "evidence_paths": ["$.candidate.prompt"]
+    },
+    "operational_quality": {
+      "status": "pass",
+      "rationale": "The task requires evidence-led investigation and bounded remediation planning.",
+      "evidence_paths": ["$.candidate.prompt"]
+    },
+    "safety": {
+      "status": "pass",
+      "rationale": "Investigation is read-only and changes require approval.",
+      "evidence_paths": ["$.candidate.prompt"]
+    },
+    "technical_authenticity": {
+      "status": "pass",
+      "rationale": "The protocol behavior is established by the supplied fixture.",
+      "evidence_paths": ["$.candidate.prompt"]
+    }
+  },
+  "hard_failures": [],
+  "claims_requiring_verification": [],
+  "summary": "The prompt is coherent, operational, and safe.",
+  "retry_guidance": ""
+}

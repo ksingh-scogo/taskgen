@@ -1,0 +1,8 @@
+{
+  "schema_version": "ATIF-v1.7",
+  "trajectory_id": "invalid-step-id",
+  "agent": { "name": "fixture-agent", "version": "1.0.0" },
+  "steps": [
+    { "step_id": 2, "source": "user", "message": "This must start at one." }
+  ]
+}

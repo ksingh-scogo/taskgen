@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scogo.ai/schemas/taskgen-prompt-adjudication-v1.schema.json",
+  "title": "Scogo Taskgen Prompt Adjudication v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "claims", "outcome", "summary"],
+  "properties": {
+    "schema_version": {"const": "scogo.taskgen.prompt-adjudication.v1"},
+    "claims": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["claim_id", "verdict", "rationale", "citations"],
+        "properties": {
+          "claim_id": {"type": "string", "minLength": 1, "maxLength": 64},
+          "verdict": {"enum": ["supported", "unsupported", "unverified"]},
+          "rationale": {"type": "string", "minLength": 1, "maxLength": 500},
+          "citations": {
+            "type": "array",
+            "uniqueItems": true,
+            "maxItems": 12,
+            "items": {"type": "string", "minLength": 1, "maxLength": 240}
+          }
+        }
+      }
+    },
+    "outcome": {"enum": ["accept", "reject"]},
+    "summary": {"type": "string", "minLength": 1, "maxLength": 800}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"outcome": {"const": "accept"}}},
+      "then": {
+        "properties": {
+          "claims": {
+            "items": {
+              "properties": {
+                "verdict": {"const": "supported"},
+                "citations": {"minItems": 1}
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

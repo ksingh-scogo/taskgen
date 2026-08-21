@@ -69,6 +69,9 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
         run: python3 .github/scripts/set_version.py "$VERSION"
 
+      - name: Test
+        run: cargo test --target aarch64-unknown-linux-gnu
+
       - name: Build
         run: cargo build --release --target aarch64-unknown-linux-gnu
 
@@ -105,6 +108,9 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: python3 .github/scripts/set_version.py "$VERSION"
+
+      - name: Test
+        run: cargo test --target aarch64-apple-darwin
 
       - name: Build
         run: cargo build --release --target aarch64-apple-darwin
@@ -183,7 +189,7 @@ jobs:
             echo '```bash'
             echo "curl -fsSL -o taskgen https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/taskgen-linux-arm64"
             echo "chmod +x taskgen"
-            echo "./taskgen --api-key \"\$OPENAI_API_KEY\" -c 50000 -w 20 --append -o /data/itops.jsonl"
+            echo "./taskgen generate --api-key \"\$OPENAI_API_KEY\" -c 50000 -w 20 --run-dir /data/taskgen-runs/itops-001"
             echo '```'
             if [ "$MACOS_STATUS" = "success" ]; then
               echo

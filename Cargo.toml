@@ -18,3 +18,13 @@ indicatif = "0.17"
 anyhow = "1"
 futures = "0.3"
 chrono = "0.4"
+serde_yaml_ng = "0.10"
+sha2 = "0.10"
+jsonschema = { version = "0.49", default-features = false }
+url = "2"
+async-trait = "0.1"
+fastembed = { version = "6", default-features = false, features = ["ort-download-binaries-rustls-tls", "hf-hub-rustls-tls"] }
+
+[dev-dependencies]
+tempfile = "3"
+wiremock = "0.6"

@@ -1,0 +1,158 @@
+{
+  "accepted_distribution": {
+    "action_risks": {},
+    "categories": {},
+    "difficulties": {},
+    "domains": {},
+    "environments": {},
+    "evidence_bundles": {},
+    "evidence_conditions": {},
+    "incident_mechanisms": {},
+    "platform_scopes": {},
+    "platforms": {},
+    "presentations": {},
+    "records": 0,
+    "subdomains": {},
+    "task_families": {}
+  },
+  "accepted_new_records": 0,
+  "adjudication": {
+    "endpoint_origin": "http://172.16.8.12:8000",
+    "input_tokens": 0,
+    "model": "deepseek-v4-flash-0731",
+    "output_tokens": 0
+  },
+  "artifacts": {
+    "candidates": {
+      "bytes": 0,
+      "file": "candidates.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "rejected": {
+      "bytes": 373069,
+      "file": "rejected.jsonl",
+      "sha256": "2afc3afd245ece637dd24fee013def0bd40dd7e8c5020cbbb13040a4d2b923b5"
+    },
+    "reviews": {
+      "bytes": 0,
+      "file": "reviews.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "run": {
+      "file": "run.json"
+    },
+    "tasks": {
+      "bytes": 0,
+      "file": "accepted.partial.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "candidate_attempts": 500,
+  "command_version": "0.5.0",
+  "completed_at": "2026-08-20T20:00:05.527442+00:00",
+  "concurrency": {
+    "generation_workers": 5,
+    "logical_cpus": 12,
+    "review_workers": 5,
+    "runtime": "tokio-multi-thread",
+    "runtime_worker_threads": 12
+  },
+  "coordinate_replacements": 0,
+  "coordinate_seed": 20260821,
+  "dedup": {
+    "jaccard_threshold": 0.800000011920929,
+    "mode": "semantic",
+    "ngram": 5,
+    "semantic_model": "sentence-transformers/all-MiniLM-L6-v2",
+    "semantic_threshold": 0.8999999761581421
+  },
+  "duration_minutes": 0.036831184733333334,
+  "duration_seconds": 2.209871084,
+  "efficiency": {
+    "attempts_per_accepted": null,
+    "candidate_acceptance_rate": 0.0,
+    "coordinate_replacement_rate": 0.0,
+    "top_up_waves": 0
+  },
+  "existing_records": 0,
+  "final_records": 0,
+  "generation": {
+    "effective_models": [
+      "deepseek-v4-flash-0731"
+    ],
+    "endpoint_origin": "http://172.16.8.12:8000",
+    "input_tokens": 0,
+    "model": "deepseek-v4-flash-0731",
+    "output_tokens": 0,
+    "priced_cost": 0.0
+  },
+  "rejected_candidates": 500,
+  "rejections": {
+    "by_reason": {},
+    "by_stage": {
+      "generation": 500
+    }
+  },
+  "requested_new_records": 500,
+  "requests": {
+    "adjudication": {
+      "errors": 0,
+      "rate_limits": 0,
+      "requests": 0,
+      "retries": 0,
+      "timeouts": 0,
+      "total_ms": 0
+    },
+    "generation": {
+      "errors": 5,
+      "rate_limits": 0,
+      "requests": 5,
+      "retries": 4,
+      "timeouts": 0,
+      "total_ms": 0
+    },
+    "review": {
+      "errors": 0,
+      "rate_limits": 0,
+      "requests": 0,
+      "retries": 0,
+      "timeouts": 0,
+      "total_ms": 0
+    }
+  },
+  "review": {
+    "effective_models": [
+      "deepseek-v4-flash-0731"
+    ],
+    "enabled": true,
+    "endpoint_origin": "http://172.16.8.12:8000",
+    "input_tokens": 0,
+    "model": "deepseek-v4-flash-0731",
+    "outcomes": {
+      "accept": 0,
+      "needs_verification": 0,
+      "reject": 0,
+      "revise": 0
+    },
+    "output_tokens": 0,
+    "priced_cost": 0.0,
+    "status": "enabled"
+  },
+  "run_directory": "pilot-runs/netops-deepseek-500-20260821",
+  "run_id": "8f5cd117",
+  "schema_version": "scogo.taskgen.run.v3",
+  "started_at": "2026-08-20T20:00:03.317554+00:00",
+  "status": "failed",
+  "taxonomy_id": "scogo-enterprise-netops-v2",
+  "taxonomy_kind": "compositional",
+  "terminal_error": "generation cancelled before exact acceptance",
+  "throughput": {
+    "candidates_per_minute": 13575.452530786633,
+    "tasks_per_minute": 0.0
+  },
+  "timing": {
+    "adjudication_total_ms": 0,
+    "generation_total_ms": 0,
+    "review_total_ms": 0
+  }
+}

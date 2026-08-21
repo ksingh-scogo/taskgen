@@ -1,406 +1,316 @@
 # taskgen
 
-A fast, concurrent SFT (Supervised Fine-Tuning) task generator for distillation datasets. Generates diverse, difficulty-weighted IT Ops / SRE prompts across infra, observability, network, secops, identity, OEM/ISV products, and related domains — via any OpenAI-compatible API.
+`taskgen` creates reviewed, unique prompt seeds for teacher-model dataset generation through OpenAI-compatible APIs. It ships Scogo's compositional IT Operations and Sovereign Enterprise NetOps taxonomies.
 
-## Features
+Taskgen owns prompt text, sampled coordinates, capability compilation, deterministic checks, local deduplication, and configured review/adjudication decisions. A prompt may contain clearly supplied fictional scenario fixtures, but Taskgen never represents them as queried live state and never fabricates real approvals, remediation success, safety grades, ground truth, or trainable teacher trajectories.
 
-- 129 domains, 884 subdomains across 14 IT Ops categories (from `docs/it-ops-taxonomy.yaml`)
-- Vendor-first `oem` category: product lines as subdomains, SKU/firmware/CLI/TAC prompt voice
-- Weighted difficulty sampling (1–10 scale)
-- Configurable category distribution
-- Concurrent generation with lock-free atomic stats and pre-sampled task batches
-- Live progress bar with speed, token count, and error tracking
-- OpenAI-compatible API (works with OpenAI, Together, Mistral, local vLLM, etc.)
-- Free model discovery via OpenRouter with automatic health checks and periodic rescanning
-- Proxy support with round-robin or sticky rotation
-- Multiple API key rotation for load balancing across routers
-- Post-run deduplication (exact + semantic similarity via word-trigram Jaccard)
-- Graceful shutdown on API outages (5+ timeouts) or billing errors
-- Automatic retry with exponential backoff on rate limits (429)
-- JSONL output with metadata per task, flushed to disk after each write
-- Optional budget cap with per-token cost tracking
-- Append mode to resume interrupted runs
-- Auto-generated dataset README next to the JSONL (`{stem}.README.md`) with **observed** category / domain / subdomain / difficulty counts vs target weights
-- Filter existing Hub tasklists to selected categories (`filter_tasklist.py`)
-- GPT-5 / o-series / luna sampling: omit `temperature` and `max_tokens`, send `max_completion_tokens`
-- Always request `stream: false`; if a gateway still returns SSE, assemble `delta.content` across chunks
+## Core contract
 
-## Install
+A successful command:
 
-Prebuilt **ARM64** binaries ship on every push to `master` via [Releases](https://github.com/ksingh-scogo/taskgen/releases/latest). Linux ARM64 is the NVIDIA DGX Spark / aarch64 Linux build. macOS ARM64 is Apple Silicon. They are **not** interchangeable — a Linux binary will not run on macOS.
-
-**NVIDIA DGX Spark / Linux ARM64** — fetch the executable, no Rust toolchain:
-
-```bash
-curl -fsSL -o taskgen \
-  "https://github.com/ksingh-scogo/taskgen/releases/latest/download/taskgen-linux-arm64"
-chmod +x taskgen
-./taskgen --version
+```text
+taskgen generate -c N
+  => exactly N newly accepted prompt records
+  => every record is schema-valid
+  => every record passed exact, lexical, and configured semantic dedup
+  => every record passed a separate operational-quality review call
+  => no partial final dataset is published on failure
 ```
 
-Long-running generation (use `tmux`/`screen`/systemd so SSH disconnects don't kill it):
+`-c N` is not a request for N model attempts. Taskgen runs explicit generation and review waves. It generates the current acceptance deficit, persists every candidate, reviews that pool independently, repairs only `revise` outcomes once, and samples fresh compatible coordinates for every remaining deficit. It publishes only after exactly N unique candidates are accepted. `--max-candidates` bounds the entire run and defaults to `max(100, 20 × count)`.
+
+The model reviewer is an auditable gate, not an infallible source of truth. Its model, prompt, token usage, decisions, rejection reasons, and retry guidance are retained in sidecars.
+
+## Build and commands
 
 ```bash
-./taskgen \
-  --api-key "$OPENAI_API_KEY" \
-  --api-base https://omniroute.scogo.ai/v1 \
-  -m scogoai/gpt-5.6-luna-max \
-  -c 50000 -w 20 \
-  --append \
-  -o /data/itops.jsonl
+cargo build --release
+./target/release/taskgen --version
 ```
 
-**macOS Apple Silicon:**
-
-```bash
-curl -fsSL -o taskgen \
-  "https://github.com/ksingh-scogo/taskgen/releases/latest/download/taskgen-darwin-arm64"
-chmod +x taskgen
-xattr -d com.apple.quarantine taskgen 2>/dev/null || true
-./taskgen --version
+```text
+taskgen generate [OPTIONS]
+taskgen dedup --input <FILE> [OPTIONS]
+taskgen taxonomy validate --taxonomy <FILE>
+taskgen atif export --input <FILE> --output <FILE>
+taskgen atif import --input <FILE> --output <FILE>
 ```
 
-Each release also has `SHA256SUMS`. Versions are auto-bumped from the latest GitHub release (patch +1) unless `Cargo.toml` is already ahead.
+## Compositional taxonomies
 
-### Build from source
+Both taxonomies use `schema_version: scogo.taskgen.taxonomy.v3`, `kind: compositional`, and the same capability-aware sampling/validation implementation. Every subdomain is an object with an explicit `capabilities` mapping; the coordinate compiler rejects platform, mechanism, evidence, risk, or presentation values outside the inherited capability set before inference.
+
+| Taxonomy | ID | Categories | Domains | Subdomains |
+|---|---|---:|---:|---:|
+| IT Operations | `scogo-itops-v4` | 14 | 129 | 884 |
+| Enterprise NetOps | `scogo-enterprise-netops-v2` | 1 | 25 | 531 |
+
+Every sampled task composes:
+
+```text
+category + domain + subdomain
++ task family + environment
++ platform scope + selected platforms
++ incident mechanism + evidence condition + evidence bundle
++ action risk + difficulty + presentation
+```
+
+IT Ops retains its complete category/domain/subdomain inventory but now gains operational coordinates such as task family, environment, platform scope, evidence state, and risk. NetOps includes enterprise, campus, branch, data-center, cloud, hybrid, multicloud, Kubernetes, remote-access, edge, OT/IoT, AI/HPC, and enterprise real-time networks. Telecom-provider RAN, packet core, IMS, OSS/BSS, and carrier-core operations remain out of scope.
+
+Validate either file without an API key:
 
 ```bash
-git clone https://github.com/ksingh-scogo/taskgen.git
-cd taskgen
+taskgen taxonomy validate --taxonomy docs/it-ops-taxonomy.yaml
+taskgen taxonomy validate --taxonomy docs/netops-taxonomy.yaml
+```
+
+Validation rejects v1/hierarchical taxonomies, duplicate or unknown IDs, unreachable coordinate combinations, invalid platform cardinality, empty eligible sets, and invalid weights. Eligibility resolves from subdomain to domain to category to the global catalog. A subdomain may narrow any axis and may declare an exact `platforms` allow-list; exact platforms must belong to its resolved platform groups.
+
+## Generate prompts
+
+IT Ops is embedded and is used when `--taxonomy` is omitted:
+
+```bash
+taskgen generate \
+  --api-base https://api.example.com/v1 \
+  --api-key "$GENERATION_API_KEY" \
+  --model teacher/model \
+  --count 1000 \
+  --workers 5 \
+  --run-dir data/runs/itops-001
+```
+
+Enterprise NetOps:
+
+```bash
+taskgen generate \
+  --taxonomy docs/netops-taxonomy.yaml \
+  --api-base https://api.example.com/v1 \
+  --api-key "$GENERATION_API_KEY" \
+  --model teacher/model \
+  --count 1000 \
+  --workers 5 \
+  --seed 20260820 \
+  --run-dir data/runs/netops-001
+```
+
+Generation-prompt precedence is `--system-prompt`, `--system-prompt-file`, `defaults.system_prompt_file`, then the built-in IT Ops prompt. The taxonomy defaults are `prompts/itops-taskgen-system-v2.txt` and `prompts/netops-taskgen-system-v2.txt`.
+
+### Mandatory staged reviewer
+
+With no review overrides, Taskgen makes a separate review call using the effective generation model, endpoint, and credential pool.
+
+Different model on the same provider:
+
+```bash
+taskgen generate \
+  --api-base https://api.example.com/v1 \
+  --api-key "$GENERATION_API_KEY" \
+  --model fast/generator \
+  --review-model strong/reviewer \
+  --count 1000 \
+  --run-dir data/runs/same-provider-001
+```
+
+Different reviewer provider:
+
+```bash
+taskgen generate \
+  --api-base https://generator.example/v1 \
+  --api-key "$GENERATION_API_KEY" \
+  --model fast/generator \
+  --review-api-base https://reviewer.example/v1 \
+  --review-api-key "$REVIEW_API_KEY" \
+  --review-model strong/reviewer \
+  --count 1000 \
+  --run-dir data/runs/split-provider-001
+```
+
+A different normalized review endpoint requires explicit review credentials. Taskgen never sends generation credentials to another endpoint implicitly. `--keyfile` and `--review-keyfile` take precedence over single or ambient keys. CLI help hides environment-secret values.
+
+Reviewer-prompt precedence is `--review-system-prompt`, `--review-system-prompt-file`, `defaults.review_system_prompt_file`, then the built-in IT Ops reviewer. The v3 reviewer scores coordinate realization, internal consistency, operational quality, safety, and technical authenticity independently with `pass`, `fail`, or `unknown`. Its outcome is `accept`, `revise`, `reject`, or `needs_verification`; uncertainty is never silently converted into a technical failure. Malformed output and reviewer infrastructure errors are retried and never become implicit acceptance.
+
+Only `needs_verification` invokes the adjudicator. By default it uses the reviewer model, endpoint, and credentials. `--review-reference-dir <DIR>` supplies a local `.md`, `.txt`, `.json`, `.yaml`, or `.yml` corpus; bounded deterministic retrieval excerpts are passed only to adjudication. A separate adjudicator uses `--adjudication-model`, `--adjudication-api-base`, `--adjudication-api-key`, or `--adjudication-keyfile`. Credentials are inherited only when the normalized endpoint is unchanged.
+
+Using the generation model as its own reviewer is the convenience default, not the recommended production release gate. It can share the generator's blind spots. For benchmark/release datasets, configure a calibrated independent `--review-model`, replay the frozen expert set with `taskgen review --gold-labels`, and retain human sampling for platform syntax, architecture, capacity, pricing, and causal claims.
+
+Standalone replay uses the same validation, review, and adjudication engine without regenerating candidates:
+
+```bash
+taskgen review \
+  --input data/runs/netops-001/candidates.jsonl \
+  --taxonomy docs/netops-taxonomy.yaml \
+  --api-base https://reviewer.example/v1 \
+  --api-key "$REVIEW_API_KEY" \
+  --model strong/reviewer \
+  --review-workers 5 \
+  --gold-labels data/review-gold.jsonl \
+  --run-dir data/runs/netops-review-002
+```
+
+Gold labels are JSONL records containing `candidate_id` and `expected_outcome`. `run.json` reports the confusion matrix, per-outcome precision/recall, false-accept rate, false-reject rate, invalid-response rate, and adjudication rate.
+
+### Mandatory native dedup
+
+Deduplication cannot be disabled. Acceptance applies:
+
+- global lowercased, whitespace-collapsed exact matching;
+- word 5-gram Jaccard within `(language, domain, subdomain)`, default threshold `0.80`;
+- local embedding cosine similarity in the same bucket, default threshold `0.90`;
+- a serialized final recheck immediately before insertion.
+
+Semantic mode uses local FastEmbed ONNX inference. English defaults to `sentence-transformers/all-MiniLM-L6-v2`; multilingual generation defaults to `intfloat/multilingual-e5-small`. Embeddings and prompts are not sent to an embedding API. The model is downloaded on first use and cached; air-gapped deployments must pre-populate `--semantic-model-cache`.
+
+Use `--dedup-mode lexical` only when semantic inference is intentionally excluded. Exact and Jaccard checks remain mandatory.
+
+### Run directories, atomic output, and append
+
+Every invocation owns one directory. Supply `--run-dir <DIR>`, or omit it and Taskgen creates `taskgen-runs/<UTC timestamp>-<taxonomy ID>-<run ID>/`.
+
+A successful directory contains:
+
+```text
+data/runs/netops-001/
+├── tasks.jsonl
+├── candidates.jsonl
+├── reviews.jsonl
+├── rejected.jsonl
+└── run.json
+```
+
+`run.json` is created with `status: running` before generation and atomically updated to `success` or `failed`. `candidates.jsonl` is durable before review starts. `tasks.jsonl` exists only after every staged row passes the task schema, coordinate compiler, review/adjudication policy, and final deduplication and the exact accepted count is reached. Incomplete runs retain `accepted.partial.jsonl`, candidates, reviews, rejections, and their terminal report in the same directory.
+
+`--append-from <FILE> -c N` creates a new run containing the source records plus exactly N newly accepted records. The source dataset is never modified, and its records are loaded into the dedup index so new candidates cannot duplicate them.
+
+The report records start/end timestamps, duration, seed, generation/review/adjudication models, separate generation and review concurrency, top-up waves, review outcome counts, request timing, retries, 429s, timeouts, rejection reasons, coordinate replacements, candidate yield, accepted coordinate distributions, throughput, token usage, sanitized endpoint origins, and artifact size/SHA-256 metadata. It never records credentials.
+
+### Prompt record
+
+Every final line validates against `schemas/task-v2.schema.json`:
+
+```json
+{
+  "schema_version": "scogo.taskgen.task.v2",
+  "prompt": "BGP paths changed after the maintenance window...",
+  "category": "enterprise_netops",
+  "domain": "layer3_routing",
+  "subdomain": "bgp_route_leak",
+  "difficulty": 8,
+  "coordinates": {
+    "taxonomy_id": "scogo-enterprise-netops-v2",
+    "category_id": "enterprise_netops",
+    "task_family": "troubleshooting_rca",
+    "environment": "hybrid",
+    "platform_scope": "multi_platform",
+    "platforms": ["cisco_ios_xe", "juniper_junos"],
+    "incident_mechanism": "misconfiguration",
+    "evidence_condition": "contradictory",
+    "evidence_bundle": "routing_tables",
+    "action_risk": "read_only_investigation",
+    "presentation": "war_room"
+  },
+  "taskgen_model": "teacher/model",
+  "temperature": 0.9
+}
+```
+
+`language` appears only for multilingual generation. A seed makes coordinate/language sampling reproducible; it cannot make a remote completion deterministic.
+
+## Generation options
+
+| Flag | Default | Purpose |
+|---|---:|---|
+| `--taxonomy <FILE>` | embedded IT Ops | Runtime taxonomy |
+| `-c, --count <N>` | `250` | Newly accepted records required for success |
+| `-w, --workers <N>` | `5` | Concurrent coordinate slots |
+| `--request-timeout-seconds <N>` | `120` | Per generation/review HTTP request timeout |
+| `--max-candidates <N>` | `max(100, 20 × count)` | Global candidate ceiling across all top-up waves |
+| `--review-workers <N>` | `5` | Independent review-stage concurrency |
+| `--max-repairs-per-coordinate <0|1>` | `1` | Bounded repair count for `revise` only |
+| `--max-repairs-per-coordinate <N>` | `2` | Repairs before recomposing axes for the same subject |
+| `--review-model <MODEL>` | generation model | Separate review-call model |
+| `--review-api-base <URL>` | generation endpoint | Reviewer provider endpoint |
+| `--review-api-key <KEY>` | inherited on same endpoint | Reviewer credential |
+| `--review-keyfile <FILE>` | none | Reviewer keys, round-robin |
+| `--review-max-output-tokens <N>` | `1024` | Structured reviewer completion limit |
+| `--review-reference-dir <DIR>` | none | Local corpus for selective adjudication |
+| `--adjudication-model <MODEL>` | reviewer model | Optional separate adjudicator |
+| `--adjudication-api-base <URL>` | reviewer endpoint | Optional separate adjudicator endpoint |
+| `--skip-review` | off | Skip all reviewer calls for smoke/performance diagnostics |
+| `--dedup-mode <MODE>` | `semantic` | `semantic` or `lexical` |
+| `--jaccard-threshold <F>` | `0.80` | Inclusive lexical threshold |
+| `--semantic-threshold <F>` | `0.90` | Inclusive cosine threshold |
+| `--dedup-ngram <N>` | `5` | Lexical word n-gram size |
+| `--semantic-model <MODEL>` | language-dependent | Local FastEmbed model |
+| `--semantic-model-cache <DIR>` | FastEmbed default | Local model cache |
+| `--run-dir <DIR>` | generated under `taskgen-runs/` | Self-contained directory for this run |
+| `--append-from <FILE>` | none | Seed a new run from an existing dataset and add exactly N records |
+| `--multilingual` | off | Sample one of eight languages |
+
+GPT-5, o-series, and Luna request bodies omit unsupported sampling fields. Qwen and DeepSeek-v4 task generation, structured review, and adjudication use explicit bounded direct-output controls: `reasoning_effort=none`, `chat_template_kwargs.enable_thinking=false`, zero thinking budget, and no returned reasoning. The chat-template override is required because vLLM otherwise enables thinking when a non-none reasoning effort is supplied. DeepSeek-v4 free-form task generation uses a 2048-token default and an explicit `<END_TASK>` stop sequence, which the API removes from the returned prompt. Taskgen then requires a meaningful minimum length and terminal punctuation before accepting the candidate. Review-v3 and adjudication remain JSON-schema constrained; their decoder-time schemas omit vLLM-unsupported conditional/uniqueness keywords, while Taskgen applies the complete canonical schemas after parsing. These controls prevent hidden reasoning, runaway prose, truncated prompts, and malformed reviewer JSON from exhausting retries while the review rubric, deterministic gates, repair path, and selective adjudication remain fully active. Other provider/model families retain their existing plain-output behavior. Provider reasoning fields and raw successful response bodies are never stored. Empty, truncated, overlong, or exposed-planning completions are rejected and replaced in a later top-up wave.
+
+### Throughput tuning
+
+Keep review enabled for production datasets. `--skip-review` is an explicit diagnostic mode: generated prompts still pass schema, coordinate compilation, deterministic checks, and deduplication; `reviews.jsonl` remains empty; and `run.json` records review as skipped. Tune `--workers` and `--review-workers` independently. When one local endpoint serves both phases, the staged pipeline prevents generation and review from competing within the same wave. Lowering false rejection through capability constraints, the four-outcome rubric, and calibration usually saves more time than blind concurrency.
+
+## Standalone Rust dedup
+
+Deduplicate an existing JSONL without top-up generation:
+
+```bash
+taskgen dedup \
+  --input data/raw.jsonl \
+  --output data/raw.dedup.jsonl \
+  --dropped data/raw.dropped.jsonl \
+  --report data/raw.dedup-report.json
+```
+
+The kept and dropped files are written atomically. Dropped records include `_dedup` metadata with the reason, score/threshold when applicable, bucket, and accepted prompt hash. If output paths are omitted, Taskgen derives `<stem>.dedup.jsonl` and `<stem>.dropped.jsonl`.
+
+## Teacher trajectory and ATIF contracts
+
+Prompt generation is followed by a separately governed trajectory pipeline:
+
+```text
+accepted Taskgen prompt seed
+  -> teacher candidate trajectory
+  -> deterministic tool execution and evidence capture
+  -> approval/policy gate
+  -> independent verification and safety grading
+  -> canonical audit record
+  -> accepted SFT projection
+  -> optional ATIF-v1.7 interchange
+```
+
+Schemas:
+
+- `schemas/task-v2.schema.json`: Taskgen prompt seed.
+- `schemas/prompt-review-v3.schema.json`: four-outcome rubric-review decision.
+- `schemas/prompt-adjudication-v1.schema.json`: selective claim adjudication.
+- `schemas/netops-teacher-trajectory-audit-v1.schema.json`: full canonical trajectory audit.
+- `schemas/netops-teacher-trajectory-sft-v1.schema.json`: accepted trainable projection only.
+
+ATIF is an interchange representation for completed trajectories, not the prompt-generation schema or Scogo's canonical audit object.
+
+```bash
+taskgen atif export \
+  --input data/netops-teacher.audit.v1.jsonl \
+  --output data/netops-teacher.atif.v1.7.jsonl
+
+taskgen atif import \
+  --input data/external.atif.v1.7.jsonl \
+  --output data/external.audit.v1.jsonl
+```
+
+ATIF import/export validates v1.7 and writes atomically. External imports receive the `external_atif_unverified` rejection reason and remain unaccepted until independently replayed and evaluated. See `docs/netops-data-contract.md` for evidence, safety, and SFT projection rules.
+
+## Tests
+
+```bash
+cargo fmt --check
+cargo test
+cargo clippy --all-targets --all-features -- -D warnings
 cargo build --release
 ```
 
-Binary will be at `target/release/taskgen`. Fork of [empero-org/taskgen](https://github.com/empero-org/taskgen), retargeted at IT Ops / SRE prompts.
-
-Python tooling (taxonomy codegen + Hub filter):
-
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-```
-
-## Usage
-
-```bash
-taskgen [OPTIONS]
-```
-
-### Required
-
-| Flag | Env | Description |
-|---|---|---|
-| `--api-key <KEY>` | `OPENAI_API_KEY` | API key for the target provider (not needed if using `--keyfile`) |
-
-### Options
-
-| Flag | Default | Description |
-|---|---|---|
-| `--api-base <URL>` | `https://api.openai.com/v1` | API base URL |
-| `-m, --model <MODEL>` | `gpt-4o-mini` | Model to use |
-| `-c, --count <N>` | `250` | Number of tasks to generate |
-| `-w, --workers <N>` | `5` | Concurrent workers |
-| `-o, --output <FILE>` | `output.jsonl` | Output file path |
-| `-t, --temperature <F>` | `0.9` | Sampling temperature |
-| `--append` | — | Append to existing output file |
-| `--distribution <STR>` | see Domains | Category weights (`cat=w,cat=w`, must sum to ~1.0) |
-| `--difficulty <STR>` | bell curve | Difficulty weights (see below) |
-| `--multilingual` | — | Generate tasks in 8 languages and split output by language |
-| `--system-prompt <STR>` | built-in | Override the system prompt. `oem` tasks still get the product-voice addendum |
-| `--input-price <F>` | — | Input token price per 1M tokens (for cost tracking) |
-| `--output-price <F>` | — | Output token price per 1M tokens |
-| `--budget <F>` | — | Hard cost cap in USD (requires price flags) |
-
-### Proxy & Key Rotation
-
-| Flag | Default | Description |
-|---|---|---|
-| `--proxies <FILE>` | — | Proxy list file, one per line: `host:port` or `host:port:user:pass` |
-| `--rotating-proxy` | — | Use a single random proxy for all requests (sticky mode) |
-| `--keyfile <FILE>` | — | API key file, one key per line, rotated round-robin |
-
-### Free Models (OpenRouter)
-
-| Flag | Default | Description |
-|---|---|---|
-| `--free-models` | — | Auto-discover and use free models from OpenRouter |
-| `--free-rescan <MIN>` | `10` | Rescan interval in minutes for free model availability |
-
-When `--free-models` is set, taskgen will:
-1. Override `--api-base` to `https://openrouter.ai/api/v1`
-2. Fetch all available models and filter for free, text-capable models with 16k+ context
-3. Health-check each candidate with a test request (429 = live, 502/timeout = offline)
-4. Rotate verified models round-robin across tasks
-5. Track per-model failures — if a model errors 3+ times, it triggers an immediate rescan
-6. Periodically rescan on `--free-rescan` interval to pick up newly available models
-
-Each task records the actual model name in the `taskgen_model` metadata field.
-
-### Multilingual
-
-When `--multilingual` is set, each task is randomly assigned one of 8 languages:
-
-| Code | Language |
-|---|---|
-| `en` | English |
-| `de` | German |
-| `fr` | French |
-| `es` | Spanish |
-| `nl` | Dutch |
-| `zh` | Chinese |
-| `ar` | Arabic |
-| `ru` | Russian |
-
-The LLM is instructed to write the task in the assigned language. A `"language"` field is added to each JSON entry's metadata. After generation (and dedup if enabled), the output is split into per-language files:
-
-```
-output_en.jsonl
-output_de.jsonl
-output_fr.jsonl
-...
-```
-
-The generated dataset README includes a language distribution table with per-language task counts.
-
-### Deduplication
-
-| Flag | Default | Description |
-|---|---|---|
-| `--dedup` | — | Run deduplication after generation |
-| `--dedup-threshold <F>` | `0.6` | Semantic similarity threshold (0.0–1.0) |
-
-Two-pass dedup:
-1. **Exact match** — normalized (lowercase, whitespace-collapsed) string comparison
-2. **Semantic match** — word-trigram Jaccard similarity, removes entries above the threshold
-
-### Error Handling
-
-- **429 Rate Limits** — exponential backoff with up to 5 retries, respects `Retry-After` header
-- **Billing Errors** (402, `insufficient_quota`, etc.) — immediate graceful shutdown
-- **Timeouts** — retries with backoff; 5 consecutive timeouts trigger graceful shutdown
-- **Graceful Shutdown** — all workers drain, completed tasks are saved, dedup runs if enabled, dataset README is written
-
-### Provider notes (GPT-5 / Omniroute)
-
-Requests always include `"stream": false`. Some gateways (Omniroute included) still return SSE `chat.completion.chunk` events; taskgen concatenates `delta.content` across chunks instead of keeping only the last (often empty) usage event.
-
-For model names matching `gpt-5`, `luna`, `o1`, `o3`, or `o4` (including `scogoai/gpt-5.6-luna-max`):
-
-- `temperature` and `max_tokens` are omitted (those models reject them)
-- `max_completion_tokens` is sent instead of `max_tokens`
-- `--temperature` is still recorded in JSONL metadata; it is not forwarded to the API
-
-Content parts, null usage fields, and `prompt_tokens`/`input_tokens` aliases are accepted. API error payloads are surfaced instead of a generic parse failure.
-
-## Examples
-
-**Basic — generate 500 tasks with GPT-4o-mini:**
-```bash
-taskgen --api-key $OPENAI_API_KEY -c 500
-```
-
-**Free models via OpenRouter (no cost):**
-```bash
-taskgen --free-models --api-key $OPENROUTER_KEY -c 5000 -w 10
-```
-
-**Free models with faster rescan and dedup:**
-```bash
-taskgen --free-models --api-key $OPENROUTER_KEY -c 10000 -w 20 \
-  --free-rescan 5 --dedup --dedup-threshold 0.5
-```
-
-**Multilingual dataset — tasks in 8 languages:**
-```bash
-taskgen --api-key $OPENAI_API_KEY -c 2000 -w 10 --multilingual --dedup
-```
-
-**Local vLLM / Ollama:**
-```bash
-taskgen --api-base http://localhost:8000/v1 --api-key none -m mistral-7b-instruct -c 1000 -w 10
-```
-
-**Together AI with cost tracking and budget cap:**
-```bash
-taskgen \
-  --api-base https://api.together.xyz/v1 \
-  --api-key $TOGETHER_API_KEY \
-  -m meta-llama/Llama-3-8b-chat-hf \
-  -c 2000 -w 20 \
-  --input-price 0.20 --output-price 0.20 \
-  --budget 1.00
-```
-
-**Omniroute / GPT-5-class (no `temperature` / `max_tokens` on the wire):**
-```bash
-taskgen \
-  --api-base https://omniroute.scogo.ai/v1 \
-  --api-key $OPENAI_API_KEY \
-  -m scogoai/gpt-5.6-luna-max \
-  -c 250 -w 5 \
-  -o data/itops.jsonl
-```
-
-**With proxies and multiple API keys:**
-```bash
-taskgen \
-  --api-key none \
-  --keyfile keys.txt \
-  --proxies proxies.txt \
-  -c 5000 -w 20
-```
-
-**Custom distribution — 40% infra, 30% observe, 30% network:**
-```bash
-taskgen --api-key $OPENAI_API_KEY --distribution "infra=0.4,observe=0.3,network=0.3" -c 500
-```
-
-**OEM / ISV only — vendor-product prompts (FortiGate, EKS, Falcon, …):**
-```bash
-taskgen --api-key $OPENAI_API_KEY --distribution "oem=1.0" -c 250 -o data/oem.jsonl
-```
-
-**Custom difficulty — only hard tasks (levels 7–10):**
-```bash
-taskgen --api-key $OPENAI_API_KEY --difficulty "7=0.25,8=0.25,9=0.25,10=0.25" -c 500
-```
-
-**Append mode — resume a previous run:**
-```bash
-taskgen --api-key $OPENAI_API_KEY -c 1000 --append -o my_dataset.jsonl
-```
-
-## Output Format
-
-Each line in the JSONL file is a self-contained task record:
-
-```json
-{
-  "prompt": "zabbix is paging every 30s on the same host, I already restarted the agent, still flapping—mute or real disk?",
-  "domain": "infra::Storage",
-  "subdomain": "raid_degrade",
-  "difficulty": 4,
-  "language": "en",
-  "taskgen_model": "gpt-4o-mini",
-  "temperature": 0.9
-}
-```
-
-Capability categories use failure-mode subdomains (`raid_degrade`). `oem` uses product lines:
-
-```json
-{
-  "prompt": "FortiGate 200F HA split-brain after 7.4.5, FGSP config sync stuck, TAC wants diagnose debug flow before we fail over—cut or wait?",
-  "domain": "oem::Fortinet",
-  "subdomain": "fortigate",
-  "difficulty": 6,
-  "taskgen_model": "scogoai/gpt-5.6-luna-max",
-  "temperature": 0.9
-}
-```
-
-The `language` field is only present when `--multilingual` is used.
-
-A dataset README is written next to the JSONL as `{stem}.README.md` (for `-o data/itops.jsonl` that is `data/itops.README.md`). It does **not** overwrite this project `README.md`. The card reports run parameters, token usage, cost, and **observed** mix (category / `category::domain` / subdomain / difficulty counts vs the sampling targets). JSONL and `{stem}.README.md` under `data/` are gitignored.
-
-## Filter Hub datasets
-
-`filter_tasklist.py` keeps rows whose `domain` prefix (or full cell) matches `--keep-categories` and writes UTF-8 JSONL. Auth via `HF_TOKEN` or `hf auth login` (`huggingface-cli` is deprecated).
-
-```bash
-.venv/bin/python filter_tasklist.py \
-  --dataset empero-ai/tasklist-haiku4.5-6000x-unfiltered \
-  --keep-categories coding,cs,Conversation \
-  --output ./data/tasklist-haiku45
-```
-
-Optional: `--category-column domain`, `--split all`, `--max-rows N`, `--push-to-hub ORG/REPO --private`.
-
-Current filtered mix (coding / cs / conversation, `language` backfilled to `en` on non-Grok shards) is the private Hub dataset [ScogoAI/synthetic-sft-prompts-coding-cs-conversation](https://huggingface.co/datasets/ScogoAI/synthetic-sft-prompts-coding-cs-conversation) (34,209 rows). Card lives with the JSONL on the Hub.
-
-```python
-from datasets import load_dataset
-ds = load_dataset("ScogoAI/synthetic-sft-prompts-coding-cs-conversation", token=True)
-```
-
-Publish a local `data/` folder (needs the `hf` CLI from `huggingface_hub`, not `huggingface-cli`):
-
-```bash
-.venv/bin/hf upload ScogoAI/synthetic-sft-prompts-coding-cs-conversation data/ . \
-  --repo-type dataset --private
-```
-
-## Domains
-
-Source of truth: `docs/it-ops-taxonomy.yaml`. Regenerates both the Rust `DOMAINS` catalog and `DEFAULT_DISTRIBUTION`:
-
-```bash
-.venv/bin/python scripts/codegen_domains.py --write
-```
-
-Default `--distribution` is biased toward the Scogo desk (tickets, endpoints, identity, workplace), not APM/SASE volume and not CRM/HR/ESM. Weights sum to 1.0.
-
-Two sampling axes share the same 3-level schema (`category` → `domain` → `subdomain`):
-
-| Axis | Categories | Subdomain meaning | Example |
-|---|---|---|---|
-| Capability | everything except `oem` | failure mode | `network::Firewall` / `unused_rule` |
-| Vendor / platform | `oem` | product line | `oem::Fortinet` / `fortigate` |
-
-Overlap is intentional. A generic firewall ticket and a FortiGate TAC ticket train different muscle. Do not dedup across categories.
-
-| Category | Weight | Domains |
-|---|---|---|
-| `infra` | 0.12 | Cloud Infrastructure, FinOps, CNAPP, Virtualization, Storage, Backup, BCDR Continuity, DCIM Facilities |
-| `endpoint` | 0.11 | RMM, UEM MDM, VDI DaaS, Endpoint Health |
-| `itsm` | 0.10 | Service Desk, Incident Management, Problem Management, Change Enablement, Request Catalog, CMDB Configuration, Knowledge Management, Task Project Management, SLA Measurement |
-| `identity` | 0.10 | Identity Access, Privileged Access, Identity Governance, Directory Services |
-| `oem` | 0.10 | 33 named vendors + 14 long-tail buckets (see below) |
-| `workplace` | 0.08 | Collaboration Messaging, Email Communication, Calendar Scheduling, Document Management, Content Website, Print Workplace Devices, UCaaS Voice, Digital Experience |
-| `network` | 0.08 | Networking, DNS CDN, Firewall, Load Balancer, Network Management, Routers, SD-WAN, Wireless, NAC |
-| `secops` | 0.07 | SIEM, SOAR, EDR XDR, Vulnerability Management, Threat Intel NDR, GRC Audit, Forensics IR |
-| `observe` | 0.06 | Monitoring, Observability APM, AIOps, Synthetics DEM, AI Agent Observability |
-| `delivery` | 0.06 | DevOps, Kubernetes, IaC GitOps, Release Orchestration, AppSec ASPM, Mainframe Midrange |
-| `data` | 0.05 | Database, Analytics, Messaging Streaming, iPaaS API, Data Governance |
-| `agentic` | 0.03 | Agent Fabric, SIA Guardrails, Knowledge Graph, Channels Knowledge, Platform Deploy |
-| `secure_edge` | 0.03 | SASE SSE, CASB, Data Loss Prevention, Email Security, Web Security, WAF DDoS, DSPM, SSPM |
-| `enterprise` | 0.01 | CRM Sales, HR Payroll, ERP Finance, Supplier Contract |
-
-### OEM / ISV / Platform
-
-47 domains, 386 product-line subdomains. Named vendors are specialist portfolios (Cisco, AWS, CrowdStrike). Buckets hold long-tail brands (Veeam, Grafana, Jamf). Kubernetes and Linux distros count as platforms even though they are not companies.
-
-`oem` generation appends a product-voice addendum to the system prompt (even if `--system-prompt` is set) and asks for SKU / firmware / CLI / console / TAC / license language. It must not emit a generic capability ticket.
-
-| Group | Named vendors | Long-tail buckets |
-|---|---|---|
-| Hyperscale cloud | AWS, Azure, Google Cloud | Other Cloud (`oci`, `ibm_cloud`, `alibaba`, `digitalocean`, `akamai_linode`, `ovh`, `hetzner`) |
-| OS & distros | Microsoft, IBM, Red Hat, Canonical | Linux Distros (`debian`, `rocky`, `alma`, `oracle_linux`, `amazon_linux`, `sles`, `freebsd`) |
-| Containers | Kubernetes | — |
-| Network OEM | Cisco, Juniper, Fortinet, Versa, Palo Alto, HPE Aruba | Other Network OEM (`arista_eos`, `extreme`, `ubiquiti`, `mikrotik`, `f5_bigip`, `checkpoint`, `nokia_srlinux`, `sonicwall`, `ruckus`, `infoblox`) |
-| Secure edge | Cloudflare, Zscaler | Other SASE (`netskope`, `cato`, `forcepoint`, `skyhigh`, `perimeter81`) |
-| Security & identity | CrowdStrike, CyberArk, Okta | Other Security ISV (`sentinelone`, `tenable`, `qualys`, `rapid7`, `proofpoint`, `mimecast`, `trend_micro`, `sophos`, `tanium`, `darktrace`); Other Identity ISV (`ping`, `sailpoint`, `beyondtrust`, `delinea`, `forgerock`, `jumpcloud`) |
-| Compute & storage | Dell, HPE, NetApp, Pure Storage | Other Compute OEM (`lenovo_thinksystem`, `supermicro`, `hitachi_vantara`) |
-| Virtualization | VMware, Nutanix | Other Hypervisor (`proxmox`, `citrix_cvad`, `kvm_libvirt`, `oracle_virtualization`) |
-| Data & databases | Oracle | Database ISVs (`postgresql`, `mysql`, `mariadb`, `mongodb`, `redis`, `elasticsearch`, `snowflake`, `databricks`, `cockroach`, `cassandra`, `neo4j`, `clickhouse`) |
-| Observability | Datadog, Splunk | Other Observability (`dynatrace`, `new_relic`, `grafana`, `zabbix`, `elastic`, `pagerduty`, `solarwinds`, `manageengine`, `prometheus`) |
-| Backup & DR | — | Backup ISVs (`veeam`, `rubrik`, `cohesity`, `commvault`, `veritas`, `acronis`, `datto`, `druva`) |
-| ITSM & workplace SaaS | ServiceNow, Atlassian, Google Workspace | Workplace SaaS (`slack`, `zoom`, `box`, `dropbox`, `adobe`, `freshservice`, `zendesk`, `bmc_helix`) |
-| Endpoint / RMM / UEM | — | RMM UEM ISVs (`jamf`, `ninjaone`, `connectwise`, `kaseya`, `datto_rmm`, `omnissa`, `addigy`, `hexnode`) |
-| DevOps & IaC | GitHub, HashiCorp | Other DevOps ISV (`gitlab`, `jfrog`, `harness`, `circleci`, `pulumi`, `argo`, `flux`, `jenkins`, `azure_devops`, `docker`) |
-
-Product lines live on each domain in the YAML (e.g. Fortinet → `fortigate`, `fortimanager`, `fortisase`; AWS → `ec2`, `eks`, `rds`). Edit the YAML, then re-run codegen.
-
-## Difficulty Scale
-
-| Level | Label |
-|---|---|
-| 1 | Very Easy (junior on-call) |
-| 2 | Easy (runbook exists) |
-| 3 | Basic (one failing check) |
-| 4 | Intermediate (mid SRE) |
-| 5 | Standard (incomplete metrics) |
-| 6 | Skilled (senior, SLO tradeoffs) |
-| 7 | Proficient (blast-radius / freeze) |
-| 8 | Advanced (principal, multi-system) |
-| 9 | Expert (unknown-unknown) |
-| 10 | Principal (no runbook, synthesis) |
+The suite covers taxonomy migration counts, eligibility, schemas, ATIF round trips, provider isolation, reviewer decisions, native dedup, atomic artifacts, and replacement to an exact accepted count.

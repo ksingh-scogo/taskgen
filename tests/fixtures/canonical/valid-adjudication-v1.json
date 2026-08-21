@@ -1,0 +1,13 @@
+{
+  "schema_version": "scogo.taskgen.prompt-adjudication.v1",
+  "claims": [
+    {
+      "claim_id": "claim-1",
+      "verdict": "supported",
+      "rationale": "The supplied route table directly establishes the claimed next hop.",
+      "citations": ["candidate:$.prompt"]
+    }
+  ],
+  "outcome": "accept",
+  "summary": "Every requested claim is supported by supplied evidence."
+}

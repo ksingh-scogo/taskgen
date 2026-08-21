@@ -1,4 +1,4 @@
-# IT Ops SFT taxonomy — source of truth for taskgen DomainDef generation
+# Scogo IT Ops compositional prompt-seed taxonomy using schema v3
 # Built 2026-08-17 from: Scogo connector categories, Scogo use-case catalogue,
 # ITIL 4 (34 practices), NIST CSF 2.0, Gartner ITSM/ITOM/ITAM + Observability,
 # CSOH 2026 security umbrellas (CNAPP/SSE/XDR/ASPM/DSPM/SSPM).
@@ -14,715 +14,1976 @@
 #   catalogue  — Scogo use-case catalogue / scogo.ai, no connector bucket
 #   fill       — ITIL / NIST / Gartner / market gap; needed for full-estate SFT
 
-version: 3
-# Default mix for Scogo copilot SFT (matches src/main.rs DEFAULT_DISTRIBUTION).
-# Biased toward the desk: tickets, endpoints, identity, workplace.
-# Observe / SASE stay in the mix but are not the volume path. Not CRM/HR/ESM.
-default_distribution:
-  infra: 0.12
-  endpoint: 0.11
-  itsm: 0.10
-  identity: 0.10
-  oem: 0.10
-  workplace: 0.08
-  network: 0.08
-  secops: 0.07
-  observe: 0.06
-  delivery: 0.06
-  data: 0.05
-  agentic: 0.03
-  secure_edge: 0.03
-  enterprise: 0.01
+schema_version: scogo.taskgen.taxonomy.v3
+id: scogo-itops-v4
+kind: compositional
+label: Scogo IT Operations
+defaults:
+  system_prompt_file: ../prompts/itops-taskgen-system-v2.txt
+  review_system_prompt_file: ../prompts/itops-prompt-review-system-v3.txt
+  difficulty_distribution:
+    1: 0.05
+    2: 0.05
+    3: 0.10
+    4: 0.15
+    5: 0.20
+    6: 0.15
+    7: 0.10
+    8: 0.08
+    9: 0.07
+    10: 0.05
+
+platform_groups:
+  - id: public_cloud
+    weight: 1.0
+    platforms:
+      - {id: aws, label: "Aws", weight: 0.16666667}
+      - {id: azure, label: "Azure", weight: 0.16666667}
+      - {id: google_cloud, label: "Google Cloud", weight: 0.16666667}
+      - {id: alibaba_cloud, label: "Alibaba Cloud", weight: 0.16666667}
+      - {id: oracle_cloud, label: "Oracle Cloud", weight: 0.16666667}
+      - {id: openstack, label: "Openstack", weight: 0.16666665}
+  - id: microsoft_365
+    weight: 1.0
+    platforms:
+      - {id: exchange_online, label: "Exchange Online", weight: 0.14285714}
+      - {id: sharepoint_online, label: "Sharepoint Online", weight: 0.14285714}
+      - {id: teams, label: "Teams", weight: 0.14285714}
+      - {id: entra_id, label: "Entra Id", weight: 0.14285714}
+      - {id: intune, label: "Intune", weight: 0.14285714}
+      - {id: defender_for_endpoint, label: "Defender For Endpoint", weight: 0.14285714}
+      - {id: power_platform, label: "Power Platform", weight: 0.14285716}
+  - id: google_workspace
+    weight: 1.0
+    platforms:
+      - {id: gmail, label: "Gmail", weight: 0.16666667}
+      - {id: drive, label: "Drive", weight: 0.16666667}
+      - {id: meet, label: "Meet", weight: 0.16666667}
+      - {id: calendar, label: "Calendar", weight: 0.16666667}
+      - {id: admin_console, label: "Admin Console", weight: 0.16666667}
+      - {id: cloud_identity, label: "Cloud Identity", weight: 0.16666665}
+  - id: collaboration
+    weight: 1.0
+    platforms:
+      - {id: slack, label: "Slack", weight: 0.20000000}
+      - {id: zoom, label: "Zoom", weight: 0.20000000}
+      - {id: webex, label: "Webex", weight: 0.20000000}
+      - {id: jira_confluence, label: "Jira Confluence", weight: 0.20000000}
+      - {id: notion, label: "Notion", weight: 0.20000000}
+  - id: itsm_cmdb
+    weight: 1.0
+    platforms:
+      - {id: servicenow, label: "ServiceNow", weight: 0.20}
+      - {id: jira_service_management, label: "Jira Service Management", weight: 0.20}
+      - {id: bmc_helix, label: "BMC Helix", weight: 0.20}
+      - {id: freshservice, label: "Freshservice", weight: 0.20}
+      - {id: manageengine_service_manager_plus, label: "ManageEngine ServiceDesk Plus", weight: 0.20}
+  - id: endpoint_management
+    weight: 1.0
+    platforms:
+      - {id: microsoft_intune, label: "Microsoft Intune", weight: 0.20000000}
+      - {id: jamf_pro, label: "Jamf Pro", weight: 0.20000000}
+      - {id: vmware_workspace_one, label: "Vmware Workspace One", weight: 0.20000000}
+      - {id: tanium, label: "Tanium", weight: 0.20000000}
+      - {id: sccm_mecm, label: "Sccm Mecm", weight: 0.20000000}
+  - id: endpoint_operating_systems
+    weight: 1.0
+    platforms:
+      - {id: windows_11, label: "Windows 11", weight: 0.16666667}
+      - {id: macos, label: "Macos", weight: 0.16666667}
+      - {id: ubuntu_desktop, label: "Ubuntu Desktop", weight: 0.16666667}
+      - {id: ios, label: "Ios", weight: 0.16666667}
+      - {id: android, label: "Android", weight: 0.16666667}
+      - {id: chromeos, label: "Chromeos", weight: 0.16666665}
+  - id: identity_access
+    weight: 1.0
+    platforms:
+      - {id: microsoft_entra_id, label: "Microsoft Entra Id", weight: 0.16666667}
+      - {id: okta, label: "Okta", weight: 0.16666667}
+      - {id: ping_identity, label: "Ping Identity", weight: 0.16666667}
+      - {id: cyberark, label: "Cyberark", weight: 0.16666667}
+      - {id: sailpoint, label: "Sailpoint", weight: 0.16666667}
+      - {id: keycloak, label: "Keycloak", weight: 0.16666665}
+  - id: security_operations
+    weight: 1.0
+    platforms:
+      - {id: microsoft_sentinel, label: "Microsoft Sentinel", weight: 0.16666667}
+      - {id: splunk_es, label: "Splunk Es", weight: 0.16666667}
+      - {id: crowdstrike_falcon, label: "Crowdstrike Falcon", weight: 0.16666667}
+      - {id: palo_alto_cortex_xdr, label: "Palo Alto Cortex Xdr", weight: 0.16666667}
+      - {id: wazuh, label: "Wazuh", weight: 0.16666667}
+      - {id: qradar, label: "Qradar", weight: 0.16666665}
+  - id: network_security
+    weight: 1.0
+    platforms:
+      - {id: fortinet_fortios, label: "Fortinet Fortios", weight: 0.16666667}
+      - {id: palo_alto_panos, label: "Palo Alto Panos", weight: 0.16666667}
+      - {id: checkpoint_gaia, label: "Checkpoint Gaia", weight: 0.16666667}
+      - {id: cisco_secure_firewall, label: "Cisco Secure Firewall", weight: 0.16666667}
+      - {id: zscaler, label: "Zscaler", weight: 0.16666667}
+      - {id: cloudflare, label: "Cloudflare", weight: 0.16666665}
+  - id: networking
+    weight: 1.0
+    platforms:
+      - {id: cisco_ios_xe, label: "Cisco Ios Xe", weight: 0.16666667}
+      - {id: juniper_junos, label: "Juniper Junos", weight: 0.16666667}
+      - {id: arista_eos, label: "Arista Eos", weight: 0.16666667}
+      - {id: hpe_aruba_cx, label: "Hpe Aruba Cx", weight: 0.16666667}
+      - {id: frrouting, label: "Frrouting", weight: 0.16666667}
+      - {id: sonic, label: "Sonic", weight: 0.16666665}
+  - id: observability
+    weight: 1.0
+    platforms:
+      - {id: datadog, label: "Datadog", weight: 0.16666667}
+      - {id: splunk, label: "Splunk", weight: 0.16666667}
+      - {id: dynatrace, label: "Dynatrace", weight: 0.16666667}
+      - {id: new_relic, label: "New Relic", weight: 0.16666667}
+      - {id: prometheus_grafana, label: "Prometheus Grafana", weight: 0.16666667}
+      - {id: zabbix, label: "Zabbix", weight: 0.16666665}
+  - id: automation_iac
+    weight: 1.0
+    platforms:
+      - {id: terraform, label: "Terraform", weight: 0.16666667}
+      - {id: ansible, label: "Ansible", weight: 0.16666667}
+      - {id: pulumi, label: "Pulumi", weight: 0.16666667}
+      - {id: chef, label: "Chef", weight: 0.16666667}
+      - {id: puppet, label: "Puppet", weight: 0.16666667}
+      - {id: saltstack, label: "Saltstack", weight: 0.16666665}
+  - id: containers_kubernetes
+    weight: 1.0
+    platforms:
+      - {id: kubernetes, label: "Kubernetes", weight: 0.16666667}
+      - {id: openshift, label: "Openshift", weight: 0.16666667}
+      - {id: rancher, label: "Rancher", weight: 0.16666667}
+      - {id: eks, label: "Eks", weight: 0.16666667}
+      - {id: aks, label: "Aks", weight: 0.16666667}
+      - {id: gke, label: "Gke", weight: 0.16666665}
+  - id: virtualization_private_cloud
+    weight: 1.0
+    platforms:
+      - {id: vmware_vsphere, label: "Vmware Vsphere", weight: 0.20000000}
+      - {id: hyper_v, label: "Hyper V", weight: 0.20000000}
+      - {id: nutanix_ahv, label: "Nutanix Ahv", weight: 0.20000000}
+      - {id: proxmox, label: "Proxmox", weight: 0.20000000}
+      - {id: openstack, label: "Openstack", weight: 0.20000000}
+  - id: servers_operating_systems
+    weight: 1.0
+    platforms:
+      - {id: windows_server, label: "Windows Server", weight: 0.20000000}
+      - {id: rhel, label: "Rhel", weight: 0.20000000}
+      - {id: ubuntu_server, label: "Ubuntu Server", weight: 0.20000000}
+      - {id: sles, label: "Sles", weight: 0.20000000}
+      - {id: aix, label: "Aix", weight: 0.20000000}
+  - id: storage_backup
+    weight: 1.0
+    platforms:
+      - {id: veeam, label: "Veeam", weight: 0.16666667}
+      - {id: commvault, label: "Commvault", weight: 0.16666667}
+      - {id: rubrik, label: "Rubrik", weight: 0.16666667}
+      - {id: cohesity, label: "Cohesity", weight: 0.16666667}
+      - {id: netapp_ontap, label: "Netapp Ontap", weight: 0.16666667}
+      - {id: dell_powerstore, label: "Dell Powerstore", weight: 0.16666665}
+  - id: databases_data_platforms
+    weight: 1.0
+    platforms:
+      - {id: postgresql, label: "Postgresql", weight: 0.14285714}
+      - {id: mysql, label: "Mysql", weight: 0.14285714}
+      - {id: sql_server, label: "Sql Server", weight: 0.14285714}
+      - {id: oracle_database, label: "Oracle Database", weight: 0.14285714}
+      - {id: mongodb, label: "Mongodb", weight: 0.14285714}
+      - {id: snowflake, label: "Snowflake", weight: 0.14285714}
+      - {id: databricks, label: "Databricks", weight: 0.14285716}
+  - id: devops_delivery
+    weight: 1.0
+    platforms:
+      - {id: github, label: "Github", weight: 0.16666667}
+      - {id: gitlab, label: "Gitlab", weight: 0.16666667}
+      - {id: azure_devops, label: "Azure Devops", weight: 0.16666667}
+      - {id: jenkins, label: "Jenkins", weight: 0.16666667}
+      - {id: argocd, label: "Argocd", weight: 0.16666667}
+      - {id: flux, label: "Flux", weight: 0.16666665}
+  - id: enterprise_applications
+    weight: 1.0
+    platforms:
+      - {id: sap_s4hana, label: "Sap S4hana", weight: 0.20000000}
+      - {id: salesforce, label: "Salesforce", weight: 0.20000000}
+      - {id: dynamics_365, label: "Dynamics 365", weight: 0.20000000}
+      - {id: oracle_fusion, label: "Oracle Fusion", weight: 0.20000000}
+      - {id: workday, label: "Workday", weight: 0.20000000}
+  - id: ai_agent_platforms
+    weight: 1.0
+    platforms:
+      - {id: scogo_sia, label: "Scogo Sia", weight: 0.16666667}
+      - {id: openai_compatible, label: "Openai Compatible", weight: 0.16666667}
+      - {id: vllm, label: "Vllm", weight: 0.16666667}
+      - {id: ollama, label: "Ollama", weight: 0.16666667}
+      - {id: langgraph, label: "Langgraph", weight: 0.16666667}
+      - {id: mcp, label: "Mcp", weight: 0.16666665}
+  - id: open_source_platforms
+    weight: 1.0
+    platforms:
+      - {id: linux, label: "Linux", weight: 0.16666667}
+      - {id: kubernetes, label: "Kubernetes", weight: 0.16666667}
+      - {id: postgresql, label: "Postgresql", weight: 0.16666667}
+      - {id: nginx, label: "Nginx", weight: 0.16666667}
+      - {id: apache_kafka, label: "Apache Kafka", weight: 0.16666667}
+      - {id: redis, label: "Redis", weight: 0.16666665}
+  - id: oem_aws
+    weight: 1.0
+    platforms:
+      - {id: oem_aws_ec2, label: "Oem Aws Ec2", weight: 0.07142857}
+      - {id: oem_aws_vpc_iam, label: "Oem Aws Vpc Iam", weight: 0.07142857}
+      - {id: oem_aws_s3, label: "Oem Aws S3", weight: 0.07142857}
+      - {id: oem_aws_rds, label: "Oem Aws Rds", weight: 0.07142857}
+      - {id: oem_aws_eks, label: "Oem Aws Eks", weight: 0.07142857}
+      - {id: oem_aws_lambda, label: "Oem Aws Lambda", weight: 0.07142857}
+      - {id: oem_aws_cloudwatch, label: "Oem Aws Cloudwatch", weight: 0.07142857}
+      - {id: oem_aws_route53, label: "Oem Aws Route53", weight: 0.07142857}
+      - {id: oem_aws_direct_connect, label: "Oem Aws Direct Connect", weight: 0.07142857}
+      - {id: oem_aws_elb_alb, label: "Oem Aws Elb Alb", weight: 0.07142857}
+      - {id: oem_aws_waf_shield, label: "Oem Aws Waf Shield", weight: 0.07142857}
+      - {id: oem_aws_organizations, label: "Oem Aws Organizations", weight: 0.07142857}
+      - {id: oem_aws_secrets_manager, label: "Oem Aws Secrets Manager", weight: 0.07142857}
+      - {id: oem_aws_backup, label: "Oem Aws Backup", weight: 0.07142859}
+  - id: oem_azure
+    weight: 1.0
+    platforms:
+      - {id: oem_azure_vm, label: "Oem Azure Vm", weight: 0.07692308}
+      - {id: oem_azure_vnet, label: "Oem Azure Vnet", weight: 0.07692308}
+      - {id: oem_azure_blob, label: "Oem Azure Blob", weight: 0.07692308}
+      - {id: oem_azure_aks, label: "Oem Azure Aks", weight: 0.07692308}
+      - {id: oem_azure_azure_sql, label: "Oem Azure Azure Sql", weight: 0.07692308}
+      - {id: oem_azure_monitor, label: "Oem Azure Monitor", weight: 0.07692308}
+      - {id: oem_azure_expressroute, label: "Oem Azure Expressroute", weight: 0.07692308}
+      - {id: oem_azure_firewall, label: "Oem Azure Firewall", weight: 0.07692308}
+      - {id: oem_azure_sentinel, label: "Oem Azure Sentinel", weight: 0.07692308}
+      - {id: oem_azure_policy_arc, label: "Oem Azure Policy Arc", weight: 0.07692308}
+      - {id: oem_azure_lb_appgw, label: "Oem Azure Lb Appgw", weight: 0.07692308}
+      - {id: oem_azure_backup, label: "Oem Azure Backup", weight: 0.07692308}
+      - {id: oem_azure_files, label: "Oem Azure Files", weight: 0.07692304}
+  - id: oem_google_cloud
+    weight: 1.0
+    platforms:
+      - {id: oem_google_cloud_gce, label: "Oem Google Cloud Gce", weight: 0.08333333}
+      - {id: oem_google_cloud_vpc, label: "Oem Google Cloud Vpc", weight: 0.08333333}
+      - {id: oem_google_cloud_gke, label: "Oem Google Cloud Gke", weight: 0.08333333}
+      - {id: oem_google_cloud_cloud_sql, label: "Oem Google Cloud Cloud Sql", weight: 0.08333333}
+      - {id: oem_google_cloud_bigquery, label: "Oem Google Cloud Bigquery", weight: 0.08333333}
+      - {id: oem_google_cloud_gcs, label: "Oem Google Cloud Gcs", weight: 0.08333333}
+      - {id: oem_google_cloud_iam, label: "Oem Google Cloud Iam", weight: 0.08333333}
+      - {id: oem_google_cloud_cloud_armor, label: "Oem Google Cloud Cloud Armor", weight: 0.08333333}
+      - {id: oem_google_cloud_interconnect, label: "Oem Google Cloud Interconnect", weight: 0.08333333}
+      - {id: oem_google_cloud_logging, label: "Oem Google Cloud Logging", weight: 0.08333333}
+      - {id: oem_google_cloud_pubsub, label: "Oem Google Cloud Pubsub", weight: 0.08333333}
+      - {id: oem_google_cloud_cloud_run, label: "Oem Google Cloud Cloud Run", weight: 0.08333337}
+  - id: oem_other_cloud
+    weight: 1.0
+    platforms:
+      - {id: oem_other_cloud_oci, label: "Oem Other Cloud Oci", weight: 0.14285714}
+      - {id: oem_other_cloud_ibm_cloud, label: "Oem Other Cloud Ibm Cloud", weight: 0.14285714}
+      - {id: oem_other_cloud_alibaba, label: "Oem Other Cloud Alibaba", weight: 0.14285714}
+      - {id: oem_other_cloud_digitalocean, label: "Oem Other Cloud Digitalocean", weight: 0.14285714}
+      - {id: oem_other_cloud_akamai_linode, label: "Oem Other Cloud Akamai Linode", weight: 0.14285714}
+      - {id: oem_other_cloud_ovh, label: "Oem Other Cloud Ovh", weight: 0.14285714}
+      - {id: oem_other_cloud_hetzner, label: "Oem Other Cloud Hetzner", weight: 0.14285716}
+  - id: oem_microsoft
+    weight: 1.0
+    platforms:
+      - {id: oem_microsoft_windows_server, label: "Oem Microsoft Windows Server", weight: 0.07142857}
+      - {id: oem_microsoft_active_directory, label: "Oem Microsoft Active Directory", weight: 0.07142857}
+      - {id: oem_microsoft_m365, label: "Oem Microsoft M365", weight: 0.07142857}
+      - {id: oem_microsoft_exchange, label: "Oem Microsoft Exchange", weight: 0.07142857}
+      - {id: oem_microsoft_sharepoint, label: "Oem Microsoft Sharepoint", weight: 0.07142857}
+      - {id: oem_microsoft_teams, label: "Oem Microsoft Teams", weight: 0.07142857}
+      - {id: oem_microsoft_entra_id, label: "Oem Microsoft Entra Id", weight: 0.07142857}
+      - {id: oem_microsoft_intune, label: "Oem Microsoft Intune", weight: 0.07142857}
+      - {id: oem_microsoft_defender, label: "Oem Microsoft Defender", weight: 0.07142857}
+      - {id: oem_microsoft_sql_server, label: "Oem Microsoft Sql Server", weight: 0.07142857}
+      - {id: oem_microsoft_hyper_v, label: "Oem Microsoft Hyper V", weight: 0.07142857}
+      - {id: oem_microsoft_sccm_mecm, label: "Oem Microsoft Sccm Mecm", weight: 0.07142857}
+      - {id: oem_microsoft_power_platform, label: "Oem Microsoft Power Platform", weight: 0.07142857}
+      - {id: oem_microsoft_windows_11, label: "Oem Microsoft Windows 11", weight: 0.07142859}
+  - id: oem_ibm
+    weight: 1.0
+    platforms:
+      - {id: oem_ibm_power_aix, label: "Oem Ibm Power Aix", weight: 0.07142857}
+      - {id: oem_ibm_ibm_i, label: "Oem Ibm Ibm I", weight: 0.07142857}
+      - {id: oem_ibm_zos, label: "Oem Ibm Zos", weight: 0.07142857}
+      - {id: oem_ibm_flashsystem, label: "Oem Ibm Flashsystem", weight: 0.07142857}
+      - {id: oem_ibm_maximo, label: "Oem Ibm Maximo", weight: 0.07142857}
+      - {id: oem_ibm_qradar, label: "Oem Ibm Qradar", weight: 0.07142857}
+      - {id: oem_ibm_instana, label: "Oem Ibm Instana", weight: 0.07142857}
+      - {id: oem_ibm_turbonomic, label: "Oem Ibm Turbonomic", weight: 0.07142857}
+      - {id: oem_ibm_mq, label: "Oem Ibm Mq", weight: 0.07142857}
+      - {id: oem_ibm_db2, label: "Oem Ibm Db2", weight: 0.07142857}
+      - {id: oem_ibm_watsonx, label: "Oem Ibm Watsonx", weight: 0.07142857}
+      - {id: oem_ibm_cloud_pak, label: "Oem Ibm Cloud Pak", weight: 0.07142857}
+      - {id: oem_ibm_websphere, label: "Oem Ibm Websphere", weight: 0.07142857}
+      - {id: oem_ibm_spectrum_protect, label: "Oem Ibm Spectrum Protect", weight: 0.07142859}
+  - id: oem_red_hat
+    weight: 1.0
+    platforms:
+      - {id: oem_red_hat_rhel, label: "Oem Red Hat Rhel", weight: 0.12500000}
+      - {id: oem_red_hat_openshift, label: "Oem Red Hat Openshift", weight: 0.12500000}
+      - {id: oem_red_hat_ansible_aap, label: "Oem Red Hat Ansible Aap", weight: 0.12500000}
+      - {id: oem_red_hat_satellite, label: "Oem Red Hat Satellite", weight: 0.12500000}
+      - {id: oem_red_hat_idm, label: "Oem Red Hat Idm", weight: 0.12500000}
+      - {id: oem_red_hat_ceph, label: "Oem Red Hat Ceph", weight: 0.12500000}
+      - {id: oem_red_hat_openstack, label: "Oem Red Hat Openstack", weight: 0.12500000}
+      - {id: oem_red_hat_insights, label: "Oem Red Hat Insights", weight: 0.12500000}
+  - id: oem_canonical
+    weight: 1.0
+    platforms:
+      - {id: oem_canonical_ubuntu_server, label: "Oem Canonical Ubuntu Server", weight: 0.16666667}
+      - {id: oem_canonical_ubuntu_pro, label: "Oem Canonical Ubuntu Pro", weight: 0.16666667}
+      - {id: oem_canonical_landscape, label: "Oem Canonical Landscape", weight: 0.16666667}
+      - {id: oem_canonical_lxd, label: "Oem Canonical Lxd", weight: 0.16666667}
+      - {id: oem_canonical_maas, label: "Oem Canonical Maas", weight: 0.16666667}
+      - {id: oem_canonical_juju, label: "Oem Canonical Juju", weight: 0.16666665}
+  - id: oem_linux_distros
+    weight: 1.0
+    platforms:
+      - {id: oem_linux_distros_debian, label: "Oem Linux Distros Debian", weight: 0.14285714}
+      - {id: oem_linux_distros_rocky, label: "Oem Linux Distros Rocky", weight: 0.14285714}
+      - {id: oem_linux_distros_alma, label: "Oem Linux Distros Alma", weight: 0.14285714}
+      - {id: oem_linux_distros_oracle_linux, label: "Oem Linux Distros Oracle Linux", weight: 0.14285714}
+      - {id: oem_linux_distros_amazon_linux, label: "Oem Linux Distros Amazon Linux", weight: 0.14285714}
+      - {id: oem_linux_distros_sles, label: "Oem Linux Distros Sles", weight: 0.14285714}
+      - {id: oem_linux_distros_freebsd, label: "Oem Linux Distros Freebsd", weight: 0.14285716}
+  - id: oem_kubernetes
+    weight: 1.0
+    platforms:
+      - {id: oem_kubernetes_control_plane, label: "Oem Kubernetes Control Plane", weight: 0.10000000}
+      - {id: oem_kubernetes_etcd, label: "Oem Kubernetes Etcd", weight: 0.10000000}
+      - {id: oem_kubernetes_cni, label: "Oem Kubernetes Cni", weight: 0.10000000}
+      - {id: oem_kubernetes_ingress, label: "Oem Kubernetes Ingress", weight: 0.10000000}
+      - {id: oem_kubernetes_rbac, label: "Oem Kubernetes Rbac", weight: 0.10000000}
+      - {id: oem_kubernetes_storage_class, label: "Oem Kubernetes Storage Class", weight: 0.10000000}
+      - {id: oem_kubernetes_operators, label: "Oem Kubernetes Operators", weight: 0.10000000}
+      - {id: oem_kubernetes_gateway_api, label: "Oem Kubernetes Gateway Api", weight: 0.10000000}
+      - {id: oem_kubernetes_network_policy, label: "Oem Kubernetes Network Policy", weight: 0.10000000}
+      - {id: oem_kubernetes_cluster_upgrade, label: "Oem Kubernetes Cluster Upgrade", weight: 0.10000000}
+  - id: oem_cisco
+    weight: 1.0
+    platforms:
+      - {id: oem_cisco_ios_xe, label: "Oem Cisco Ios Xe", weight: 0.07142857}
+      - {id: oem_cisco_ios_xr, label: "Oem Cisco Ios Xr", weight: 0.07142857}
+      - {id: oem_cisco_nxos, label: "Oem Cisco Nxos", weight: 0.07142857}
+      - {id: oem_cisco_meraki, label: "Oem Cisco Meraki", weight: 0.07142857}
+      - {id: oem_cisco_catalyst_center, label: "Oem Cisco Catalyst Center", weight: 0.07142857}
+      - {id: oem_cisco_ise, label: "Oem Cisco Ise", weight: 0.07142857}
+      - {id: oem_cisco_firepower, label: "Oem Cisco Firepower", weight: 0.07142857}
+      - {id: oem_cisco_umbrella, label: "Oem Cisco Umbrella", weight: 0.07142857}
+      - {id: oem_cisco_duo, label: "Oem Cisco Duo", weight: 0.07142857}
+      - {id: oem_cisco_thousandeyes, label: "Oem Cisco Thousandeyes", weight: 0.07142857}
+      - {id: oem_cisco_viptela, label: "Oem Cisco Viptela", weight: 0.07142857}
+      - {id: oem_cisco_webex, label: "Oem Cisco Webex", weight: 0.07142857}
+      - {id: oem_cisco_appdynamics, label: "Oem Cisco Appdynamics", weight: 0.07142857}
+      - {id: oem_cisco_ucs, label: "Oem Cisco Ucs", weight: 0.07142859}
+  - id: oem_juniper
+    weight: 1.0
+    platforms:
+      - {id: oem_juniper_junos, label: "Oem Juniper Junos", weight: 0.12500000}
+      - {id: oem_juniper_mist, label: "Oem Juniper Mist", weight: 0.12500000}
+      - {id: oem_juniper_srx, label: "Oem Juniper Srx", weight: 0.12500000}
+      - {id: oem_juniper_mx, label: "Oem Juniper Mx", weight: 0.12500000}
+      - {id: oem_juniper_qfx, label: "Oem Juniper Qfx", weight: 0.12500000}
+      - {id: oem_juniper_apstra, label: "Oem Juniper Apstra", weight: 0.12500000}
+      - {id: oem_juniper_contrail, label: "Oem Juniper Contrail", weight: 0.12500000}
+      - {id: oem_juniper_session_smart, label: "Oem Juniper Session Smart", weight: 0.12500000}
+  - id: oem_fortinet
+    weight: 1.0
+    platforms:
+      - {id: oem_fortinet_fortigate, label: "Oem Fortinet Fortigate", weight: 0.08333333}
+      - {id: oem_fortinet_fortimanager, label: "Oem Fortinet Fortimanager", weight: 0.08333333}
+      - {id: oem_fortinet_fortianalyzer, label: "Oem Fortinet Fortianalyzer", weight: 0.08333333}
+      - {id: oem_fortinet_forticlient, label: "Oem Fortinet Forticlient", weight: 0.08333333}
+      - {id: oem_fortinet_fortisase, label: "Oem Fortinet Fortisase", weight: 0.08333333}
+      - {id: oem_fortinet_fortimail, label: "Oem Fortinet Fortimail", weight: 0.08333333}
+      - {id: oem_fortinet_fortiweb, label: "Oem Fortinet Fortiweb", weight: 0.08333333}
+      - {id: oem_fortinet_fortiedr, label: "Oem Fortinet Fortiedr", weight: 0.08333333}
+      - {id: oem_fortinet_fortiswitch, label: "Oem Fortinet Fortiswitch", weight: 0.08333333}
+      - {id: oem_fortinet_fortiap, label: "Oem Fortinet Fortiap", weight: 0.08333333}
+      - {id: oem_fortinet_fortiauthenticator, label: "Oem Fortinet Fortiauthenticator", weight: 0.08333333}
+      - {id: oem_fortinet_forticnapp, label: "Oem Fortinet Forticnapp", weight: 0.08333337}
+  - id: oem_versa
+    weight: 1.0
+    platforms:
+      - {id: oem_versa_versa_director, label: "Oem Versa Versa Director", weight: 0.20000000}
+      - {id: oem_versa_versa_analytics, label: "Oem Versa Versa Analytics", weight: 0.20000000}
+      - {id: oem_versa_versa_os, label: "Oem Versa Versa Os", weight: 0.20000000}
+      - {id: oem_versa_versa_sase, label: "Oem Versa Versa Sase", weight: 0.20000000}
+      - {id: oem_versa_versa_titan, label: "Oem Versa Versa Titan", weight: 0.20000000}
+  - id: oem_palo_alto
+    weight: 1.0
+    platforms:
+      - {id: oem_palo_alto_panos, label: "Oem Palo Alto Panos", weight: 0.12500000}
+      - {id: oem_palo_alto_panorama, label: "Oem Palo Alto Panorama", weight: 0.12500000}
+      - {id: oem_palo_alto_prisma_access, label: "Oem Palo Alto Prisma Access", weight: 0.12500000}
+      - {id: oem_palo_alto_prisma_cloud, label: "Oem Palo Alto Prisma Cloud", weight: 0.12500000}
+      - {id: oem_palo_alto_cortex_xdr, label: "Oem Palo Alto Cortex Xdr", weight: 0.12500000}
+      - {id: oem_palo_alto_globalprotect, label: "Oem Palo Alto Globalprotect", weight: 0.12500000}
+      - {id: oem_palo_alto_wildfire, label: "Oem Palo Alto Wildfire", weight: 0.12500000}
+      - {id: oem_palo_alto_sdwan, label: "Oem Palo Alto Sdwan", weight: 0.12500000}
+  - id: oem_hpe_aruba
+    weight: 1.0
+    platforms:
+      - {id: oem_hpe_aruba_aos_cx, label: "Oem Hpe Aruba Aos Cx", weight: 0.16666667}
+      - {id: oem_hpe_aruba_central, label: "Oem Hpe Aruba Central", weight: 0.16666667}
+      - {id: oem_hpe_aruba_clearpass, label: "Oem Hpe Aruba Clearpass", weight: 0.16666667}
+      - {id: oem_hpe_aruba_silver_peak, label: "Oem Hpe Aruba Silver Peak", weight: 0.16666667}
+      - {id: oem_hpe_aruba_ssid_rf, label: "Oem Hpe Aruba Ssid Rf", weight: 0.16666667}
+      - {id: oem_hpe_aruba_nac, label: "Oem Hpe Aruba Nac", weight: 0.16666665}
+  - id: oem_other_network_oem
+    weight: 1.0
+    platforms:
+      - {id: oem_other_network_oem_arista_eos, label: "Oem Other Network Oem Arista Eos", weight: 0.10000000}
+      - {id: oem_other_network_oem_extreme, label: "Oem Other Network Oem Extreme", weight: 0.10000000}
+      - {id: oem_other_network_oem_ubiquiti, label: "Oem Other Network Oem Ubiquiti", weight: 0.10000000}
+      - {id: oem_other_network_oem_mikrotik, label: "Oem Other Network Oem Mikrotik", weight: 0.10000000}
+      - {id: oem_other_network_oem_f5_bigip, label: "Oem Other Network Oem F5 Bigip", weight: 0.10000000}
+      - {id: oem_other_network_oem_checkpoint, label: "Oem Other Network Oem Checkpoint", weight: 0.10000000}
+      - {id: oem_other_network_oem_nokia_srlinux, label: "Oem Other Network Oem Nokia Srlinux", weight: 0.10000000}
+      - {id: oem_other_network_oem_sonicwall, label: "Oem Other Network Oem Sonicwall", weight: 0.10000000}
+      - {id: oem_other_network_oem_ruckus, label: "Oem Other Network Oem Ruckus", weight: 0.10000000}
+      - {id: oem_other_network_oem_infoblox, label: "Oem Other Network Oem Infoblox", weight: 0.10000000}
+  - id: oem_cloudflare
+    weight: 1.0
+    platforms:
+      - {id: oem_cloudflare_cdn_cache, label: "Oem Cloudflare Cdn Cache", weight: 0.11111111}
+      - {id: oem_cloudflare_waf, label: "Oem Cloudflare Waf", weight: 0.11111111}
+      - {id: oem_cloudflare_tunnel, label: "Oem Cloudflare Tunnel", weight: 0.11111111}
+      - {id: oem_cloudflare_zero_trust, label: "Oem Cloudflare Zero Trust", weight: 0.11111111}
+      - {id: oem_cloudflare_workers, label: "Oem Cloudflare Workers", weight: 0.11111111}
+      - {id: oem_cloudflare_r2, label: "Oem Cloudflare R2", weight: 0.11111111}
+      - {id: oem_cloudflare_dns, label: "Oem Cloudflare Dns", weight: 0.11111111}
+      - {id: oem_cloudflare_bot_mgmt, label: "Oem Cloudflare Bot Mgmt", weight: 0.11111111}
+      - {id: oem_cloudflare_magic_wan, label: "Oem Cloudflare Magic Wan", weight: 0.11111112}
+  - id: oem_zscaler
+    weight: 1.0
+    platforms:
+      - {id: oem_zscaler_zia, label: "Oem Zscaler Zia", weight: 0.16666667}
+      - {id: oem_zscaler_zpa, label: "Oem Zscaler Zpa", weight: 0.16666667}
+      - {id: oem_zscaler_zdx, label: "Oem Zscaler Zdx", weight: 0.16666667}
+      - {id: oem_zscaler_zcc, label: "Oem Zscaler Zcc", weight: 0.16666667}
+      - {id: oem_zscaler_bsp, label: "Oem Zscaler Bsp", weight: 0.16666667}
+      - {id: oem_zscaler_deception, label: "Oem Zscaler Deception", weight: 0.16666665}
+  - id: oem_other_sase
+    weight: 1.0
+    platforms:
+      - {id: oem_other_sase_netskope, label: "Oem Other Sase Netskope", weight: 0.20000000}
+      - {id: oem_other_sase_cato, label: "Oem Other Sase Cato", weight: 0.20000000}
+      - {id: oem_other_sase_forcepoint, label: "Oem Other Sase Forcepoint", weight: 0.20000000}
+      - {id: oem_other_sase_skyhigh, label: "Oem Other Sase Skyhigh", weight: 0.20000000}
+      - {id: oem_other_sase_perimeter81, label: "Oem Other Sase Perimeter81", weight: 0.20000000}
+  - id: oem_crowdstrike
+    weight: 1.0
+    platforms:
+      - {id: oem_crowdstrike_falcon_prevent, label: "Oem Crowdstrike Falcon Prevent", weight: 0.12500000}
+      - {id: oem_crowdstrike_insight, label: "Oem Crowdstrike Insight", weight: 0.12500000}
+      - {id: oem_crowdstrike_overwatch, label: "Oem Crowdstrike Overwatch", weight: 0.12500000}
+      - {id: oem_crowdstrike_identity, label: "Oem Crowdstrike Identity", weight: 0.12500000}
+      - {id: oem_crowdstrike_cloud, label: "Oem Crowdstrike Cloud", weight: 0.12500000}
+      - {id: oem_crowdstrike_logscale, label: "Oem Crowdstrike Logscale", weight: 0.12500000}
+      - {id: oem_crowdstrike_discover, label: "Oem Crowdstrike Discover", weight: 0.12500000}
+      - {id: oem_crowdstrike_spotlight, label: "Oem Crowdstrike Spotlight", weight: 0.12500000}
+  - id: oem_cyberark
+    weight: 1.0
+    platforms:
+      - {id: oem_cyberark_privileged_cloud, label: "Oem Cyberark Privileged Cloud", weight: 0.14285714}
+      - {id: oem_cyberark_pam, label: "Oem Cyberark Pam", weight: 0.14285714}
+      - {id: oem_cyberark_identity, label: "Oem Cyberark Identity", weight: 0.14285714}
+      - {id: oem_cyberark_endpoint_privilege, label: "Oem Cyberark Endpoint Privilege", weight: 0.14285714}
+      - {id: oem_cyberark_secrets_manager, label: "Oem Cyberark Secrets Manager", weight: 0.14285714}
+      - {id: oem_cyberark_conjur, label: "Oem Cyberark Conjur", weight: 0.14285714}
+      - {id: oem_cyberark_remote_access, label: "Oem Cyberark Remote Access", weight: 0.14285716}
+  - id: oem_okta
+    weight: 1.0
+    platforms:
+      - {id: oem_okta_workforce, label: "Oem Okta Workforce", weight: 0.16666667}
+      - {id: oem_okta_cic, label: "Oem Okta Cic", weight: 0.16666667}
+      - {id: oem_okta_wga, label: "Oem Okta Wga", weight: 0.16666667}
+      - {id: oem_okta_privileged_access, label: "Oem Okta Privileged Access", weight: 0.16666667}
+      - {id: oem_okta_workflows, label: "Oem Okta Workflows", weight: 0.16666667}
+      - {id: oem_okta_fastpass, label: "Oem Okta Fastpass", weight: 0.16666665}
+  - id: oem_other_security_isv
+    weight: 1.0
+    platforms:
+      - {id: oem_other_security_isv_sentinelone, label: "Oem Other Security Isv Sentinelone", weight: 0.10000000}
+      - {id: oem_other_security_isv_tenable, label: "Oem Other Security Isv Tenable", weight: 0.10000000}
+      - {id: oem_other_security_isv_qualys, label: "Oem Other Security Isv Qualys", weight: 0.10000000}
+      - {id: oem_other_security_isv_rapid7, label: "Oem Other Security Isv Rapid7", weight: 0.10000000}
+      - {id: oem_other_security_isv_proofpoint, label: "Oem Other Security Isv Proofpoint", weight: 0.10000000}
+      - {id: oem_other_security_isv_mimecast, label: "Oem Other Security Isv Mimecast", weight: 0.10000000}
+      - {id: oem_other_security_isv_trend_micro, label: "Oem Other Security Isv Trend Micro", weight: 0.10000000}
+      - {id: oem_other_security_isv_sophos, label: "Oem Other Security Isv Sophos", weight: 0.10000000}
+      - {id: oem_other_security_isv_tanium, label: "Oem Other Security Isv Tanium", weight: 0.10000000}
+      - {id: oem_other_security_isv_darktrace, label: "Oem Other Security Isv Darktrace", weight: 0.10000000}
+  - id: oem_other_identity_isv
+    weight: 1.0
+    platforms:
+      - {id: oem_other_identity_isv_ping, label: "Oem Other Identity Isv Ping", weight: 0.16666667}
+      - {id: oem_other_identity_isv_sailpoint, label: "Oem Other Identity Isv Sailpoint", weight: 0.16666667}
+      - {id: oem_other_identity_isv_beyondtrust, label: "Oem Other Identity Isv Beyondtrust", weight: 0.16666667}
+      - {id: oem_other_identity_isv_delinea, label: "Oem Other Identity Isv Delinea", weight: 0.16666667}
+      - {id: oem_other_identity_isv_forgerock, label: "Oem Other Identity Isv Forgerock", weight: 0.16666667}
+      - {id: oem_other_identity_isv_jumpcloud, label: "Oem Other Identity Isv Jumpcloud", weight: 0.16666665}
+  - id: oem_dell
+    weight: 1.0
+    platforms:
+      - {id: oem_dell_poweredge, label: "Oem Dell Poweredge", weight: 0.12500000}
+      - {id: oem_dell_idrac, label: "Oem Dell Idrac", weight: 0.12500000}
+      - {id: oem_dell_powerstore, label: "Oem Dell Powerstore", weight: 0.12500000}
+      - {id: oem_dell_powerscale, label: "Oem Dell Powerscale", weight: 0.12500000}
+      - {id: oem_dell_vxrail, label: "Oem Dell Vxrail", weight: 0.12500000}
+      - {id: oem_dell_avamar, label: "Oem Dell Avamar", weight: 0.12500000}
+      - {id: oem_dell_networker, label: "Oem Dell Networker", weight: 0.12500000}
+      - {id: oem_dell_openmanage, label: "Oem Dell Openmanage", weight: 0.12500000}
+  - id: oem_hpe
+    weight: 1.0
+    platforms:
+      - {id: oem_hpe_proliant, label: "Oem Hpe Proliant", weight: 0.12500000}
+      - {id: oem_hpe_ilo, label: "Oem Hpe Ilo", weight: 0.12500000}
+      - {id: oem_hpe_alletra, label: "Oem Hpe Alletra", weight: 0.12500000}
+      - {id: oem_hpe_synergy, label: "Oem Hpe Synergy", weight: 0.12500000}
+      - {id: oem_hpe_greenlake, label: "Oem Hpe Greenlake", weight: 0.12500000}
+      - {id: oem_hpe_primera_3par, label: "Oem Hpe Primera 3par", weight: 0.12500000}
+      - {id: oem_hpe_storeonce, label: "Oem Hpe Storeonce", weight: 0.12500000}
+      - {id: oem_hpe_oneview, label: "Oem Hpe Oneview", weight: 0.12500000}
+  - id: oem_netapp
+    weight: 1.0
+    platforms:
+      - {id: oem_netapp_ontap, label: "Oem Netapp Ontap", weight: 0.16666667}
+      - {id: oem_netapp_ontap_select, label: "Oem Netapp Ontap Select", weight: 0.16666667}
+      - {id: oem_netapp_storagegrid, label: "Oem Netapp Storagegrid", weight: 0.16666667}
+      - {id: oem_netapp_cloud_volumes, label: "Oem Netapp Cloud Volumes", weight: 0.16666667}
+      - {id: oem_netapp_snapmirror, label: "Oem Netapp Snapmirror", weight: 0.16666667}
+      - {id: oem_netapp_active_iq, label: "Oem Netapp Active Iq", weight: 0.16666665}
+  - id: oem_pure_storage
+    weight: 1.0
+    platforms:
+      - {id: oem_pure_storage_flasharray, label: "Oem Pure Storage Flasharray", weight: 0.20000000}
+      - {id: oem_pure_storage_flashblade, label: "Oem Pure Storage Flashblade", weight: 0.20000000}
+      - {id: oem_pure_storage_portworx, label: "Oem Pure Storage Portworx", weight: 0.20000000}
+      - {id: oem_pure_storage_fusion, label: "Oem Pure Storage Fusion", weight: 0.20000000}
+      - {id: oem_pure_storage_cloud_block, label: "Oem Pure Storage Cloud Block", weight: 0.20000000}
+  - id: oem_other_compute_oem
+    weight: 1.0
+    platforms:
+      - {id: oem_other_compute_oem_lenovo_thinksystem, label: "Oem Other Compute Oem Lenovo Thinksystem", weight: 0.33333333}
+      - {id: oem_other_compute_oem_supermicro, label: "Oem Other Compute Oem Supermicro", weight: 0.33333333}
+      - {id: oem_other_compute_oem_hitachi_vantara, label: "Oem Other Compute Oem Hitachi Vantara", weight: 0.33333334}
+  - id: oem_vmware
+    weight: 1.0
+    platforms:
+      - {id: oem_vmware_vsphere, label: "Oem Vmware Vsphere", weight: 0.11111111}
+      - {id: oem_vmware_vcenter, label: "Oem Vmware Vcenter", weight: 0.11111111}
+      - {id: oem_vmware_vsan, label: "Oem Vmware Vsan", weight: 0.11111111}
+      - {id: oem_vmware_nsx, label: "Oem Vmware Nsx", weight: 0.11111111}
+      - {id: oem_vmware_horizon, label: "Oem Vmware Horizon", weight: 0.11111111}
+      - {id: oem_vmware_aria, label: "Oem Vmware Aria", weight: 0.11111111}
+      - {id: oem_vmware_velocloud, label: "Oem Vmware Velocloud", weight: 0.11111111}
+      - {id: oem_vmware_tanzu, label: "Oem Vmware Tanzu", weight: 0.11111111}
+      - {id: oem_vmware_vcf, label: "Oem Vmware Vcf", weight: 0.11111112}
+  - id: oem_nutanix
+    weight: 1.0
+    platforms:
+      - {id: oem_nutanix_ahv, label: "Oem Nutanix Ahv", weight: 0.16666667}
+      - {id: oem_nutanix_prism, label: "Oem Nutanix Prism", weight: 0.16666667}
+      - {id: oem_nutanix_files, label: "Oem Nutanix Files", weight: 0.16666667}
+      - {id: oem_nutanix_flow, label: "Oem Nutanix Flow", weight: 0.16666667}
+      - {id: oem_nutanix_calm, label: "Oem Nutanix Calm", weight: 0.16666667}
+      - {id: oem_nutanix_nkp, label: "Oem Nutanix Nkp", weight: 0.16666665}
+  - id: oem_other_hypervisor
+    weight: 1.0
+    platforms:
+      - {id: oem_other_hypervisor_proxmox, label: "Oem Other Hypervisor Proxmox", weight: 0.25000000}
+      - {id: oem_other_hypervisor_citrix_cvad, label: "Oem Other Hypervisor Citrix Cvad", weight: 0.25000000}
+      - {id: oem_other_hypervisor_kvm_libvirt, label: "Oem Other Hypervisor Kvm Libvirt", weight: 0.25000000}
+      - {id: oem_other_hypervisor_oracle_virtualization, label: "Oem Other Hypervisor Oracle Virtualization", weight: 0.25000000}
+  - id: oem_oracle
+    weight: 1.0
+    platforms:
+      - {id: oem_oracle_database, label: "Oem Oracle Database", weight: 0.12500000}
+      - {id: oem_oracle_rac_dataguard, label: "Oem Oracle Rac Dataguard", weight: 0.12500000}
+      - {id: oem_oracle_exadata, label: "Oem Oracle Exadata", weight: 0.12500000}
+      - {id: oem_oracle_goldengate, label: "Oem Oracle Goldengate", weight: 0.12500000}
+      - {id: oem_oracle_ebs, label: "Oem Oracle Ebs", weight: 0.12500000}
+      - {id: oem_oracle_fusion_cloud, label: "Oem Oracle Fusion Cloud", weight: 0.12500000}
+      - {id: oem_oracle_weblogic, label: "Oem Oracle Weblogic", weight: 0.12500000}
+      - {id: oem_oracle_mysql_heatwave, label: "Oem Oracle Mysql Heatwave", weight: 0.12500000}
+  - id: oem_database_isvs
+    weight: 1.0
+    platforms:
+      - {id: oem_database_isvs_postgresql, label: "Oem Database Isvs Postgresql", weight: 0.08333333}
+      - {id: oem_database_isvs_mysql, label: "Oem Database Isvs Mysql", weight: 0.08333333}
+      - {id: oem_database_isvs_mariadb, label: "Oem Database Isvs Mariadb", weight: 0.08333333}
+      - {id: oem_database_isvs_mongodb, label: "Oem Database Isvs Mongodb", weight: 0.08333333}
+      - {id: oem_database_isvs_redis, label: "Oem Database Isvs Redis", weight: 0.08333333}
+      - {id: oem_database_isvs_elasticsearch, label: "Oem Database Isvs Elasticsearch", weight: 0.08333333}
+      - {id: oem_database_isvs_snowflake, label: "Oem Database Isvs Snowflake", weight: 0.08333333}
+      - {id: oem_database_isvs_databricks, label: "Oem Database Isvs Databricks", weight: 0.08333333}
+      - {id: oem_database_isvs_cockroach, label: "Oem Database Isvs Cockroach", weight: 0.08333333}
+      - {id: oem_database_isvs_cassandra, label: "Oem Database Isvs Cassandra", weight: 0.08333333}
+      - {id: oem_database_isvs_neo4j, label: "Oem Database Isvs Neo4j", weight: 0.08333333}
+      - {id: oem_database_isvs_clickhouse, label: "Oem Database Isvs Clickhouse", weight: 0.08333337}
+  - id: oem_datadog
+    weight: 1.0
+    platforms:
+      - {id: oem_datadog_infra, label: "Oem Datadog Infra", weight: 0.12500000}
+      - {id: oem_datadog_apm, label: "Oem Datadog Apm", weight: 0.12500000}
+      - {id: oem_datadog_logs, label: "Oem Datadog Logs", weight: 0.12500000}
+      - {id: oem_datadog_synthetics, label: "Oem Datadog Synthetics", weight: 0.12500000}
+      - {id: oem_datadog_rum, label: "Oem Datadog Rum", weight: 0.12500000}
+      - {id: oem_datadog_security, label: "Oem Datadog Security", weight: 0.12500000}
+      - {id: oem_datadog_k8s, label: "Oem Datadog K8s", weight: 0.12500000}
+      - {id: oem_datadog_usm, label: "Oem Datadog Usm", weight: 0.12500000}
+  - id: oem_splunk
+    weight: 1.0
+    platforms:
+      - {id: oem_splunk_enterprise, label: "Oem Splunk Enterprise", weight: 0.14285714}
+      - {id: oem_splunk_cloud, label: "Oem Splunk Cloud", weight: 0.14285714}
+      - {id: oem_splunk_otel, label: "Oem Splunk Otel", weight: 0.14285714}
+      - {id: oem_splunk_enterprise_security, label: "Oem Splunk Enterprise Security", weight: 0.14285714}
+      - {id: oem_splunk_it_si, label: "Oem Splunk It Si", weight: 0.14285714}
+      - {id: oem_splunk_observability, label: "Oem Splunk Observability", weight: 0.14285714}
+      - {id: oem_splunk_forwarder, label: "Oem Splunk Forwarder", weight: 0.14285716}
+  - id: oem_other_observability
+    weight: 1.0
+    platforms:
+      - {id: oem_other_observability_dynatrace, label: "Oem Other Observability Dynatrace", weight: 0.11111111}
+      - {id: oem_other_observability_new_relic, label: "Oem Other Observability New Relic", weight: 0.11111111}
+      - {id: oem_other_observability_grafana, label: "Oem Other Observability Grafana", weight: 0.11111111}
+      - {id: oem_other_observability_zabbix, label: "Oem Other Observability Zabbix", weight: 0.11111111}
+      - {id: oem_other_observability_elastic, label: "Oem Other Observability Elastic", weight: 0.11111111}
+      - {id: oem_other_observability_pagerduty, label: "Oem Other Observability Pagerduty", weight: 0.11111111}
+      - {id: oem_other_observability_solarwinds, label: "Oem Other Observability Solarwinds", weight: 0.11111111}
+      - {id: oem_other_observability_manageengine, label: "Oem Other Observability Manageengine", weight: 0.11111111}
+      - {id: oem_other_observability_prometheus, label: "Oem Other Observability Prometheus", weight: 0.11111112}
+  - id: oem_backup_isvs
+    weight: 1.0
+    platforms:
+      - {id: oem_backup_isvs_veeam, label: "Oem Backup Isvs Veeam", weight: 0.12500000}
+      - {id: oem_backup_isvs_rubrik, label: "Oem Backup Isvs Rubrik", weight: 0.12500000}
+      - {id: oem_backup_isvs_cohesity, label: "Oem Backup Isvs Cohesity", weight: 0.12500000}
+      - {id: oem_backup_isvs_commvault, label: "Oem Backup Isvs Commvault", weight: 0.12500000}
+      - {id: oem_backup_isvs_veritas, label: "Oem Backup Isvs Veritas", weight: 0.12500000}
+      - {id: oem_backup_isvs_acronis, label: "Oem Backup Isvs Acronis", weight: 0.12500000}
+      - {id: oem_backup_isvs_datto, label: "Oem Backup Isvs Datto", weight: 0.12500000}
+      - {id: oem_backup_isvs_druva, label: "Oem Backup Isvs Druva", weight: 0.12500000}
+  - id: oem_servicenow
+    weight: 1.0
+    platforms:
+      - {id: oem_servicenow_itsm, label: "Oem Servicenow Itsm", weight: 0.12500000}
+      - {id: oem_servicenow_itom, label: "Oem Servicenow Itom", weight: 0.12500000}
+      - {id: oem_servicenow_cmdb, label: "Oem Servicenow Cmdb", weight: 0.12500000}
+      - {id: oem_servicenow_now_assist, label: "Oem Servicenow Now Assist", weight: 0.12500000}
+      - {id: oem_servicenow_secops, label: "Oem Servicenow Secops", weight: 0.12500000}
+      - {id: oem_servicenow_hrsd, label: "Oem Servicenow Hrsd", weight: 0.12500000}
+      - {id: oem_servicenow_csm, label: "Oem Servicenow Csm", weight: 0.12500000}
+      - {id: oem_servicenow_integration_hub, label: "Oem Servicenow Integration Hub", weight: 0.12500000}
+  - id: oem_atlassian
+    weight: 1.0
+    platforms:
+      - {id: oem_atlassian_jira, label: "Oem Atlassian Jira", weight: 0.16666667}
+      - {id: oem_atlassian_jira_sm, label: "Oem Atlassian Jira Sm", weight: 0.16666667}
+      - {id: oem_atlassian_confluence, label: "Oem Atlassian Confluence", weight: 0.16666667}
+      - {id: oem_atlassian_bitbucket, label: "Oem Atlassian Bitbucket", weight: 0.16666667}
+      - {id: oem_atlassian_opsgenie, label: "Oem Atlassian Opsgenie", weight: 0.16666667}
+      - {id: oem_atlassian_statuspage, label: "Oem Atlassian Statuspage", weight: 0.16666665}
+  - id: oem_google_workspace
+    weight: 1.0
+    platforms:
+      - {id: oem_google_workspace_gmail, label: "Oem Google Workspace Gmail", weight: 0.12500000}
+      - {id: oem_google_workspace_drive, label: "Oem Google Workspace Drive", weight: 0.12500000}
+      - {id: oem_google_workspace_calendar, label: "Oem Google Workspace Calendar", weight: 0.12500000}
+      - {id: oem_google_workspace_meet, label: "Oem Google Workspace Meet", weight: 0.12500000}
+      - {id: oem_google_workspace_chromeos, label: "Oem Google Workspace Chromeos", weight: 0.12500000}
+      - {id: oem_google_workspace_cloud_identity, label: "Oem Google Workspace Cloud Identity", weight: 0.12500000}
+      - {id: oem_google_workspace_vault, label: "Oem Google Workspace Vault", weight: 0.12500000}
+      - {id: oem_google_workspace_admin, label: "Oem Google Workspace Admin", weight: 0.12500000}
+  - id: oem_workplace_saas
+    weight: 1.0
+    platforms:
+      - {id: oem_workplace_saas_slack, label: "Oem Workplace Saas Slack", weight: 0.12500000}
+      - {id: oem_workplace_saas_zoom, label: "Oem Workplace Saas Zoom", weight: 0.12500000}
+      - {id: oem_workplace_saas_box, label: "Oem Workplace Saas Box", weight: 0.12500000}
+      - {id: oem_workplace_saas_dropbox, label: "Oem Workplace Saas Dropbox", weight: 0.12500000}
+      - {id: oem_workplace_saas_adobe, label: "Oem Workplace Saas Adobe", weight: 0.12500000}
+      - {id: oem_workplace_saas_freshservice, label: "Oem Workplace Saas Freshservice", weight: 0.12500000}
+      - {id: oem_workplace_saas_zendesk, label: "Oem Workplace Saas Zendesk", weight: 0.12500000}
+      - {id: oem_workplace_saas_bmc_helix, label: "Oem Workplace Saas Bmc Helix", weight: 0.12500000}
+  - id: oem_rmm_uem_isvs
+    weight: 1.0
+    platforms:
+      - {id: oem_rmm_uem_isvs_jamf, label: "Oem Rmm Uem Isvs Jamf", weight: 0.12500000}
+      - {id: oem_rmm_uem_isvs_ninjaone, label: "Oem Rmm Uem Isvs Ninjaone", weight: 0.12500000}
+      - {id: oem_rmm_uem_isvs_connectwise, label: "Oem Rmm Uem Isvs Connectwise", weight: 0.12500000}
+      - {id: oem_rmm_uem_isvs_kaseya, label: "Oem Rmm Uem Isvs Kaseya", weight: 0.12500000}
+      - {id: oem_rmm_uem_isvs_datto_rmm, label: "Oem Rmm Uem Isvs Datto Rmm", weight: 0.12500000}
+      - {id: oem_rmm_uem_isvs_omnissa, label: "Oem Rmm Uem Isvs Omnissa", weight: 0.12500000}
+      - {id: oem_rmm_uem_isvs_addigy, label: "Oem Rmm Uem Isvs Addigy", weight: 0.12500000}
+      - {id: oem_rmm_uem_isvs_hexnode, label: "Oem Rmm Uem Isvs Hexnode", weight: 0.12500000}
+  - id: oem_github
+    weight: 1.0
+    platforms:
+      - {id: oem_github_actions, label: "Oem Github Actions", weight: 0.16666667}
+      - {id: oem_github_packages, label: "Oem Github Packages", weight: 0.16666667}
+      - {id: oem_github_enterprise, label: "Oem Github Enterprise", weight: 0.16666667}
+      - {id: oem_github_copilot, label: "Oem Github Copilot", weight: 0.16666667}
+      - {id: oem_github_advanced_security, label: "Oem Github Advanced Security", weight: 0.16666667}
+      - {id: oem_github_codespaces, label: "Oem Github Codespaces", weight: 0.16666665}
+  - id: oem_hashicorp
+    weight: 1.0
+    platforms:
+      - {id: oem_hashicorp_terraform, label: "Oem Hashicorp Terraform", weight: 0.16666667}
+      - {id: oem_hashicorp_vault, label: "Oem Hashicorp Vault", weight: 0.16666667}
+      - {id: oem_hashicorp_consul, label: "Oem Hashicorp Consul", weight: 0.16666667}
+      - {id: oem_hashicorp_nomad, label: "Oem Hashicorp Nomad", weight: 0.16666667}
+      - {id: oem_hashicorp_boundary, label: "Oem Hashicorp Boundary", weight: 0.16666667}
+      - {id: oem_hashicorp_packer, label: "Oem Hashicorp Packer", weight: 0.16666665}
+  - id: oem_other_devops_isv
+    weight: 1.0
+    platforms:
+      - {id: oem_other_devops_isv_gitlab, label: "Oem Other Devops Isv Gitlab", weight: 0.10000000}
+      - {id: oem_other_devops_isv_jfrog, label: "Oem Other Devops Isv Jfrog", weight: 0.10000000}
+      - {id: oem_other_devops_isv_harness, label: "Oem Other Devops Isv Harness", weight: 0.10000000}
+      - {id: oem_other_devops_isv_circleci, label: "Oem Other Devops Isv Circleci", weight: 0.10000000}
+      - {id: oem_other_devops_isv_pulumi, label: "Oem Other Devops Isv Pulumi", weight: 0.10000000}
+      - {id: oem_other_devops_isv_argo, label: "Oem Other Devops Isv Argo", weight: 0.10000000}
+      - {id: oem_other_devops_isv_flux, label: "Oem Other Devops Isv Flux", weight: 0.10000000}
+      - {id: oem_other_devops_isv_jenkins, label: "Oem Other Devops Isv Jenkins", weight: 0.10000000}
+      - {id: oem_other_devops_isv_azure_devops, label: "Oem Other Devops Isv Azure Devops", weight: 0.10000000}
+      - {id: oem_other_devops_isv_docker, label: "Oem Other Devops Isv Docker", weight: 0.10000000}
+
+axes:
+  task_families:
+    - {id: incident_triage, label: "Incident Triage", weight: 0.05555556, difficulty_min: 1, difficulty_max: 10}
+    - {id: troubleshooting_rca, label: "Troubleshooting Rca", weight: 0.05555556, difficulty_min: 1, difficulty_max: 10}
+    - {id: hypothesis_and_evidence_plan, label: "Hypothesis And Evidence Plan", weight: 0.05555556, difficulty_min: 1, difficulty_max: 10}
+    - {id: telemetry_interpretation, label: "Telemetry Interpretation", weight: 0.05555556, difficulty_min: 1, difficulty_max: 10}
+    - {id: configuration_review, label: "Configuration Review", weight: 0.05555556, difficulty_min: 1, difficulty_max: 10}
+    - {id: infrastructure_as_code_review, label: "Infrastructure As Code Review", weight: 0.05555556, difficulty_min: 1, difficulty_max: 10}
+    - {id: tool_selection_and_execution_plan, label: "Tool Selection And Execution Plan", weight: 0.05555556, difficulty_min: 1, difficulty_max: 10}
+    - {id: safe_remediation_plan, label: "Safe Remediation Plan", weight: 0.05555556, difficulty_min: 1, difficulty_max: 10}
+    - {id: change_risk_and_approval, label: "Change Risk And Approval", weight: 0.05555556, difficulty_min: 1, difficulty_max: 10}
+    - {id: post_change_verification, label: "Post Change Verification", weight: 0.05555556, difficulty_min: 1, difficulty_max: 10}
+    - {id: rollback_planning, label: "Rollback Planning", weight: 0.05555556, difficulty_min: 1, difficulty_max: 10}
+    - {id: capacity_and_performance, label: "Capacity And Performance", weight: 0.05555556, difficulty_min: 1, difficulty_max: 10}
+    - {id: cost_and_resource_optimization, label: "Cost And Resource Optimization", weight: 0.05555556, difficulty_min: 1, difficulty_max: 10}
+    - {id: security_and_compliance_investigation, label: "Security And Compliance Investigation", weight: 0.05555556, difficulty_min: 1, difficulty_max: 10}
+    - {id: runbook_execution, label: "Runbook Execution", weight: 0.05555556, difficulty_min: 1, difficulty_max: 10}
+    - {id: incident_communication_and_handoff, label: "Incident Communication And Handoff", weight: 0.05555556, difficulty_min: 1, difficulty_max: 10}
+    - {id: postmortem_and_prevention, label: "Postmortem And Prevention", weight: 0.05555556, difficulty_min: 1, difficulty_max: 10}
+    - {id: abstention_and_escalation, label: "Abstention And Escalation", weight: 0.05555548, difficulty_min: 1, difficulty_max: 10}
+  environments:
+    - {id: on_premises, label: "On Premises", weight: 0.05000000}
+    - {id: branch, label: "Branch", weight: 0.05000000}
+    - {id: campus, label: "Campus", weight: 0.05000000}
+    - {id: data_center, label: "Data Center", weight: 0.05000000}
+    - {id: private_cloud, label: "Private Cloud", weight: 0.05000000}
+    - {id: public_cloud, label: "Public Cloud", weight: 0.05000000}
+    - {id: multi_cloud, label: "Multi Cloud", weight: 0.05000000}
+    - {id: hybrid, label: "Hybrid", weight: 0.05000000}
+    - {id: saas_tenant, label: "Saas Tenant", weight: 0.05000000}
+    - {id: remote_work, label: "Remote Work", weight: 0.05000000}
+    - {id: endpoint_fleet, label: "Endpoint Fleet", weight: 0.05000000}
+    - {id: mobile_fleet, label: "Mobile Fleet", weight: 0.05000000}
+    - {id: kubernetes, label: "Kubernetes", weight: 0.05000000}
+    - {id: edge, label: "Edge", weight: 0.05000000}
+    - {id: ot_iot, label: "Ot Iot", weight: 0.05000000}
+    - {id: backup_recovery_site, label: "Backup Recovery Site", weight: 0.05000000}
+    - {id: identity_control_plane, label: "Identity Control Plane", weight: 0.05000000}
+    - {id: developer_platform, label: "Developer Platform", weight: 0.05000000}
+    - {id: ai_hpc, label: "Ai Hpc", weight: 0.05000000}
+    - {id: lab_staging, label: "Lab Staging", weight: 0.05000000}
+  platform_scopes:
+    - {id: platform_neutral, label: "Platform Neutral", weight: 0.40000000}
+    - {id: single_platform, label: "Single Platform", weight: 0.40000000}
+    - {id: multi_platform, label: "Multi Platform", weight: 0.20000000}
+  incident_mechanisms:
+    - {id: misconfiguration, label: "Misconfiguration", weight: 0.05000000}
+    - {id: configuration_drift, label: "Configuration Drift", weight: 0.05000000}
+    - {id: policy_or_access, label: "Policy Or Access", weight: 0.05000000}
+    - {id: credential_or_secret_lifecycle, label: "Credential Or Secret Lifecycle", weight: 0.05000000}
+    - {id: certificate_or_key_expiry, label: "Certificate Or Key Expiry", weight: 0.05000000}
+    - {id: capacity_exhaustion, label: "Capacity Exhaustion", weight: 0.05000000}
+    - {id: resource_contention, label: "Resource Contention", weight: 0.05000000}
+    - {id: dependency_failure, label: "Dependency Failure", weight: 0.05000000}
+    - {id: network_or_path_failure, label: "Network Or Path Failure", weight: 0.05000000}
+    - {id: service_degradation, label: "Service Degradation", weight: 0.05000000}
+    - {id: software_defect, label: "Software Defect", weight: 0.05000000}
+    - {id: data_or_state_inconsistency, label: "Data Or State Inconsistency", weight: 0.05000000}
+    - {id: rate_limit_or_quota, label: "Rate Limit Or Quota", weight: 0.05000000}
+    - {id: change_regression, label: "Change Regression", weight: 0.05000000}
+    - {id: hardware_failure, label: "Hardware Failure", weight: 0.05000000}
+    - {id: security_event, label: "Security Event", weight: 0.05000000}
+    - {id: human_process_failure, label: "Human Process Failure", weight: 0.05000000}
+    - {id: telemetry_or_monitoring_gap, label: "Telemetry Or Monitoring Gap", weight: 0.05000000}
+    - {id: multi_fault, label: "Multi Fault", weight: 0.05000000}
+    - {id: unknown_requires_evidence, label: "Unknown Requires Evidence", weight: 0.05000000}
+  evidence_conditions:
+    - {id: complete, label: "Complete", weight: 0.12500000}
+    - {id: partial, label: "Partial", weight: 0.12500000}
+    - {id: stale, label: "Stale", weight: 0.12500000}
+    - {id: noisy, label: "Noisy", weight: 0.12500000}
+    - {id: contradictory, label: "Contradictory", weight: 0.12500000}
+    - {id: misleading, label: "Misleading", weight: 0.12500000}
+    - {id: intentionally_missing, label: "Intentionally Missing", weight: 0.12500000}
+    - {id: live_state_required, label: "Live State Required", weight: 0.12500000}
+  evidence_bundles:
+    - {id: ticket_cmdb, label: "Ticket Cmdb", weight: 0.05000000}
+    - {id: runbook_change_history, label: "Runbook Change History", weight: 0.05000000}
+    - {id: logs_metrics_traces, label: "Logs Metrics Traces", weight: 0.05000000}
+    - {id: service_health, label: "Service Health", weight: 0.05000000}
+    - {id: configuration_state, label: "Configuration State", weight: 0.05000000}
+    - {id: infrastructure_as_code, label: "Infrastructure As Code", weight: 0.05000000}
+    - {id: cloud_inventory, label: "Cloud Inventory", weight: 0.05000000}
+    - {id: cloud_bill_and_usage, label: "Cloud Bill And Usage", weight: 0.05000000}
+    - {id: identity_audit, label: "Identity Audit", weight: 0.05000000}
+    - {id: endpoint_telemetry, label: "Endpoint Telemetry", weight: 0.05000000}
+    - {id: network_path_and_flow, label: "Network Path And Flow", weight: 0.05000000}
+    - {id: dns_tls, label: "Dns Tls", weight: 0.05000000}
+    - {id: mail_trace, label: "Mail Trace", weight: 0.05000000}
+    - {id: database_state_and_queries, label: "Database State And Queries", weight: 0.05000000}
+    - {id: storage_backup_jobs, label: "Storage Backup Jobs", weight: 0.05000000}
+    - {id: security_alerts, label: "Security Alerts", weight: 0.05000000}
+    - {id: application_deployment_state, label: "Application Deployment State", weight: 0.05000000}
+    - {id: user_reports, label: "User Reports", weight: 0.05000000}
+    - {id: multi_source, label: "Multi Source", weight: 0.05000000}
+    - {id: intentionally_missing, label: "Intentionally Missing", weight: 0.05000000}
+  action_risks:
+    - {id: read_only_investigation, label: "Read Only Investigation", weight: 0.14285714}
+    - {id: recommendation_only, label: "Recommendation Only", weight: 0.14285714}
+    - {id: reversible_low_risk, label: "Reversible Low Risk", weight: 0.14285714}
+    - {id: approval_gated_change, label: "Approval Gated Change", weight: 0.14285714}
+    - {id: high_risk_change_plan_only, label: "High Risk Change Plan Only", weight: 0.14285714}
+    - {id: rollback_required, label: "Rollback Required", weight: 0.14285714}
+    - {id: escalation_required, label: "Escalation Required", weight: 0.14285716}
+  presentations:
+    - {id: service_desk_ticket, label: "Service Desk Ticket", weight: 0.08333333}
+    - {id: monitoring_alert, label: "Monitoring Alert", weight: 0.08333333}
+    - {id: war_room, label: "War Room", weight: 0.08333333}
+    - {id: shift_handover, label: "Shift Handover", weight: 0.08333333}
+    - {id: change_request, label: "Change Request", weight: 0.08333333}
+    - {id: runbook_gap, label: "Runbook Gap", weight: 0.08333333}
+    - {id: audit_finding, label: "Audit Finding", weight: 0.08333333}
+    - {id: capacity_review, label: "Capacity Review", weight: 0.08333333}
+    - {id: cost_review, label: "Cost Review", weight: 0.08333333}
+    - {id: customer_escalation, label: "Customer Escalation", weight: 0.08333333}
+    - {id: postmortem, label: "Postmortem", weight: 0.08333333}
+    - {id: tool_execution_task, label: "Tool Execution Task", weight: 0.08333337}
 
 categories:
   - id: itsm
+    weight: 0.10
     label: ITSM & Service Management
     pillar: Gartner ITSM · ITIL service practices
     blurb: System of record for request, incident, problem, change, knowledge, CMDB, SLA.
+    eligibility:
+      platform_groups: [itsm_cmdb, collaboration]
+      environments: [on_premises, hybrid, saas_tenant, remote_work]
+      evidence_bundles: [ticket_cmdb, runbook_change_history, logs_metrics_traces, user_reports, multi_source, intentionally_missing]
     domains:
-      - name: Service Desk
+      - id: service_desk
+        label: Service Desk
         origin: connector
         connectors: 15
         frameworks: [ITIL Service Desk, ITIL Request]
-        subdomains: [auto_deflection, classification_routing, l0_l1_autoresolve, ticket_enrichment, sla_breach, major_incident, approval_workflows, reassignment_churn, conversational_status, knowledge_deflection]
-      - name: Incident Management
+        subdomains: [{id: auto_deflection, capabilities: {}}, {id: classification_routing, capabilities: {}}, {id: l0_l1_autoresolve, capabilities: {}}, {id: ticket_enrichment, capabilities: {}}, {id: sla_breach, capabilities: {}}, {id: major_incident, capabilities: {}}, {id: approval_workflows, capabilities: {}}, {id: reassignment_churn, capabilities: {}}, {id: conversational_status, capabilities: {}}, {id: knowledge_deflection, capabilities: {}}]
+
+      - id: incident_management
+        label: Incident Management
         origin: fill
         frameworks: [ITIL Incident, NIST RS]
-        subdomains: [sev_classify, war_room, customer_comms, timeline, page_storm, commander_role, handoff, major_incident_bridge]
-      - name: Problem Management
+        subdomains: [{id: sev_classify, capabilities: {}}, {id: war_room, capabilities: {}}, {id: customer_comms, capabilities: {}}, {id: timeline, capabilities: {}}, {id: page_storm, capabilities: {}}, {id: commander_role, capabilities: {}}, {id: handoff, capabilities: {}}, {id: major_incident_bridge, capabilities: {}}]
+
+      - id: problem_management
+        label: Problem Management
         origin: fill
         frameworks: [ITIL Problem]
-        subdomains: [rca, known_error, workaround, problem_trend, ke_article, recurring_incident]
-      - name: Change Enablement
+        subdomains: [{id: rca, capabilities: {}}, {id: known_error, capabilities: {}}, {id: workaround, capabilities: {}}, {id: problem_trend, capabilities: {}}, {id: ke_article, capabilities: {}}, {id: recurring_incident, capabilities: {}}]
+
+      - id: change_enablement
+        label: Change Enablement
         origin: fill
         frameworks: [ITIL Change, Gartner ARO]
-        subdomains: [cab_risk, emergency_change, backout_plan, collision_window, standard_change, post_impl_verify, freeze_calendar]
-      - name: Request Catalog
+        subdomains: [{id: cab_risk, capabilities: {}}, {id: emergency_change, capabilities: {}}, {id: backout_plan, capabilities: {}}, {id: collision_window, capabilities: {}}, {id: standard_change, capabilities: {}}, {id: post_impl_verify, capabilities: {}}, {id: freeze_calendar, capabilities: {}}]
+
+      - id: request_catalog
+        label: Request Catalog
         origin: fill
         frameworks: [ITIL Request, ITIL Catalog]
-        subdomains: [catalog_item, fulfillment_path, entitlement, approval_chain, service_offering, request_sla]
-      - name: CMDB Configuration
+        subdomains: [{id: catalog_item, capabilities: {}}, {id: fulfillment_path, capabilities: {}}, {id: entitlement, capabilities: {}}, {id: approval_chain, capabilities: {}}, {id: service_offering, capabilities: {}}, {id: request_sla, capabilities: {}}]
+
+      - id: cmdb_configuration
+        label: CMDB Configuration
         origin: fill
         frameworks: [ITIL Configuration, ServiceNow CSDM]
-        subdomains: [ci_reconciliation, relationship_map, stale_ci, discovery_gap, service_mapping, orphan_ci]
-      - name: Knowledge Management
+        subdomains: [{id: ci_reconciliation, capabilities: {}}, {id: relationship_map, capabilities: {}}, {id: stale_ci, capabilities: {}}, {id: discovery_gap, capabilities: {}}, {id: service_mapping, capabilities: {}}, {id: orphan_ci, capabilities: {}}]
+
+      - id: knowledge_management
+        label: Knowledge Management
         origin: connector
         connectors: 13
         note: Scogo bucket is Productivity & Knowledge
         frameworks: [ITIL Knowledge]
-        subdomains: [kb_gap, article_decay, sop_from_ticket, search_miss, deflection_quality, conflicting_sop]
-      - name: Task Project Management
+        subdomains: [{id: kb_gap, capabilities: {}}, {id: article_decay, capabilities: {}}, {id: sop_from_ticket, capabilities: {}}, {id: search_miss, capabilities: {}}, {id: deflection_quality, capabilities: {}}, {id: conflicting_sop, capabilities: {}}]
+
+      - id: task_project_management
+        label: Task Project Management
         origin: connector
         connectors: 5
         frameworks: [ITIL Project]
-        subdomains: [sprint_block, it_project_risk, dependency, resource_conflict, change_project, milestone_slip]
-      - name: SLA Measurement
+        subdomains: [{id: sprint_block, capabilities: {}}, {id: it_project_risk, capabilities: {}}, {id: dependency, capabilities: {}}, {id: resource_conflict, capabilities: {}}, {id: change_project, capabilities: {}}, {id: milestone_slip, capabilities: {}}]
+
+      - id: sla_measurement
+        label: SLA Measurement
         origin: fill
         frameworks: [ITIL SLM, ITIL Measurement]
-        subdomains: [sla_clock, ola_breach, kpi_drift, report_pack, under_reporting]
+        subdomains: [{id: sla_clock, capabilities: {}}, {id: ola_breach, capabilities: {}}, {id: kpi_drift, capabilities: {}}, {id: report_pack, capabilities: {}}, {id: under_reporting, capabilities: {}}]
+
 
   - id: workplace
+    weight: 0.08
     label: Digital Workplace
     pillar: Employee-facing collab, email, content, voice, DEX
     blurb: How work happens in browser/SaaS. Highest L1 volume after the desk.
+    eligibility:
+      platform_groups: [microsoft_365, google_workspace, collaboration]
+      environments: [hybrid, saas_tenant, remote_work, endpoint_fleet]
+      evidence_bundles: [ticket_cmdb, service_health, endpoint_telemetry, dns_tls, mail_trace, user_reports, multi_source, intentionally_missing]
     domains:
-      - name: Collaboration Messaging
+      - id: collaboration_messaging
+        label: Collaboration Messaging
         origin: connector
         connectors: 3
-        subdomains: [teams_outage, slack_guest, channel_perm, message_retention, webhook_fail, federation]
-      - name: Email Communication
+        subdomains: [{id: teams_outage, capabilities: {}}, {id: slack_guest, capabilities: {}}, {id: channel_perm, capabilities: {}}, {id: message_retention, capabilities: {}}, {id: webhook_fail, capabilities: {}}, {id: federation, capabilities: {}}]
+
+      - id: email_communication
+        label: Email Communication
         origin: connector
         connectors: 3
-        subdomains: [mailbox_full, mail_flow, shared_mailbox, alias, journaling, transport_rule]
-      - name: Calendar Scheduling
+        subdomains: [{id: mailbox_full, capabilities: {}}, {id: mail_flow, capabilities: {}}, {id: shared_mailbox, capabilities: {}}, {id: alias, capabilities: {}}, {id: journaling, capabilities: {}}, {id: transport_rule, capabilities: {}}]
+
+      - id: calendar_scheduling
+        label: Calendar Scheduling
         origin: connector
         connectors: 3
-        subdomains: [room_conflict, booking_delegate, timezone, resource_mailbox, calendar_perm]
-      - name: Document Management
+        subdomains: [{id: room_conflict, capabilities: {}}, {id: booking_delegate, capabilities: {}}, {id: timezone, capabilities: {}}, {id: resource_mailbox, capabilities: {}}, {id: calendar_perm, capabilities: {}}]
+
+      - id: document_management
+        label: Document Management
         origin: connector
         connectors: 5
-        subdomains: [share_perm, version_conflict, retention_label, sync_fail, external_share, checkout_lock]
-      - name: Content Website
+        subdomains: [{id: share_perm, capabilities: {}}, {id: version_conflict, capabilities: {}}, {id: retention_label, capabilities: {}}, {id: sync_fail, capabilities: {}}, {id: external_share, capabilities: {}}, {id: checkout_lock, capabilities: {}}]
+
+      - id: content_website
+        label: Content Website
         origin: connector
         connectors: 2
-        subdomains: [cms_outage, publish_fail, cert_on_site, wcm_perm, plugin_break]
-      - name: Print Workplace Devices
+        subdomains: [{id: cms_outage, capabilities: {}}, {id: publish_fail, capabilities: {}}, {id: cert_on_site, capabilities: {}}, {id: wcm_perm, capabilities: {}}, {id: plugin_break, capabilities: {}}]
+
+      - id: print_workplace_devices
+        label: Print Workplace Devices
         origin: fill
-        subdomains: [print_queue, driver_mapping, scan_workflow, meeting_room_av, badge_access, thin_client]
-      - name: UCaaS Voice
+        subdomains: [{id: print_queue, capabilities: {}}, {id: driver_mapping, capabilities: {}}, {id: scan_workflow, capabilities: {}}, {id: meeting_room_av, capabilities: {}}, {id: badge_access, capabilities: {}}, {id: thin_client, capabilities: {}}]
+
+      - id: ucaas_voice
+        label: UCaaS Voice
         origin: fill
         frameworks: [ITIL Service Continuity]
-        subdomains: [call_quality, sbc, did_port, contact_center_queue, voicemail, recording_compliance]
-      - name: Digital Experience
+        subdomains: [{id: call_quality, capabilities: {}}, {id: sbc, capabilities: {}}, {id: did_port, capabilities: {}}, {id: contact_center_queue, capabilities: {}}, {id: voicemail, capabilities: {}}, {id: recording_compliance, capabilities: {}}]
+
+      - id: digital_experience
+        label: Digital Experience
         origin: fill
         frameworks: [Gartner DEM / DEX]
-        subdomains: [login_slowness, saas_apdex, rum_error, last_mile, crash_free]
+        subdomains: [{id: login_slowness, capabilities: {}}, {id: saas_apdex, capabilities: {}}, {id: rum_error, capabilities: {}}, {id: last_mile, capabilities: {}}, {id: crash_free, capabilities: {}}]
+
 
   - id: endpoint
+    weight: 0.11
     label: Endpoint & Device
     pillar: RMM · UEM/MDM · VDI · fleet health
     blurb: Device as the control plane. Scogo RMM is 1 connector; UEM/VDI still generate most of the work.
+    eligibility:
+      platform_groups: [endpoint_management, endpoint_operating_systems]
+      environments: [on_premises, branch, campus, remote_work, endpoint_fleet, mobile_fleet]
+      evidence_bundles: [ticket_cmdb, configuration_state, identity_audit, endpoint_telemetry, security_alerts, user_reports, multi_source, intentionally_missing]
     domains:
-      - name: RMM
+      - id: rmm
+        label: RMM
         origin: connector
         connectors: 1
-        subdomains: [agent_offline, self_heal, script_fail, patch_job, remote_session, policy_drift]
-      - name: UEM MDM
+        subdomains: [{id: agent_offline, capabilities: {}}, {id: self_heal, capabilities: {}}, {id: script_fail, capabilities: {}}, {id: patch_job, capabilities: {}}, {id: remote_session, capabilities: {}}, {id: policy_drift, capabilities: {}}]
+
+      - id: uem_mdm
+        label: UEM MDM
         origin: fill
         frameworks: [NIST PR.PS]
-        subdomains: [enrollment, compliance_policy, wipe, app_push, byod_privacy, autopilot]
-      - name: VDI DaaS
+        subdomains: [{id: enrollment, capabilities: {}}, {id: compliance_policy, capabilities: {}}, {id: wipe, capabilities: {}}, {id: app_push, capabilities: {}}, {id: byod_privacy, capabilities: {}}, {id: autopilot, capabilities: {}}]
+
+      - id: vdi_daas
+        label: VDI DaaS
         origin: fill
-        subdomains: [pool_exhaust, profile_corrupt, protocol_quality, golden_image, gpu_contention, broker]
-      - name: Endpoint Health
+        subdomains: [{id: pool_exhaust, capabilities: {}}, {id: profile_corrupt, capabilities: {}}, {id: protocol_quality, capabilities: {}}, {id: golden_image, capabilities: {}}, {id: gpu_contention, capabilities: {}}, {id: broker, capabilities: {}}]
+
+      - id: endpoint_health
+        label: Endpoint Health
         origin: catalogue
         frameworks: [Scogo D3]
-        subdomains: [health_score, disk_pressure, encryption_bitlocker, edr_presence, baseline_drift, service_failures]
+        subdomains: [{id: health_score, capabilities: {}}, {id: disk_pressure, capabilities: {}}, {id: encryption_bitlocker, capabilities: {}}, {id: edr_presence, capabilities: {}}, {id: baseline_drift, capabilities: {}}, {id: service_failures, capabilities: {}}]
+
 
   - id: identity
+    weight: 0.10
     label: Identity & Access
     pillar: IAM · PAM · IGA · directory
     blurb: Identity is the new perimeter. Screenshot has IAM only; PAM/IGA are distinct failure modes.
+    eligibility:
+      platform_groups: [identity_access, microsoft_365, google_workspace]
+      environments: [hybrid, saas_tenant, remote_work, identity_control_plane]
+      evidence_bundles: [ticket_cmdb, configuration_state, identity_audit, security_alerts, multi_source, intentionally_missing]
     domains:
-      - name: Identity Access
+      - id: identity_access
+        label: Identity Access
         origin: connector
         connectors: 15
         frameworks: [NIST PR.AA]
-        subdomains: [joiner, mover, leaver, sso_break, mfa_enrollment, conditional_access, scim_sync, guest_stale, entra_ad_sync]
-      - name: Privileged Access
+        subdomains: [{id: joiner, capabilities: {}}, {id: mover, capabilities: {}}, {id: leaver, capabilities: {}}, {id: sso_break, capabilities: {}}, {id: mfa_enrollment, capabilities: {}}, {id: conditional_access, capabilities: {}}, {id: scim_sync, capabilities: {}}, {id: guest_stale, capabilities: {}}, {id: entra_ad_sync, capabilities: {}}]
+
+      - id: privileged_access
+        label: Privileged Access
         origin: fill
         frameworks: [NIST PR.AA]
-        subdomains: [vault_checkout, jit_elevation, session_record, standing_admin, password_rotation, break_glass]
-      - name: Identity Governance
+        subdomains: [{id: vault_checkout, capabilities: {}}, {id: jit_elevation, capabilities: {}}, {id: session_record, capabilities: {}}, {id: standing_admin, capabilities: {}}, {id: password_rotation, capabilities: {}}, {id: break_glass, capabilities: {}}]
+
+      - id: identity_governance
+        label: Identity Governance
         origin: fill
-        subdomains: [access_certification, sod_conflict, orphan_account, entitlement_creep, role_mining, joiner_lag]
-      - name: Directory Services
+        subdomains: [{id: access_certification, capabilities: {}}, {id: sod_conflict, capabilities: {}}, {id: orphan_account, capabilities: {}}, {id: entitlement_creep, capabilities: {}}, {id: role_mining, capabilities: {}}, {id: joiner_lag, capabilities: {}}]
+
+      - id: directory_services
+        label: Directory Services
         origin: fill
-        subdomains: [ad_replication, fsmo, gpo_drift, aad_connect, ldap_bind, dns_srv]
+        subdomains: [{id: ad_replication, capabilities: {}}, {id: fsmo, capabilities: {}}, {id: gpo_drift, capabilities: {}}, {id: aad_connect, capabilities: {}}, {id: ldap_bind, capabilities: {}}, {id: dns_srv, capabilities: {}}]
+
 
   - id: secops
+    weight: 0.07
     label: Security Operations
     pillar: NIST Detect/Respond · SIEM SOAR EDR
     blurb: Split the screenshot's three SecOps buckets; add vuln, intel, GRC, forensics.
+    eligibility:
+      platform_groups: [security_operations, identity_access, network_security, public_cloud]
+      environments: [on_premises, data_center, public_cloud, multi_cloud, hybrid, saas_tenant, endpoint_fleet, identity_control_plane]
+      evidence_bundles: [logs_metrics_traces, cloud_inventory, identity_audit, endpoint_telemetry, network_path_and_flow, security_alerts, multi_source, intentionally_missing]
     domains:
-      - name: SIEM
+      - id: siem
+        label: SIEM
         origin: connector
         connectors: 8
         frameworks: [NIST DE]
-        subdomains: [use_case_tune, parser_break, ingestion_lag, correlation_miss, ueba_alert, retention_cost, data_lake]
-      - name: SOAR
+        subdomains: [{id: use_case_tune, capabilities: {}}, {id: parser_break, capabilities: {}}, {id: ingestion_lag, capabilities: {}}, {id: correlation_miss, capabilities: {}}, {id: ueba_alert, capabilities: {}}, {id: retention_cost, capabilities: {}}, {id: data_lake, capabilities: {}}]
+
+      - id: soar
+        label: SOAR
         origin: connector
         connectors: 6
         frameworks: [NIST RS]
-        subdomains: [playbook_fail, enrichment_gap, ticket_loop, containment_action, approval_gate, stale_playbook]
-      - name: EDR XDR
+        subdomains: [{id: playbook_fail, capabilities: {}}, {id: enrichment_gap, capabilities: {}}, {id: ticket_loop, capabilities: {}}, {id: containment_action, capabilities: {}}, {id: approval_gate, capabilities: {}}, {id: stale_playbook, capabilities: {}}]
+
+      - id: edr_xdr
+        label: EDR XDR
         origin: connector
         connectors: 7
         frameworks: [NIST DE, CSOH XDR]
-        subdomains: [isolate_host, false_positive, ransomware_roll, sensor_health, threat_hunt, identity_signal]
-      - name: Vulnerability Management
+        subdomains: [{id: isolate_host, capabilities: {}}, {id: false_positive, capabilities: {}}, {id: ransomware_roll, capabilities: {}}, {id: sensor_health, capabilities: {}}, {id: threat_hunt, capabilities: {}}, {id: identity_signal, capabilities: {}}]
+
+      - id: vulnerability_management
+        label: Vulnerability Management
         origin: fill
         frameworks: [NIST ID.RA, Scogo D7]
-        subdomains: [scan_coverage, risk_score, exception_waiver, exploit_available, agentless_gap, patch_advisory]
-      - name: Threat Intel NDR
+        subdomains: [{id: scan_coverage, capabilities: {}}, {id: risk_score, capabilities: {}}, {id: exception_waiver, capabilities: {}}, {id: exploit_available, capabilities: {}}, {id: agentless_gap, capabilities: {}}, {id: patch_advisory, capabilities: {}}]
+
+      - id: threat_intel_ndr
+        label: Threat Intel NDR
         origin: fill
-        subdomains: [ioc_match, dns_tunnel, lateral_movement, beacon, feed_stale, east_west]
-      - name: GRC Audit
+        subdomains: [{id: ioc_match, capabilities: {}}, {id: dns_tunnel, capabilities: {}}, {id: lateral_movement, capabilities: {}}, {id: beacon, capabilities: {}}, {id: feed_stale, capabilities: {}}, {id: east_west, capabilities: {}}]
+
+      - id: grc_audit
+        label: GRC Audit
         origin: fill
         frameworks: [NIST GV, ITIL Risk]
-        subdomains: [control_evidence, iso27001, soc2, policy_exception, vendor_risk, dpdp]
-      - name: Forensics IR
+        subdomains: [{id: control_evidence, capabilities: {}}, {id: iso27001, capabilities: {}}, {id: soc2, capabilities: {}}, {id: policy_exception, capabilities: {}}, {id: vendor_risk, capabilities: {}}, {id: dpdp, capabilities: {}}]
+
+      - id: forensics_ir
+        label: Forensics IR
         origin: fill
         frameworks: [NIST RS]
-        subdomains: [disk_image, chain_of_custody, timeline, malware_sandbox, legal_hold, memory_capture]
+        subdomains: [{id: disk_image, capabilities: {}}, {id: chain_of_custody, capabilities: {}}, {id: timeline, capabilities: {}}, {id: malware_sandbox, capabilities: {}}, {id: legal_hold, capabilities: {}}, {id: memory_capture, capabilities: {}}]
+
 
   - id: secure_edge
+    weight: 0.03
     label: Secure Access & Data
     pillar: SASE/SSE · CASB · DLP · email/web/WAF
     blurb: CSOH SSE = SWG+CASB+ZTNA+FWaaS+DLP. SASE = SSE+SD-WAN. Keep screenshot names.
+    eligibility:
+      platform_groups: [network_security, identity_access, public_cloud, networking]
+      environments: [branch, campus, data_center, public_cloud, multi_cloud, hybrid, remote_work, edge]
+      evidence_bundles: [configuration_state, cloud_inventory, identity_audit, network_path_and_flow, dns_tls, security_alerts, multi_source, intentionally_missing]
     domains:
-      - name: SASE SSE
+      - id: sase_sse
+        label: SASE SSE
         origin: connector
         connectors: 9
         frameworks: [CSOH SSE]
-        subdomains: [ztna_app, swg_block, fwaas, private_access, policy_conflict, user_steering]
-      - name: CASB
+        subdomains: [{id: ztna_app, capabilities: {}}, {id: swg_block, capabilities: {}}, {id: fwaas, capabilities: {}}, {id: private_access, capabilities: {}}, {id: policy_conflict, capabilities: {}}, {id: user_steering, capabilities: {}}]
+
+      - id: casb
+        label: CASB
         origin: connector
         connectors: 3
-        subdomains: [unsanctioned_saas, session_control, api_mode, shadow_it, dlp_saas]
-      - name: Data Loss Prevention
+        subdomains: [{id: unsanctioned_saas, capabilities: {}}, {id: session_control, capabilities: {}}, {id: api_mode, capabilities: {}}, {id: shadow_it, capabilities: {}}, {id: dlp_saas, capabilities: {}}]
+
+      - id: data_loss_prevention
+        label: Data Loss Prevention
         origin: connector
         connectors: 3
         frameworks: [NIST PR.DS]
-        subdomains: [exfil_alert, false_positive, endpoint_dlp, email_dlp, classification]
-      - name: Email Security
+        subdomains: [{id: exfil_alert, capabilities: {}}, {id: false_positive, capabilities: {}}, {id: endpoint_dlp, capabilities: {}}, {id: email_dlp, capabilities: {}}, {id: classification, capabilities: {}}]
+
+      - id: email_security
+        label: Email Security
         origin: connector
         connectors: 4
-        subdomains: [phish, bec, spoof_dmarc, quarantine, impersonation, time_of_click]
-      - name: Web Security
+        subdomains: [{id: phish, capabilities: {}}, {id: bec, capabilities: {}}, {id: spoof_dmarc, capabilities: {}}, {id: quarantine, capabilities: {}}, {id: impersonation, capabilities: {}}, {id: time_of_click, capabilities: {}}]
+
+      - id: web_security
+        label: Web Security
         origin: connector
         connectors: 4
-        subdomains: [url_filter, malicious_site, ssl_inspect, category_miss, swg_bypass]
-      - name: WAF DDoS
+        subdomains: [{id: url_filter, capabilities: {}}, {id: malicious_site, capabilities: {}}, {id: ssl_inspect, capabilities: {}}, {id: category_miss, capabilities: {}}, {id: swg_bypass, capabilities: {}}]
+
+      - id: waf_ddos
+        label: WAF DDoS
         origin: fill
-        subdomains: [l7_flood, bot, owasp, api_abuse, tls_policy, origin_shield]
-      - name: DSPM
+        subdomains: [{id: l7_flood, capabilities: {}}, {id: bot, capabilities: {}}, {id: owasp, capabilities: {}}, {id: api_abuse, capabilities: {}}, {id: tls_policy, capabilities: {}}, {id: origin_shield, capabilities: {}}]
+
+      - id: dspm
+        label: DSPM
         origin: fill
         frameworks: [CSOH DSPM]
-        subdomains: [public_bucket_data, shadow_db, classification_gap, overshare, lineage]
-      - name: SSPM
+        subdomains: [{id: public_bucket_data, capabilities: {}}, {id: shadow_db, capabilities: {}}, {id: classification_gap, capabilities: {}}, {id: overshare, capabilities: {}}, {id: lineage, capabilities: {}}]
+
+      - id: sspm
+        label: SSPM
         origin: fill
         frameworks: [CSOH SSPM]
-        subdomains: [saas_posture, third_party_app, oauth_grant, m365_hardening, salesforce_perm]
+        subdomains: [{id: saas_posture, capabilities: {}}, {id: third_party_app, capabilities: {}}, {id: oauth_grant, capabilities: {}}, {id: m365_hardening, capabilities: {}}, {id: salesforce_perm, capabilities: {}}]
+
 
   - id: network
+    weight: 0.08
     label: Network
     pillar: Screenshot Networking* split kept as domains
     blurb: Do not collapse firewall/SD-WAN/wireless — connector counts prove they are operated separately.
+    eligibility:
+      platform_groups: [networking, network_security, public_cloud, observability]
+      environments: [on_premises, branch, campus, data_center, public_cloud, multi_cloud, hybrid, remote_work, kubernetes, edge, ot_iot, ai_hpc, lab_staging]
+      evidence_bundles: [logs_metrics_traces, configuration_state, infrastructure_as_code, network_path_and_flow, dns_tls, multi_source, intentionally_missing]
     domains:
-      - name: Networking
+      - id: networking
+        label: Networking
         origin: connector
         connectors: 6
-        subdomains: [l2_loop, dhcp_exhaust, spanning_tree, vlan_misconfig, mtu, ipam]
-      - name: DNS CDN
+        subdomains: [{id: l2_loop, capabilities: {}}, {id: dhcp_exhaust, capabilities: {}}, {id: spanning_tree, capabilities: {}}, {id: vlan_misconfig, capabilities: {}}, {id: mtu, capabilities: {}}, {id: ipam, capabilities: {}}]
+
+      - id: dns_cdn
+        label: DNS CDN
         origin: connector
         connectors: 4
-        subdomains: [dns_outage, cache_poison, cdn_purge, ttl, split_horizon, dnssec]
-      - name: Firewall
+        subdomains: [{id: dns_outage, capabilities: {}}, {id: cache_poison, capabilities: {}}, {id: cdn_purge, capabilities: {}}, {id: ttl, capabilities: {}}, {id: split_horizon, capabilities: {}}, {id: dnssec, capabilities: {}}]
+
+      - id: firewall
+        label: Firewall
         origin: connector
         connectors: 7
-        subdomains: [unused_rule, any_any, hit_count, nat, change_window, app_id]
-      - name: Load Balancer
+        subdomains: [{id: unused_rule, capabilities: {}}, {id: any_any, capabilities: {}}, {id: hit_count, capabilities: {}}, {id: nat, capabilities: {}}, {id: change_window, capabilities: {}}, {id: app_id, capabilities: {}}]
+
+      - id: load_balancer
+        label: Load Balancer
         origin: connector
         connectors: 4
-        subdomains: [pool_down, ssl_offload, persistence, health_check, cert_expiry]
-      - name: Network Management
+        subdomains: [{id: pool_down, capabilities: {}}, {id: ssl_offload, capabilities: {}}, {id: persistence, capabilities: {}}, {id: health_check, capabilities: {}}, {id: cert_expiry, capabilities: {}}]
+
+      - id: network_management
+        label: Network Management
         origin: connector
         connectors: 6
-        subdomains: [snmp_poll, config_backup, config_drift, inventory, capacity, syslog]
-      - name: Routers
+        subdomains: [{id: snmp_poll, capabilities: {}}, {id: config_backup, capabilities: {}}, {id: config_drift, capabilities: {}}, {id: inventory, capabilities: {}}, {id: capacity, capabilities: {}}, {id: syslog, capabilities: {}}]
+
+      - id: routers
+        label: Routers
         origin: connector
         connectors: 3
-        subdomains: [bgp_flap, ospf_neighbor, route_leak, acl, wan_brownout]
-      - name: SD-WAN
+        subdomains: [{id: bgp_flap, capabilities: {}}, {id: ospf_neighbor, capabilities: {}}, {id: route_leak, capabilities: {}}, {id: acl, capabilities: {}}, {id: wan_brownout, capabilities: {}}]
+
+      - id: sd_wan
+        label: SD-WAN
         origin: connector
         connectors: 8
-        subdomains: [sla_class, underlay_fail, app_steering, overlay_flap, qos, site_brownout]
-      - name: Wireless
+        subdomains: [{id: sla_class, capabilities: {}}, {id: underlay_fail, capabilities: {}}, {id: app_steering, capabilities: {}}, {id: overlay_flap, capabilities: {}}, {id: qos, capabilities: {}}, {id: site_brownout, capabilities: {}}]
+
+      - id: wireless
+        label: Wireless
         origin: connector
         connectors: 4
-        subdomains: [ap_down, roam, rf_interference, captive_portal, controller]
-      - name: NAC
+        subdomains: [{id: ap_down, capabilities: {}}, {id: roam, capabilities: {}}, {id: rf_interference, capabilities: {}}, {id: captive_portal, capabilities: {}}, {id: controller, capabilities: {}}]
+
+      - id: nac
+        label: NAC
         origin: fill
-        subdomains: [dot1x, posture, quarantine_vlan, guest_ssid, eap_cert]
+        subdomains: [{id: dot1x, capabilities: {}}, {id: posture, capabilities: {}}, {id: quarantine_vlan, capabilities: {}}, {id: guest_ssid, capabilities: {}}, {id: eap_cert, capabilities: {}}]
+
 
   - id: infra
+    weight: 0.12
     label: Infra Cloud Storage
     pillar: Gartner ITOM infrastructure · Scogo Pillar C
     blurb: Storage (29) and Virtualization (28) are the densest connector buckets — keep first-class.
+    eligibility:
+      platform_groups: [public_cloud, servers_operating_systems, virtualization_private_cloud, containers_kubernetes, storage_backup, automation_iac]
+      environments: [on_premises, data_center, private_cloud, public_cloud, multi_cloud, hybrid, kubernetes, edge, backup_recovery_site, ai_hpc, lab_staging]
+      evidence_bundles: [logs_metrics_traces, configuration_state, infrastructure_as_code, cloud_inventory, cloud_bill_and_usage, storage_backup_jobs, multi_source, intentionally_missing]
     domains:
-      - name: Cloud Infrastructure
+      - id: cloud_infrastructure
+        label: Cloud Infrastructure
         origin: connector
         connectors: 12
         frameworks: [Scogo D9]
-        subdomains: [landing_zone, iam_role, sg_open, quota, region_failover, orphan_resource, public_bucket]
-      - name: FinOps
+        subdomains: [{id: landing_zone, capabilities: {}}, {id: iam_role, capabilities: {}}, {id: sg_open, capabilities: {}}, {id: quota, capabilities: {}}, {id: region_failover, capabilities: {}}, {id: orphan_resource, capabilities: {}}, {id: public_bucket, capabilities: {}}]
+
+      - id: finops
+        label: FinOps
         origin: catalogue
         frameworks: [Scogo D9]
-        subdomains: [cost_anomaly, ri_coverage, idle_orphans, tag_gap, commitment, unit_econ]
-      - name: CNAPP
+        subdomains: [{id: cost_anomaly, capabilities: {}}, {id: ri_coverage, capabilities: {}}, {id: idle_orphans, capabilities: {}}, {id: tag_gap, capabilities: {}}, {id: commitment, capabilities: {}}, {id: unit_econ, capabilities: {}}]
+
+      - id: cnapp
+        label: CNAPP
         origin: fill
         frameworks: [CSOH CNAPP]
-        subdomains: [cspm_finding, cwpp_runtime, kspm, ciem_perm, secret_in_image, toxic_combo]
-      - name: Virtualization
+        subdomains: [{id: cspm_finding, capabilities: {}}, {id: cwpp_runtime, capabilities: {}}, {id: kspm, capabilities: {}}, {id: ciem_perm, capabilities: {}}, {id: secret_in_image, capabilities: {}}, {id: toxic_combo, capabilities: {}}]
+
+      - id: virtualization
+        label: Virtualization
         origin: connector
         connectors: 28
         frameworks: [Scogo D10]
-        subdomains: [vm_health, snapshot_age, cpu_ready, datastore, ha_failover, template_golden, capacity_forecast]
-      - name: Storage
+        subdomains: [{id: vm_health, capabilities: {}}, {id: snapshot_age, capabilities: {}}, {id: cpu_ready, capabilities: {}}, {id: datastore, capabilities: {}}, {id: ha_failover, capabilities: {}}, {id: template_golden, capabilities: {}}, {id: capacity_forecast, capabilities: {}}]
+
+      - id: storage
+        label: Storage
         origin: connector
         connectors: 29
         frameworks: [Scogo D11]
-        subdomains: [volume_full, latency, raid_degrade, lun_map, replication, thin_provision, array_health]
-      - name: Backup
+        subdomains: [{id: volume_full, capabilities: {}}, {id: latency, capabilities: {}}, {id: raid_degrade, capabilities: {}}, {id: lun_map, capabilities: {}}, {id: replication, capabilities: {}}, {id: thin_provision, capabilities: {}}, {id: array_health, capabilities: {}}]
+
+      - id: backup
+        label: Backup
         origin: connector
         connectors: 17
         frameworks: [NIST RC, Scogo D11]
-        subdomains: [job_fail, rpo_miss, restore_test, immutable, catalog_corrupt, ransomware_recovery]
-      - name: BCDR Continuity
+        subdomains: [{id: job_fail, capabilities: {}}, {id: rpo_miss, capabilities: {}}, {id: restore_test, capabilities: {}}, {id: immutable, capabilities: {}}, {id: catalog_corrupt, capabilities: {}}, {id: ransomware_recovery, capabilities: {}}]
+
+      - id: bcdr_continuity
+        label: BCDR Continuity
         origin: fill
         frameworks: [ITIL Continuity, NIST RC]
-        subdomains: [dr_drill, rto_miss, runbook, site_failover, chaos, comms_tree]
-      - name: DCIM Facilities
+        subdomains: [{id: dr_drill, capabilities: {}}, {id: rto_miss, capabilities: {}}, {id: runbook, capabilities: {}}, {id: site_failover, capabilities: {}}, {id: chaos, capabilities: {}}, {id: comms_tree, capabilities: {}}]
+
+      - id: dcim_facilities
+        label: DCIM Facilities
         origin: fill
-        subdomains: [pdu, cooling, rack, generator, environmental, colo]
+        subdomains: [{id: pdu, capabilities: {}}, {id: cooling, capabilities: {}}, {id: rack, capabilities: {}}, {id: generator, capabilities: {}}, {id: environmental, capabilities: {}}, {id: colo, capabilities: {}}]
+
 
   - id: observe
+    weight: 0.06
     label: Monitoring & Observability
     pillar: Gartner Observability Platforms 2026 · Scogo D13
     blurb: Screenshot Monitoring (28) is infra/NOC. APM/AIOps/DEM are different jobs — do not merge.
+    eligibility:
+      platform_groups: [observability, public_cloud, security_operations]
+      environments: [on_premises, data_center, private_cloud, public_cloud, multi_cloud, hybrid, saas_tenant, endpoint_fleet, kubernetes, edge]
+      evidence_bundles: [logs_metrics_traces, service_health, cloud_inventory, endpoint_telemetry, network_path_and_flow, security_alerts, multi_source, intentionally_missing]
     domains:
-      - name: Monitoring
+      - id: monitoring
+        label: Monitoring
         origin: connector
         connectors: 28
         frameworks: [ITIL Monitoring, Scogo D13]
-        subdomains: [alert_storm, threshold, snmp, agent_down, auto_close, noise, runbook_restart, webhook_enrich]
-      - name: Observability APM
+        subdomains: [{id: alert_storm, capabilities: {}}, {id: threshold, capabilities: {}}, {id: snmp, capabilities: {}}, {id: agent_down, capabilities: {}}, {id: auto_close, capabilities: {}}, {id: noise, capabilities: {}}, {id: runbook_restart, capabilities: {}}, {id: webhook_enrich, capabilities: {}}]
+
+      - id: observability_apm
+        label: Observability APM
         origin: fill
         frameworks: [Gartner Observability 2026]
-        subdomains: [trace_break, golden_signals, otel, service_map, error_budget, slow_span]
-      - name: AIOps
+        subdomains: [{id: trace_break, capabilities: {}}, {id: golden_signals, capabilities: {}}, {id: otel, capabilities: {}}, {id: service_map, capabilities: {}}, {id: error_budget, capabilities: {}}, {id: slow_span, capabilities: {}}]
+
+      - id: aiops
+        label: AIOps
         origin: fill
         frameworks: [Gartner ITOM]
-        subdomains: [correlate, suppress, probable_cause, forecast, anomaly, ticket_reduce]
-      - name: Synthetics DEM
+        subdomains: [{id: correlate, capabilities: {}}, {id: suppress, capabilities: {}}, {id: probable_cause, capabilities: {}}, {id: forecast, capabilities: {}}, {id: anomaly, capabilities: {}}, {id: ticket_reduce, capabilities: {}}]
+
+      - id: synthetics_dem
+        label: Synthetics DEM
         origin: fill
         frameworks: [Gartner DEM]
-        subdomains: [synthetic_fail, rum, apdex, last_mile, mobile_crash, journey]
-      - name: AI Agent Observability
+        subdomains: [{id: synthetic_fail, capabilities: {}}, {id: rum, capabilities: {}}, {id: apdex, capabilities: {}}, {id: last_mile, capabilities: {}}, {id: mobile_crash, capabilities: {}}, {id: journey, capabilities: {}}]
+
+      - id: ai_agent_observability
+        label: AI Agent Observability
         origin: fill
         frameworks: [Gartner Observability 2026]
-        subdomains: [tool_fail, hallucination, token_cost, loop, policy_break, eval_regress]
+        subdomains: [{id: tool_fail, capabilities: {}}, {id: hallucination, capabilities: {}}, {id: token_cost, capabilities: {}}, {id: loop, capabilities: {}}, {id: policy_break, capabilities: {}}, {id: eval_regress, capabilities: {}}]
+
 
   - id: data
+    weight: 0.05
     label: Data Platform
     pillar: Database · analytics · streaming · iPaaS
     blurb: Screenshot Database (21) and Analytics (24) are huge; streaming/iPaaS were missing.
+    eligibility:
+      platform_groups: [databases_data_platforms, storage_backup, public_cloud]
+      environments: [on_premises, data_center, private_cloud, public_cloud, multi_cloud, hybrid, backup_recovery_site]
+      evidence_bundles: [logs_metrics_traces, configuration_state, cloud_inventory, cloud_bill_and_usage, database_state_and_queries, storage_backup_jobs, multi_source, intentionally_missing]
     domains:
-      - name: Database
+      - id: database
+        label: Database
         origin: connector
         connectors: 21
-        subdomains: [replication_lag, failover, bloat_vacuum, connection_exhaustion, slow_query, backup_restore, blocking_locks, storage_growth]
-      - name: Analytics
+        subdomains: [{id: replication_lag, capabilities: {}}, {id: failover, capabilities: {}}, {id: bloat_vacuum, capabilities: {}}, {id: connection_exhaustion, capabilities: {}}, {id: slow_query, capabilities: {}}, {id: backup_restore, capabilities: {}}, {id: blocking_locks, capabilities: {}}, {id: storage_growth, capabilities: {}}]
+
+      - id: analytics
+        label: Analytics
         origin: connector
         connectors: 24
-        subdomains: [pipeline_sla, warehouse_spend, refresh_fail, semantic_layer, access, cube_stale]
-      - name: Messaging Streaming
+        subdomains: [{id: pipeline_sla, capabilities: {}}, {id: warehouse_spend, capabilities: {}}, {id: refresh_fail, capabilities: {}}, {id: semantic_layer, capabilities: {}}, {id: access, capabilities: {}}, {id: cube_stale, capabilities: {}}]
+
+      - id: messaging_streaming
+        label: Messaging Streaming
         origin: fill
-        subdomains: [kafka_lag, consumer_rebalance, redis_eviction, rabbit_poison, dlq_replay, schema]
-      - name: iPaaS API
+        subdomains: [{id: kafka_lag, capabilities: {}}, {id: consumer_rebalance, capabilities: {}}, {id: redis_eviction, capabilities: {}}, {id: rabbit_poison, capabilities: {}}, {id: dlq_replay, capabilities: {}}, {id: schema, capabilities: {}}]
+
+      - id: ipaas_api
+        label: iPaaS API
         origin: fill
-        subdomains: [connector_fail, rate_limit, mapping_break, webhook, contract_test, dead_letter]
-      - name: Data Governance
+        subdomains: [{id: connector_fail, capabilities: {}}, {id: rate_limit, capabilities: {}}, {id: mapping_break, capabilities: {}}, {id: webhook, capabilities: {}}, {id: contract_test, capabilities: {}}, {id: dead_letter, capabilities: {}}]
+
+      - id: data_governance
+        label: Data Governance
         origin: fill
-        subdomains: [catalog_stale, lineage, quality_rule, pii_tag, retention, mdq]
+        subdomains: [{id: catalog_stale, capabilities: {}}, {id: lineage, capabilities: {}}, {id: quality_rule, capabilities: {}}, {id: pii_tag, capabilities: {}}, {id: retention, capabilities: {}}, {id: mdq, capabilities: {}}]
+
 
   - id: delivery
+    weight: 0.06
     label: Delivery & Platform Eng
     pillar: Gartner ARO · DevOps (23) · k8s · IaC · ASPM
     blurb: Screenshot has DevOps as one bucket; split runtime (k8s) and supply-chain (ASPM).
+    eligibility:
+      platform_groups: [devops_delivery, automation_iac, containers_kubernetes, public_cloud]
+      environments: [developer_platform, public_cloud, multi_cloud, hybrid, kubernetes, lab_staging]
+      evidence_bundles: [runbook_change_history, logs_metrics_traces, configuration_state, infrastructure_as_code, application_deployment_state, multi_source, intentionally_missing]
     domains:
-      - name: DevOps
+      - id: devops
+        label: DevOps
         origin: connector
         connectors: 23
         frameworks: [ITIL Deployment, ITIL Software]
-        subdomains: [pipeline_red, flaky_tests, secret_in_ci, runner_capacity, artifact, env_drift]
-      - name: Kubernetes
+        subdomains: [{id: pipeline_red, capabilities: {}}, {id: flaky_tests, capabilities: {}}, {id: secret_in_ci, capabilities: {}}, {id: runner_capacity, capabilities: {}}, {id: artifact, capabilities: {}}, {id: env_drift, capabilities: {}}]
+
+      - id: kubernetes
+        label: Kubernetes
         origin: fill
-        subdomains: [crashloopbackoff, oomkill, hpa_thrash, pdb_block, ingress_tls, etcd_health, pending_pods, image_cve]
-      - name: IaC GitOps
+        subdomains: [{id: crashloopbackoff, capabilities: {}}, {id: oomkill, capabilities: {}}, {id: hpa_thrash, capabilities: {}}, {id: pdb_block, capabilities: {}}, {id: ingress_tls, capabilities: {}}, {id: etcd_health, capabilities: {}}, {id: pending_pods, capabilities: {}}, {id: image_cve, capabilities: {}}]
+
+      - id: iac_gitops
+        label: IaC GitOps
         origin: fill
-        subdomains: [terraform_drift, state_lock, helm_rollback, argo_out_of_sync, opa_deny, module_blast_radius]
-      - name: Release Orchestration
+        subdomains: [{id: terraform_drift, capabilities: {}}, {id: state_lock, capabilities: {}}, {id: helm_rollback, capabilities: {}}, {id: argo_out_of_sync, capabilities: {}}, {id: opa_deny, capabilities: {}}, {id: module_blast_radius, capabilities: {}}]
+
+      - id: release_orchestration
+        label: Release Orchestration
         origin: fill
         frameworks: [Gartner ARO, ITIL Release]
-        subdomains: [canary_abort, rollback, feature_flag, change_freeze, artifact_promote, smoke]
-      - name: AppSec ASPM
+        subdomains: [{id: canary_abort, capabilities: {}}, {id: rollback, capabilities: {}}, {id: feature_flag, capabilities: {}}, {id: change_freeze, capabilities: {}}, {id: artifact_promote, capabilities: {}}, {id: smoke, capabilities: {}}]
+
+      - id: appsec_aspm
+        label: AppSec ASPM
         origin: fill
         frameworks: [CSOH ASPM]
-        subdomains: [sast, sca, dast, iac_scan, secret_scan, container_scan]
-      - name: Mainframe Midrange
+        subdomains: [{id: sast, capabilities: {}}, {id: sca, capabilities: {}}, {id: dast, capabilities: {}}, {id: iac_scan, capabilities: {}}, {id: secret_scan, capabilities: {}}, {id: container_scan, capabilities: {}}]
+
+      - id: mainframe_midrange
+        label: Mainframe Midrange
         origin: fill
         frameworks: [Gartner ITOM mainframe]
-        subdomains: [batch_abend, racf, cics, capacity, tape, lpar]
+        subdomains: [{id: batch_abend, capabilities: {}}, {id: racf, capabilities: {}}, {id: cics, capabilities: {}}, {id: capacity, capabilities: {}}, {id: tape, capabilities: {}}, {id: lpar, capabilities: {}}]
+
 
   - id: enterprise
+    weight: 0.01
     label: Enterprise Systems IT Operates
     pillar: CRM · HR · ERP · supplier — IT owns the integration, not the process
     blurb: Screenshot already has CRM (9) and HR (5). ERP/supplier are the usual next tickets.
+    eligibility:
+      platform_groups: [enterprise_applications, databases_data_platforms, identity_access, public_cloud]
+      environments: [on_premises, data_center, private_cloud, public_cloud, hybrid, saas_tenant]
+      evidence_bundles: [ticket_cmdb, logs_metrics_traces, service_health, configuration_state, identity_audit, database_state_and_queries, application_deployment_state, user_reports, multi_source, intentionally_missing]
     domains:
-      - name: CRM Sales
+      - id: crm_sales
+        label: CRM Sales
         origin: connector
         connectors: 9
-        subdomains: [sync_fail, sandbox, api_limit, sharing_rule, integration_user, duplicate]
-      - name: HR Payroll
+        subdomains: [{id: sync_fail, capabilities: {}}, {id: sandbox, capabilities: {}}, {id: api_limit, capabilities: {}}, {id: sharing_rule, capabilities: {}}, {id: integration_user, capabilities: {}}, {id: duplicate, capabilities: {}}]
+
+      - id: hr_payroll
+        label: HR Payroll
         origin: connector
         connectors: 5
         frameworks: [ITIL Workforce]
-        subdomains: [joiner_feed, payroll_file, pii, access, offboard_hris, org_chart]
-      - name: ERP Finance
+        subdomains: [{id: joiner_feed, capabilities: {}}, {id: payroll_file, capabilities: {}}, {id: pii, capabilities: {}}, {id: access, capabilities: {}}, {id: offboard_hris, capabilities: {}}, {id: org_chart, capabilities: {}}]
+
+      - id: erp_finance
+        label: ERP Finance
         origin: fill
-        subdomains: [sap_rfc, transport, job_fail, tcode, idoc, interface_queue]
-      - name: Supplier Contract
+        subdomains: [{id: sap_rfc, capabilities: {}}, {id: transport, capabilities: {}}, {id: job_fail, capabilities: {}}, {id: tcode, capabilities: {}}, {id: idoc, capabilities: {}}, {id: interface_queue, capabilities: {}}]
+
+      - id: supplier_contract
+        label: Supplier Contract
         origin: fill
         frameworks: [ITIL Supplier]
-        subdomains: [vendor_sla, license_trueup, sow, offboarding_vendor, saas_renewal]
+        subdomains: [{id: vendor_sla, capabilities: {}}, {id: license_trueup, capabilities: {}}, {id: sow, capabilities: {}}, {id: offboarding_vendor, capabilities: {}}, {id: saas_renewal, capabilities: {}}]
+
 
   - id: agentic
+    weight: 0.03
     label: Agentic Platform
     pillar: Scogo-specific — unique distillation signal
     blurb: How SIA actually acts. Not in the connector list; required so the model learns guardrails not just tools.
+    eligibility:
+      platform_groups: [ai_agent_platforms, automation_iac, observability, identity_access]
+      environments: [on_premises, private_cloud, public_cloud, hybrid, saas_tenant, developer_platform, ai_hpc, lab_staging]
+      evidence_bundles: [runbook_change_history, logs_metrics_traces, configuration_state, infrastructure_as_code, identity_audit, application_deployment_state, multi_source, intentionally_missing]
     domains:
-      - name: Agent Fabric
+      - id: agent_fabric
+        label: Agent Fabric
         origin: catalogue
-        subdomains: [connector_outage, oauth_scope, mcp_tool_fail, oem_version_skew, least_privilege_app_reg, integration_auth_rot]
-      - name: SIA Guardrails
+        subdomains: [{id: connector_outage, capabilities: {}}, {id: oauth_scope, capabilities: {}}, {id: mcp_tool_fail, capabilities: {}}, {id: oem_version_skew, capabilities: {}}, {id: least_privilege_app_reg, capabilities: {}}, {id: integration_auth_rot, capabilities: {}}]
+
+      - id: sia_guardrails
+        label: SIA Guardrails
         origin: catalogue
-        subdomains: [approval_gate, dry_run_preview, rollback, audit_export, hallucination_refuse, destructive_cmd_block, human_in_loop]
-      - name: Knowledge Graph
+        subdomains: [{id: approval_gate, capabilities: {}}, {id: dry_run_preview, capabilities: {}}, {id: rollback, capabilities: {}}, {id: audit_export, capabilities: {}}, {id: hallucination_refuse, capabilities: {}}, {id: destructive_cmd_block, capabilities: {}}, {id: human_in_loop, capabilities: {}}]
+
+      - id: knowledge_graph
+        label: Knowledge Graph
         origin: catalogue
-        subdomains: [cross_system_join, stale_cmdb, alert_to_asset, identity_to_device, policy_conflict, context_gap]
-      - name: Channels Knowledge
+        subdomains: [{id: cross_system_join, capabilities: {}}, {id: stale_cmdb, capabilities: {}}, {id: alert_to_asset, capabilities: {}}, {id: identity_to_device, capabilities: {}}, {id: policy_conflict, capabilities: {}}, {id: context_gap, capabilities: {}}]
+
+      - id: channels_knowledge
+        label: Channels Knowledge
         origin: catalogue
-        subdomains: [slack_teams_whatsapp, sop_curation, kb_from_ticket, remote_session_learn, deflection_accuracy]
-      - name: Platform Deploy
+        subdomains: [{id: slack_teams_whatsapp, capabilities: {}}, {id: sop_curation, capabilities: {}}, {id: kb_from_ticket, capabilities: {}}, {id: remote_session_learn, capabilities: {}}, {id: deflection_accuracy, capabilities: {}}]
+
+      - id: platform_deploy
+        label: Platform Deploy
         origin: catalogue
-        subdomains: [saas_india, byoc, on_prem, airgap, rmm_agent, browser_intel]
+        subdomains: [{id: saas_india, capabilities: {}}, {id: byoc, capabilities: {}}, {id: on_prem, capabilities: {}}, {id: airgap, capabilities: {}}, {id: rmm_agent, capabilities: {}}, {id: browser_intel, capabilities: {}}]
+
 
   - id: oem
+    weight: 0.10
     label: OEM / ISV / Platform
     pillar: Vendor-first axis — complementary to capability categories
     blurb: Product the operator is staring at. Named vendors for specialist portfolios; buckets for long-tail brands. Kubernetes and Linux distros count as platforms.
+    eligibility:
+      platform_groups: [oem_aws, oem_azure, oem_google_cloud, oem_other_cloud, oem_microsoft, oem_ibm, oem_red_hat, oem_canonical, oem_linux_distros, oem_kubernetes, oem_cisco, oem_juniper, oem_fortinet, oem_versa, oem_palo_alto, oem_hpe_aruba, oem_other_network_oem, oem_cloudflare, oem_zscaler, oem_other_sase, oem_crowdstrike, oem_cyberark, oem_okta, oem_other_security_isv, oem_other_identity_isv, oem_dell, oem_hpe, oem_netapp, oem_pure_storage, oem_other_compute_oem, oem_vmware, oem_nutanix, oem_other_hypervisor, oem_oracle, oem_database_isvs, oem_datadog, oem_splunk, oem_other_observability, oem_backup_isvs, oem_servicenow, oem_atlassian, oem_google_workspace, oem_workplace_saas, oem_rmm_uem_isvs, oem_github, oem_hashicorp, oem_other_devops_isv]
+      environments: [on_premises, branch, campus, data_center, private_cloud, public_cloud, multi_cloud, hybrid, saas_tenant, remote_work, endpoint_fleet, mobile_fleet, kubernetes, edge, ot_iot, backup_recovery_site, identity_control_plane, developer_platform, ai_hpc, lab_staging]
+      evidence_bundles: [ticket_cmdb, runbook_change_history, logs_metrics_traces, service_health, configuration_state, infrastructure_as_code, cloud_inventory, cloud_bill_and_usage, identity_audit, endpoint_telemetry, network_path_and_flow, dns_tls, mail_trace, database_state_and_queries, storage_backup_jobs, security_alerts, application_deployment_state, user_reports, multi_source, intentionally_missing]
     domains:
-      - name: AWS
+      - id: aws
+        label: AWS
+        eligibility:
+          platform_groups: [oem_aws]
         origin: fill
         kind: vendor
         group: cloud
         note: Hyperscale IaaS/PaaS
-        subdomains: [ec2, vpc_iam, s3, rds, eks, lambda, cloudwatch, route53, direct_connect, elb_alb, waf_shield, organizations, secrets_manager, backup]
-      - name: Azure
+        subdomains: [{id: ec2, capabilities: {}}, {id: vpc_iam, capabilities: {}}, {id: s3, capabilities: {}}, {id: rds, capabilities: {}}, {id: eks, capabilities: {}}, {id: lambda, capabilities: {}}, {id: cloudwatch, capabilities: {}}, {id: route53, capabilities: {}}, {id: direct_connect, capabilities: {}}, {id: elb_alb, capabilities: {}}, {id: waf_shield, capabilities: {}}, {id: organizations, capabilities: {}}, {id: secrets_manager, capabilities: {}}, {id: backup, capabilities: {}}]
+
+      - id: azure
+        label: Azure
+        eligibility:
+          platform_groups: [oem_azure]
         origin: fill
         kind: vendor
         group: cloud
         note: Microsoft cloud IaaS/PaaS (not M365)
-        subdomains: [vm, vnet, blob, aks, azure_sql, monitor, expressroute, firewall, sentinel, policy_arc, lb_appgw, backup, files]
-      - name: Google Cloud
+        subdomains: [{id: vm, capabilities: {}}, {id: vnet, capabilities: {}}, {id: blob, capabilities: {}}, {id: aks, capabilities: {}}, {id: azure_sql, capabilities: {}}, {id: monitor, capabilities: {}}, {id: expressroute, capabilities: {}}, {id: firewall, capabilities: {}}, {id: sentinel, capabilities: {}}, {id: policy_arc, capabilities: {}}, {id: lb_appgw, capabilities: {}}, {id: backup, capabilities: {}}, {id: files, capabilities: {}}]
+
+      - id: google_cloud
+        label: Google Cloud
+        eligibility:
+          platform_groups: [oem_google_cloud]
         origin: fill
         kind: vendor
         group: cloud
         note: GCP IaaS/PaaS
-        subdomains: [gce, vpc, gke, cloud_sql, bigquery, gcs, iam, cloud_armor, interconnect, logging, pubsub, cloud_run]
-      - name: Other Cloud
+        subdomains: [{id: gce, capabilities: {}}, {id: vpc, capabilities: {}}, {id: gke, capabilities: {}}, {id: cloud_sql, capabilities: {}}, {id: bigquery, capabilities: {}}, {id: gcs, capabilities: {}}, {id: iam, capabilities: {}}, {id: cloud_armor, capabilities: {}}, {id: interconnect, capabilities: {}}, {id: logging, capabilities: {}}, {id: pubsub, capabilities: {}}, {id: cloud_run, capabilities: {}}]
+
+      - id: other_cloud
+        label: Other Cloud
+        eligibility:
+          platform_groups: [oem_other_cloud]
         origin: fill
         kind: bucket
         group: cloud
         note: Long-tail public cloud
-        subdomains: [oci, ibm_cloud, alibaba, digitalocean, akamai_linode, ovh, hetzner]
-      - name: Microsoft
+        subdomains: [{id: oci, capabilities: {}}, {id: ibm_cloud, capabilities: {}}, {id: alibaba, capabilities: {}}, {id: digitalocean, capabilities: {}}, {id: akamai_linode, capabilities: {}}, {id: ovh, capabilities: {}}, {id: hetzner, capabilities: {}}]
+
+      - id: microsoft
+        label: Microsoft
+        eligibility:
+          platform_groups: [oem_microsoft]
         origin: fill
         kind: vendor
         group: os
         note: Windows, AD, M365, Intune, Defender, SQL Server
-        subdomains: [windows_server, active_directory, m365, exchange, sharepoint, teams, entra_id, intune, defender, sql_server, hyper_v, sccm_mecm, power_platform, windows_11]
-      - name: IBM
+        subdomains: [{id: windows_server, capabilities: {}}, {id: active_directory, capabilities: {}}, {id: m365, capabilities: {}}, {id: exchange, capabilities: {}}, {id: sharepoint, capabilities: {}}, {id: teams, capabilities: {}}, {id: entra_id, capabilities: {}}, {id: intune, capabilities: {}}, {id: defender, capabilities: {}}, {id: sql_server, capabilities: {}}, {id: hyper_v, capabilities: {}}, {id: sccm_mecm, capabilities: {}}, {id: power_platform, capabilities: {}}, {id: windows_11, capabilities: {}}]
+
+      - id: ibm
+        label: IBM
+        eligibility:
+          platform_groups: [oem_ibm]
         origin: fill
         kind: vendor
         group: os
         note: Power, z, storage, Maximo, QRadar, MQ, watsonx
-        subdomains: [power_aix, ibm_i, zos, flashsystem, maximo, qradar, instana, turbonomic, mq, db2, watsonx, cloud_pak, websphere, spectrum_protect]
-      - name: Red Hat
+        subdomains: [{id: power_aix, capabilities: {}}, {id: ibm_i, capabilities: {}}, {id: zos, capabilities: {}}, {id: flashsystem, capabilities: {}}, {id: maximo, capabilities: {}}, {id: qradar, capabilities: {}}, {id: instana, capabilities: {}}, {id: turbonomic, capabilities: {}}, {id: mq, capabilities: {}}, {id: db2, capabilities: {}}, {id: watsonx, capabilities: {}}, {id: cloud_pak, capabilities: {}}, {id: websphere, capabilities: {}}, {id: spectrum_protect, capabilities: {}}]
+
+      - id: red_hat
+        label: Red Hat
+        eligibility:
+          platform_groups: [oem_red_hat]
         origin: fill
         kind: vendor
         group: os
         note: RHEL, OpenShift, Ansible, Satellite
-        subdomains: [rhel, openshift, ansible_aap, satellite, idm, ceph, openstack, insights]
-      - name: Canonical
+        subdomains: [{id: rhel, capabilities: {}}, {id: openshift, capabilities: {}}, {id: ansible_aap, capabilities: {}}, {id: satellite, capabilities: {}}, {id: idm, capabilities: {}}, {id: ceph, capabilities: {}}, {id: openstack, capabilities: {}}, {id: insights, capabilities: {}}]
+
+      - id: canonical
+        label: Canonical
+        eligibility:
+          platform_groups: [oem_canonical]
         origin: fill
         kind: vendor
         group: os
         note: Ubuntu and Landscape
-        subdomains: [ubuntu_server, ubuntu_pro, landscape, lxd, maas, juju]
-      - name: Linux Distros
+        subdomains: [{id: ubuntu_server, capabilities: {}}, {id: ubuntu_pro, capabilities: {}}, {id: landscape, capabilities: {}}, {id: lxd, capabilities: {}}, {id: maas, capabilities: {}}, {id: juju, capabilities: {}}]
+
+      - id: linux_distros
+        label: Linux Distros
+        eligibility:
+          platform_groups: [oem_linux_distros]
         origin: fill
         kind: bucket
         group: os
         note: Community and clone distros
-        subdomains: [debian, rocky, alma, oracle_linux, amazon_linux, sles, freebsd]
-      - name: Kubernetes
+        subdomains: [{id: debian, capabilities: {}}, {id: rocky, capabilities: {}}, {id: alma, capabilities: {}}, {id: oracle_linux, capabilities: {}}, {id: amazon_linux, capabilities: {}}, {id: sles, capabilities: {}}, {id: freebsd, capabilities: {}}]
+
+      - id: kubernetes
+        label: Kubernetes
+        eligibility:
+          platform_groups: [oem_kubernetes]
         origin: fill
         kind: vendor
         group: containers
         note: CNCF platform — not a company
-        subdomains: [control_plane, etcd, cni, ingress, rbac, storage_class, operators, gateway_api, network_policy, cluster_upgrade]
-      - name: Cisco
+        subdomains: [{id: control_plane, capabilities: {}}, {id: etcd, capabilities: {}}, {id: cni, capabilities: {}}, {id: ingress, capabilities: {}}, {id: rbac, capabilities: {}}, {id: storage_class, capabilities: {}}, {id: operators, capabilities: {}}, {id: gateway_api, capabilities: {}}, {id: network_policy, capabilities: {}}, {id: cluster_upgrade, capabilities: {}}]
+
+      - id: cisco
+        label: Cisco
+        eligibility:
+          platform_groups: [oem_cisco]
         origin: fill
         kind: vendor
         group: network
         note: IOS, NX-OS, Meraki, ISE, Viptela, UCS
-        subdomains: [ios_xe, ios_xr, nxos, meraki, catalyst_center, ise, firepower, umbrella, duo, thousandeyes, viptela, webex, appdynamics, ucs]
-      - name: Juniper
+        subdomains: [{id: ios_xe, capabilities: {}}, {id: ios_xr, capabilities: {}}, {id: nxos, capabilities: {}}, {id: meraki, capabilities: {}}, {id: catalyst_center, capabilities: {}}, {id: ise, capabilities: {}}, {id: firepower, capabilities: {}}, {id: umbrella, capabilities: {}}, {id: duo, capabilities: {}}, {id: thousandeyes, capabilities: {}}, {id: viptela, capabilities: {}}, {id: webex, capabilities: {}}, {id: appdynamics, capabilities: {}}, {id: ucs, capabilities: {}}]
+
+      - id: juniper
+        label: Juniper
+        eligibility:
+          platform_groups: [oem_juniper]
         origin: fill
         kind: vendor
         group: network
         note: Junos, Mist, SRX, MX
-        subdomains: [junos, mist, srx, mx, qfx, apstra, contrail, session_smart]
-      - name: Fortinet
+        subdomains: [{id: junos, capabilities: {}}, {id: mist, capabilities: {}}, {id: srx, capabilities: {}}, {id: mx, capabilities: {}}, {id: qfx, capabilities: {}}, {id: apstra, capabilities: {}}, {id: contrail, capabilities: {}}, {id: session_smart, capabilities: {}}]
+
+      - id: fortinet
+        label: Fortinet
+        eligibility:
+          platform_groups: [oem_fortinet]
         origin: fill
         kind: vendor
         group: network
         note: FortiGate and Security Fabric
-        subdomains: [fortigate, fortimanager, fortianalyzer, forticlient, fortisase, fortimail, fortiweb, fortiedr, fortiswitch, fortiap, fortiauthenticator, forticnapp]
-      - name: Versa
+        subdomains: [{id: fortigate, capabilities: {}}, {id: fortimanager, capabilities: {}}, {id: fortianalyzer, capabilities: {}}, {id: forticlient, capabilities: {}}, {id: fortisase, capabilities: {}}, {id: fortimail, capabilities: {}}, {id: fortiweb, capabilities: {}}, {id: fortiedr, capabilities: {}}, {id: fortiswitch, capabilities: {}}, {id: fortiap, capabilities: {}}, {id: fortiauthenticator, capabilities: {}}, {id: forticnapp, capabilities: {}}]
+
+      - id: versa
+        label: Versa
+        eligibility:
+          platform_groups: [oem_versa]
         origin: fill
         kind: vendor
         group: network
         note: SD-WAN / SASE
-        subdomains: [versa_director, versa_analytics, versa_os, versa_sase, versa_titan]
-      - name: Palo Alto
+        subdomains: [{id: versa_director, capabilities: {}}, {id: versa_analytics, capabilities: {}}, {id: versa_os, capabilities: {}}, {id: versa_sase, capabilities: {}}, {id: versa_titan, capabilities: {}}]
+
+      - id: palo_alto
+        label: Palo Alto
+        eligibility:
+          platform_groups: [oem_palo_alto]
         origin: fill
         kind: vendor
         group: network
         note: PAN-OS, Prisma, Cortex
-        subdomains: [panos, panorama, prisma_access, prisma_cloud, cortex_xdr, globalprotect, wildfire, sdwan]
-      - name: HPE Aruba
+        subdomains: [{id: panos, capabilities: {}}, {id: panorama, capabilities: {}}, {id: prisma_access, capabilities: {}}, {id: prisma_cloud, capabilities: {}}, {id: cortex_xdr, capabilities: {}}, {id: globalprotect, capabilities: {}}, {id: wildfire, capabilities: {}}, {id: sdwan, capabilities: {}}]
+
+      - id: hpe_aruba
+        label: HPE Aruba
+        eligibility:
+          platform_groups: [oem_hpe_aruba]
         origin: fill
         kind: vendor
         group: network
         note: AOS-CX, Central, ClearPass, Silver Peak
-        subdomains: [aos_cx, central, clearpass, silver_peak, ssid_rf, nac]
-      - name: Other Network OEM
+        subdomains: [{id: aos_cx, capabilities: {}}, {id: central, capabilities: {}}, {id: clearpass, capabilities: {}}, {id: silver_peak, capabilities: {}}, {id: ssid_rf, capabilities: {}}, {id: nac, capabilities: {}}]
+
+      - id: other_network_oem
+        label: Other Network OEM
+        eligibility:
+          platform_groups: [oem_other_network_oem]
         origin: fill
         kind: bucket
         group: network
         note: Arista, F5, Check Point, campus/SMB
-        subdomains: [arista_eos, extreme, ubiquiti, mikrotik, f5_bigip, checkpoint, nokia_srlinux, sonicwall, ruckus, infoblox]
-      - name: Cloudflare
+        subdomains: [{id: arista_eos, capabilities: {}}, {id: extreme, capabilities: {}}, {id: ubiquiti, capabilities: {}}, {id: mikrotik, capabilities: {}}, {id: f5_bigip, capabilities: {}}, {id: checkpoint, capabilities: {}}, {id: nokia_srlinux, capabilities: {}}, {id: sonicwall, capabilities: {}}, {id: ruckus, capabilities: {}}, {id: infoblox, capabilities: {}}]
+
+      - id: cloudflare
+        label: Cloudflare
+        eligibility:
+          platform_groups: [oem_cloudflare]
         origin: fill
         kind: vendor
         group: sase
         note: CDN, WAF, Zero Trust, Workers
-        subdomains: [cdn_cache, waf, tunnel, zero_trust, workers, r2, dns, bot_mgmt, magic_wan]
-      - name: Zscaler
+        subdomains: [{id: cdn_cache, capabilities: {}}, {id: waf, capabilities: {}}, {id: tunnel, capabilities: {}}, {id: zero_trust, capabilities: {}}, {id: workers, capabilities: {}}, {id: r2, capabilities: {}}, {id: dns, capabilities: {}}, {id: bot_mgmt, capabilities: {}}, {id: magic_wan, capabilities: {}}]
+
+      - id: zscaler
+        label: Zscaler
+        eligibility:
+          platform_groups: [oem_zscaler]
         origin: fill
         kind: vendor
         group: sase
         note: ZIA / ZPA / ZDX
-        subdomains: [zia, zpa, zdx, zcc, bsp, deception]
-      - name: Other SASE
+        subdomains: [{id: zia, capabilities: {}}, {id: zpa, capabilities: {}}, {id: zdx, capabilities: {}}, {id: zcc, capabilities: {}}, {id: bsp, capabilities: {}}, {id: deception, capabilities: {}}]
+
+      - id: other_sase
+        label: Other SASE
+        eligibility:
+          platform_groups: [oem_other_sase]
         origin: fill
         kind: bucket
         group: sase
         note: Netskope, Cato, Forcepoint
-        subdomains: [netskope, cato, forcepoint, skyhigh, perimeter81]
-      - name: CrowdStrike
+        subdomains: [{id: netskope, capabilities: {}}, {id: cato, capabilities: {}}, {id: forcepoint, capabilities: {}}, {id: skyhigh, capabilities: {}}, {id: perimeter81, capabilities: {}}]
+
+      - id: crowdstrike
+        label: CrowdStrike
+        eligibility:
+          platform_groups: [oem_crowdstrike]
         origin: fill
         kind: vendor
         group: security
         note: Falcon platform
-        subdomains: [falcon_prevent, insight, overwatch, identity, cloud, logscale, discover, spotlight]
-      - name: CyberArk
+        subdomains: [{id: falcon_prevent, capabilities: {}}, {id: insight, capabilities: {}}, {id: overwatch, capabilities: {}}, {id: identity, capabilities: {}}, {id: cloud, capabilities: {}}, {id: logscale, capabilities: {}}, {id: discover, capabilities: {}}, {id: spotlight, capabilities: {}}]
+
+      - id: cyberark
+        label: CyberArk
+        eligibility:
+          platform_groups: [oem_cyberark]
         origin: fill
         kind: vendor
         group: security
         note: PAM, secrets, EPM
-        subdomains: [privileged_cloud, pam, identity, endpoint_privilege, secrets_manager, conjur, remote_access]
-      - name: Okta
+        subdomains: [{id: privileged_cloud, capabilities: {}}, {id: pam, capabilities: {}}, {id: identity, capabilities: {}}, {id: endpoint_privilege, capabilities: {}}, {id: secrets_manager, capabilities: {}}, {id: conjur, capabilities: {}}, {id: remote_access, capabilities: {}}]
+
+      - id: okta
+        label: Okta
+        eligibility:
+          platform_groups: [oem_okta]
         origin: fill
         kind: vendor
         group: security
         note: Workforce IdP
-        subdomains: [workforce, cic, wga, privileged_access, workflows, fastpass]
-      - name: Other Security ISV
+        subdomains: [{id: workforce, capabilities: {}}, {id: cic, capabilities: {}}, {id: wga, capabilities: {}}, {id: privileged_access, capabilities: {}}, {id: workflows, capabilities: {}}, {id: fastpass, capabilities: {}}]
+
+      - id: other_security_isv
+        label: Other Security ISV
+        eligibility:
+          platform_groups: [oem_other_security_isv]
         origin: fill
         kind: bucket
         group: security
         note: EDR, vuln, email security long-tail
-        subdomains: [sentinelone, tenable, qualys, rapid7, proofpoint, mimecast, trend_micro, sophos, tanium, darktrace]
-      - name: Other Identity ISV
+        subdomains: [{id: sentinelone, capabilities: {}}, {id: tenable, capabilities: {}}, {id: qualys, capabilities: {}}, {id: rapid7, capabilities: {}}, {id: proofpoint, capabilities: {}}, {id: mimecast, capabilities: {}}, {id: trend_micro, capabilities: {}}, {id: sophos, capabilities: {}}, {id: tanium, capabilities: {}}, {id: darktrace, capabilities: {}}]
+
+      - id: other_identity_isv
+        label: Other Identity ISV
+        eligibility:
+          platform_groups: [oem_other_identity_isv]
         origin: fill
         kind: bucket
         group: security
         note: IGA / PAM long-tail
-        subdomains: [ping, sailpoint, beyondtrust, delinea, forgerock, jumpcloud]
-      - name: Dell
+        subdomains: [{id: ping, capabilities: {}}, {id: sailpoint, capabilities: {}}, {id: beyondtrust, capabilities: {}}, {id: delinea, capabilities: {}}, {id: forgerock, capabilities: {}}, {id: jumpcloud, capabilities: {}}]
+
+      - id: dell
+        label: Dell
+        eligibility:
+          platform_groups: [oem_dell]
         origin: fill
         kind: vendor
         group: hardware
         note: PowerEdge, PowerStore, VxRail
-        subdomains: [poweredge, idrac, powerstore, powerscale, vxrail, avamar, networker, openmanage]
-      - name: HPE
+        subdomains: [{id: poweredge, capabilities: {}}, {id: idrac, capabilities: {}}, {id: powerstore, capabilities: {}}, {id: powerscale, capabilities: {}}, {id: vxrail, capabilities: {}}, {id: avamar, capabilities: {}}, {id: networker, capabilities: {}}, {id: openmanage, capabilities: {}}]
+
+      - id: hpe
+        label: HPE
+        eligibility:
+          platform_groups: [oem_hpe]
         origin: fill
         kind: vendor
         group: hardware
         note: ProLiant, Alletra, GreenLake
-        subdomains: [proliant, ilo, alletra, synergy, greenlake, primera_3par, storeonce, oneview]
-      - name: NetApp
+        subdomains: [{id: proliant, capabilities: {}}, {id: ilo, capabilities: {}}, {id: alletra, capabilities: {}}, {id: synergy, capabilities: {}}, {id: greenlake, capabilities: {}}, {id: primera_3par, capabilities: {}}, {id: storeonce, capabilities: {}}, {id: oneview, capabilities: {}}]
+
+      - id: netapp
+        label: NetApp
+        eligibility:
+          platform_groups: [oem_netapp]
         origin: fill
         kind: vendor
         group: hardware
         note: ONTAP and Cloud Volumes
-        subdomains: [ontap, ontap_select, storagegrid, cloud_volumes, snapmirror, active_iq]
-      - name: Pure Storage
+        subdomains: [{id: ontap, capabilities: {}}, {id: ontap_select, capabilities: {}}, {id: storagegrid, capabilities: {}}, {id: cloud_volumes, capabilities: {}}, {id: snapmirror, capabilities: {}}, {id: active_iq, capabilities: {}}]
+
+      - id: pure_storage
+        label: Pure Storage
+        eligibility:
+          platform_groups: [oem_pure_storage]
         origin: fill
         kind: vendor
         group: hardware
         note: FlashArray, FlashBlade, Portworx
-        subdomains: [flasharray, flashblade, portworx, fusion, cloud_block]
-      - name: Other Compute OEM
+        subdomains: [{id: flasharray, capabilities: {}}, {id: flashblade, capabilities: {}}, {id: portworx, capabilities: {}}, {id: fusion, capabilities: {}}, {id: cloud_block, capabilities: {}}]
+
+      - id: other_compute_oem
+        label: Other Compute OEM
+        eligibility:
+          platform_groups: [oem_other_compute_oem]
         origin: fill
         kind: bucket
         group: hardware
         note: Lenovo, SuperMicro, Hitachi
-        subdomains: [lenovo_thinksystem, supermicro, hitachi_vantara]
-      - name: VMware
+        subdomains: [{id: lenovo_thinksystem, capabilities: {}}, {id: supermicro, capabilities: {}}, {id: hitachi_vantara, capabilities: {}}]
+
+      - id: vmware
+        label: VMware
+        eligibility:
+          platform_groups: [oem_vmware]
         origin: fill
         kind: vendor
         group: virt
         note: Broadcom VMware Cloud Foundation
-        subdomains: [vsphere, vcenter, vsan, nsx, horizon, aria, velocloud, tanzu, vcf]
-      - name: Nutanix
+        subdomains: [{id: vsphere, capabilities: {}}, {id: vcenter, capabilities: {}}, {id: vsan, capabilities: {}}, {id: nsx, capabilities: {}}, {id: horizon, capabilities: {}}, {id: aria, capabilities: {}}, {id: velocloud, capabilities: {}}, {id: tanzu, capabilities: {}}, {id: vcf, capabilities: {}}]
+
+      - id: nutanix
+        label: Nutanix
+        eligibility:
+          platform_groups: [oem_nutanix]
         origin: fill
         kind: vendor
         group: virt
         note: AHV and Prism
-        subdomains: [ahv, prism, files, flow, calm, nkp]
-      - name: Other Hypervisor
+        subdomains: [{id: ahv, capabilities: {}}, {id: prism, capabilities: {}}, {id: files, capabilities: {}}, {id: flow, capabilities: {}}, {id: calm, capabilities: {}}, {id: nkp, capabilities: {}}]
+
+      - id: other_hypervisor
+        label: Other Hypervisor
+        eligibility:
+          platform_groups: [oem_other_hypervisor]
         origin: fill
         kind: bucket
         group: virt
         note: Proxmox, Citrix, KVM
-        subdomains: [proxmox, citrix_cvad, kvm_libvirt, oracle_virtualization]
-      - name: Oracle
+        subdomains: [{id: proxmox, capabilities: {}}, {id: citrix_cvad, capabilities: {}}, {id: kvm_libvirt, capabilities: {}}, {id: oracle_virtualization, capabilities: {}}]
+
+      - id: oracle
+        label: Oracle
+        eligibility:
+          platform_groups: [oem_oracle]
         origin: fill
         kind: vendor
         group: data
         note: Database, Exadata, EBS, Fusion — not OCI
-        subdomains: [database, rac_dataguard, exadata, goldengate, ebs, fusion_cloud, weblogic, mysql_heatwave]
-      - name: Database ISVs
+        subdomains: [{id: database, capabilities: {}}, {id: rac_dataguard, capabilities: {}}, {id: exadata, capabilities: {}}, {id: goldengate, capabilities: {}}, {id: ebs, capabilities: {}}, {id: fusion_cloud, capabilities: {}}, {id: weblogic, capabilities: {}}, {id: mysql_heatwave, capabilities: {}}]
+
+      - id: database_isvs
+        label: Database ISVs
+        eligibility:
+          platform_groups: [oem_database_isvs]
         origin: fill
         kind: bucket
         group: data
         note: Postgres, MySQL, MongoDB, Snowflake, …
-        subdomains: [postgresql, mysql, mariadb, mongodb, redis, elasticsearch, snowflake, databricks, cockroach, cassandra, neo4j, clickhouse]
-      - name: Datadog
+        subdomains: [{id: postgresql, capabilities: {}}, {id: mysql, capabilities: {}}, {id: mariadb, capabilities: {}}, {id: mongodb, capabilities: {}}, {id: redis, capabilities: {}}, {id: elasticsearch, capabilities: {}}, {id: snowflake, capabilities: {}}, {id: databricks, capabilities: {}}, {id: cockroach, capabilities: {}}, {id: cassandra, capabilities: {}}, {id: neo4j, capabilities: {}}, {id: clickhouse, capabilities: {}}]
+
+      - id: datadog
+        label: Datadog
+        eligibility:
+          platform_groups: [oem_datadog]
         origin: fill
         kind: vendor
         group: observe
         note: Infra, APM, logs, synthetics
-        subdomains: [infra, apm, logs, synthetics, rum, security, k8s, usm]
-      - name: Splunk
+        subdomains: [{id: infra, capabilities: {}}, {id: apm, capabilities: {}}, {id: logs, capabilities: {}}, {id: synthetics, capabilities: {}}, {id: rum, capabilities: {}}, {id: security, capabilities: {}}, {id: k8s, capabilities: {}}, {id: usm, capabilities: {}}]
+
+      - id: splunk
+        label: Splunk
+        eligibility:
+          platform_groups: [oem_splunk]
         origin: fill
         kind: vendor
         group: observe
         note: Enterprise / Cloud / OTel (Cisco-owned)
-        subdomains: [enterprise, cloud, otel, enterprise_security, it_si, observability, forwarder]
-      - name: Other Observability
+        subdomains: [{id: enterprise, capabilities: {}}, {id: cloud, capabilities: {}}, {id: otel, capabilities: {}}, {id: enterprise_security, capabilities: {}}, {id: it_si, capabilities: {}}, {id: observability, capabilities: {}}, {id: forwarder, capabilities: {}}]
+
+      - id: other_observability
+        label: Other Observability
+        eligibility:
+          platform_groups: [oem_other_observability]
         origin: fill
         kind: bucket
         group: observe
         note: Dynatrace, Grafana, Zabbix, PagerDuty, …
-        subdomains: [dynatrace, new_relic, grafana, zabbix, elastic, pagerduty, solarwinds, manageengine, prometheus]
-      - name: Backup ISVs
+        subdomains: [{id: dynatrace, capabilities: {}}, {id: new_relic, capabilities: {}}, {id: grafana, capabilities: {}}, {id: zabbix, capabilities: {}}, {id: elastic, capabilities: {}}, {id: pagerduty, capabilities: {}}, {id: solarwinds, capabilities: {}}, {id: manageengine, capabilities: {}}, {id: prometheus, capabilities: {}}]
+
+      - id: backup_isvs
+        label: Backup ISVs
+        eligibility:
+          platform_groups: [oem_backup_isvs]
         origin: fill
         kind: bucket
         group: backup
         note: Veeam, Rubrik, Cohesity, Commvault, …
-        subdomains: [veeam, rubrik, cohesity, commvault, veritas, acronis, datto, druva]
-      - name: ServiceNow
+        subdomains: [{id: veeam, capabilities: {}}, {id: rubrik, capabilities: {}}, {id: cohesity, capabilities: {}}, {id: commvault, capabilities: {}}, {id: veritas, capabilities: {}}, {id: acronis, capabilities: {}}, {id: datto, capabilities: {}}, {id: druva, capabilities: {}}]
+
+      - id: servicenow
+        label: ServiceNow
+        eligibility:
+          platform_groups: [oem_servicenow]
         origin: fill
         kind: vendor
         group: itsm
         note: ITSM / ITOM / CMDB
-        subdomains: [itsm, itom, cmdb, now_assist, secops, hrsd, csm, integration_hub]
-      - name: Atlassian
+        subdomains: [{id: itsm, capabilities: {}}, {id: itom, capabilities: {}}, {id: cmdb, capabilities: {}}, {id: now_assist, capabilities: {}}, {id: secops, capabilities: {}}, {id: hrsd, capabilities: {}}, {id: csm, capabilities: {}}, {id: integration_hub, capabilities: {}}]
+
+      - id: atlassian
+        label: Atlassian
+        eligibility:
+          platform_groups: [oem_atlassian]
         origin: fill
         kind: vendor
         group: itsm
         note: Jira, Confluence, Opsgenie
-        subdomains: [jira, jira_sm, confluence, bitbucket, opsgenie, statuspage]
-      - name: Google Workspace
+        subdomains: [{id: jira, capabilities: {}}, {id: jira_sm, capabilities: {}}, {id: confluence, capabilities: {}}, {id: bitbucket, capabilities: {}}, {id: opsgenie, capabilities: {}}, {id: statuspage, capabilities: {}}]
+
+      - id: google_workspace
+        label: Google Workspace
+        eligibility:
+          platform_groups: [oem_google_workspace]
         origin: fill
         kind: vendor
         group: itsm
         note: Gmail, Drive, Meet, ChromeOS
-        subdomains: [gmail, drive, calendar, meet, chromeos, cloud_identity, vault, admin]
-      - name: Workplace SaaS
+        subdomains: [{id: gmail, capabilities: {}}, {id: drive, capabilities: {}}, {id: calendar, capabilities: {}}, {id: meet, capabilities: {}}, {id: chromeos, capabilities: {}}, {id: cloud_identity, capabilities: {}}, {id: vault, capabilities: {}}, {id: admin, capabilities: {}}]
+
+      - id: workplace_saas
+        label: Workplace SaaS
+        eligibility:
+          platform_groups: [oem_workplace_saas]
         origin: fill
         kind: bucket
         group: itsm
         note: Slack, Zoom, Box, Freshservice, …
-        subdomains: [slack, zoom, box, dropbox, adobe, freshservice, zendesk, bmc_helix]
-      - name: RMM UEM ISVs
+        subdomains: [{id: slack, capabilities: {}}, {id: zoom, capabilities: {}}, {id: box, capabilities: {}}, {id: dropbox, capabilities: {}}, {id: adobe, capabilities: {}}, {id: freshservice, capabilities: {}}, {id: zendesk, capabilities: {}}, {id: bmc_helix, capabilities: {}}]
+
+      - id: rmm_uem_isvs
+        label: RMM UEM ISVs
+        eligibility:
+          platform_groups: [oem_rmm_uem_isvs]
         origin: fill
         kind: bucket
         group: endpoint
         note: Jamf, NinjaOne, ConnectWise, Kaseya, …
-        subdomains: [jamf, ninjaone, connectwise, kaseya, datto_rmm, omnissa, addigy, hexnode]
-      - name: GitHub
+        subdomains: [{id: jamf, capabilities: {}}, {id: ninjaone, capabilities: {}}, {id: connectwise, capabilities: {}}, {id: kaseya, capabilities: {}}, {id: datto_rmm, capabilities: {}}, {id: omnissa, capabilities: {}}, {id: addigy, capabilities: {}}, {id: hexnode, capabilities: {}}]
+
+      - id: github
+        label: GitHub
+        eligibility:
+          platform_groups: [oem_github]
         origin: fill
         kind: vendor
         group: devops
         note: Actions, Packages, Enterprise
-        subdomains: [actions, packages, enterprise, copilot, advanced_security, codespaces]
-      - name: HashiCorp
+        subdomains: [{id: actions, capabilities: {}}, {id: packages, capabilities: {}}, {id: enterprise, capabilities: {}}, {id: copilot, capabilities: {}}, {id: advanced_security, capabilities: {}}, {id: codespaces, capabilities: {}}]
+
+      - id: hashicorp
+        label: HashiCorp
+        eligibility:
+          platform_groups: [oem_hashicorp]
         origin: fill
         kind: vendor
         group: devops
         note: Terraform, Vault, Consul, Nomad
-        subdomains: [terraform, vault, consul, nomad, boundary, packer]
-      - name: Other DevOps ISV
+        subdomains: [{id: terraform, capabilities: {}}, {id: vault, capabilities: {}}, {id: consul, capabilities: {}}, {id: nomad, capabilities: {}}, {id: boundary, capabilities: {}}, {id: packer, capabilities: {}}]
+
+      - id: other_devops_isv
+        label: Other DevOps ISV
+        eligibility:
+          platform_groups: [oem_other_devops_isv]
         origin: fill
         kind: bucket
         group: devops
         note: GitLab, JFrog, Argo, Jenkins, Docker, …
-        subdomains: [gitlab, jfrog, harness, circleci, pulumi, argo, flux, jenkins, azure_devops, docker]
+        subdomains: [{id: gitlab, capabilities: {}}, {id: jfrog, capabilities: {}}, {id: harness, capabilities: {}}, {id: circleci, capabilities: {}}, {id: pulumi, capabilities: {}}, {id: argo, capabilities: {}}, {id: flux, capabilities: {}}, {id: jenkins, capabilities: {}}, {id: azure_devops, capabilities: {}}, {id: docker, capabilities: {}}]
