@@ -1,0 +1,10 @@
+{
+  "schema_version": "scogo.taskgen.dedup-report.v1",
+  "input_records": 500,
+  "kept_records": 500,
+  "dropped_records": 0,
+  "invalid_records": 0,
+  "exact_duplicates": 0,
+  "jaccard_duplicates": 0,
+  "semantic_duplicates": 0
+}
