@@ -15,6 +15,12 @@ Prebuilt ARM64 binaries from [GitHub Releases](https://github.com/ksingh-scogo/t
 
 No x86_64 or Windows builds. The two assets are not interchangeable.
 
+`-c N` is not a request for N model attempts. Taskgen runs bounded top-up waves, but each coordinate slot now flows through generation and review independently: a completed candidate is written and flushed immediately, then enters review while later generation requests continue. It repairs only `revise` outcomes once, samples fresh compatible coordinates for every remaining deficit, and publishes only after exactly N unique candidates are accepted. `--max-candidates` bounds the entire run and defaults to `max(100, 20 × count)`.
+
+The model reviewer is an auditable gate, not an infallible source of truth. Its model, prompt, token usage, decisions, rejection reasons, and retry guidance are retained in sidecars.
+
+## Build and commands
+
 ```bash
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) asset=taskgen-darwin-arm64 ;;
@@ -145,7 +151,7 @@ Exact match + Jaccard still run. Dedup cannot be turned off.
 
 **Smoke only** — `--skip-review` is a diagnostic. Schema, coordinates, and dedup still apply; `reviews.jsonl` is empty. Do not ship this as a training set.
 
-Tune `--workers` (generation) and `--review-workers` (review) independently. On one local endpoint the staged pipeline already keeps the two phases from overlapping inside a wave. False-reject rate usually costs more wall time than too few workers.
+Tune `--workers` (generation) and `--review-workers` (review) independently. The streaming pipeline overlaps the two phases safely; on one local endpoint benchmark the combined load rather than assuming that more workers is always faster. False-reject rate usually costs more wall time than too few workers.
 
 ## What “accepted” means
 
@@ -188,9 +194,17 @@ taskgen taxonomy validate --taxonomy netops-taxonomy.yaml
 
 `--distribution` is optional. If you pass it, **every** category ID must appear exactly once and weights must sum to `1.0`. Same for `--difficulty` vs levels 1–10: listed weights must sum to `1.0`. Prefer editing YAML `weight` / `difficulty_distribution` over a huge CLI string.
 
+`run.json` is created with `status: running` before generation and atomically updated to `success` or `failed`. `candidates.jsonl`, `reviews.jsonl`, `rejected.jsonl`, and `accepted.partial.jsonl` are flushed after each completed pipeline item so operators can tail them while the run is active; the terminal flush adds the durability barrier. `tasks.jsonl` exists only after every staged row passes the task schema, coordinate compiler, review/adjudication policy, and final deduplication and the exact accepted count is reached. Incomplete runs retain `accepted.partial.jsonl`, candidates, reviews, rejections, and their terminal report in the same directory.
+
 Prompt files: `--system-prompt` > `--system-prompt-file` > taxonomy `defaults.system_prompt_file` > built-in. Reviewer prompts follow the same pattern (`--review-system-prompt*`). Defaults live in `prompts/itops-taskgen-system-v2.txt` and `prompts/netops-taskgen-system-v2.txt` (embedded for IT Ops generate; needed on disk only if you override).
 
 ## Output record
+
+The report records start/end timestamps, duration, seed, generation/review/adjudication models, separate generation and review concurrency, streaming/overlap mode and in-flight limit, top-up waves, review outcome counts, request timing, retries, 429s, timeouts, rejection reasons, coordinate replacements, candidate yield, accepted coordinate distributions, throughput, token usage, sanitized endpoint origins, and artifact size/SHA-256 metadata. It never records credentials.
+
+### Prompt record
+
+Every final line validates against `schemas/task-v2.schema.json`:
 
 ```json
 {
@@ -224,26 +238,39 @@ Prompt files: `--system-prompt` > `--system-prompt-file` > taxonomy `defaults.sy
 
 `taskgen generate --help` is authoritative. Useful defaults:
 
-| Flag | Default | Notes |
-|---|---|---|
-| `--taxonomy` | embedded IT Ops | YAML for NetOps / custom |
-| `-c, --count` | `250` | accepted records required |
-| `-w, --workers` | `5` | generation concurrency |
-| `--review-workers` | `5` | review concurrency |
-| `--max-candidates` | `max(100, 20×count)` | global ceiling |
-| `--request-timeout-seconds` | `120` | per HTTP call |
-| `--review-model` | generation model | set this for real datasets |
-| `--dedup-mode` | `semantic` | `lexical` skips FastEmbed |
-| `--jaccard-threshold` | `0.80` | |
-| `--semantic-threshold` | `0.90` | |
-| `--run-dir` | `taskgen-runs/…` | one directory per invocation |
-| `--append-from` | none | copy + N new, never mutates source |
-| `--skip-review` | off | smoke only |
-| `--max-repairs-per-coordinate` | `1` | `revise` only; cannot exceed 1 |
+| Flag | Default | Purpose |
+|---|---:|---|
+| `--taxonomy <FILE>` | embedded IT Ops | Runtime taxonomy |
+| `-c, --count <N>` | `250` | Newly accepted records required for success |
+| `-w, --workers <N>` | `5` | Maximum concurrent generation requests |
+| `--request-timeout-seconds <N>` | `120` | Per generation/review HTTP request timeout |
+| `--max-candidates <N>` | `max(100, 20 × count)` | Global candidate ceiling across all top-up waves |
+| `--review-workers <N>` | `5` | Maximum concurrent review/adjudication pipelines |
+| `--max-repairs-per-coordinate <0|1>` | `1` | Bounded repair count for `revise` only |
+| `--review-model <MODEL>` | generation model | Separate review-call model |
+| `--review-api-base <URL>` | generation endpoint | Reviewer provider endpoint |
+| `--review-api-key <KEY>` | inherited on same endpoint | Reviewer credential |
+| `--review-keyfile <FILE>` | none | Reviewer keys, round-robin |
+| `--review-max-output-tokens <N>` | `1024` | Structured reviewer completion limit |
+| `--review-reference-dir <DIR>` | none | Local corpus for selective adjudication |
+| `--adjudication-model <MODEL>` | reviewer model | Optional separate adjudicator |
+| `--adjudication-api-base <URL>` | reviewer endpoint | Optional separate adjudicator endpoint |
+| `--skip-review` | off | Skip all reviewer calls for smoke/performance diagnostics |
+| `--dedup-mode <MODE>` | `semantic` | `semantic` or `lexical` |
+| `--jaccard-threshold <F>` | `0.80` | Inclusive lexical threshold |
+| `--semantic-threshold <F>` | `0.90` | Inclusive cosine threshold |
+| `--dedup-ngram <N>` | `5` | Lexical word n-gram size |
+| `--semantic-model <MODEL>` | language-dependent | Local FastEmbed model |
+| `--semantic-model-cache <DIR>` | FastEmbed default | Local model cache |
+| `--run-dir <DIR>` | generated under `taskgen-runs/` | Self-contained directory for this run |
+| `--append-from <FILE>` | none | Seed a new run from an existing dataset and add exactly N records |
+| `--multilingual` | off | Sample one of eight languages |
 
 `--api-key` reads `OPENAI_API_KEY`. Reviewer/adjudicator: `TASKGEN_REVIEW_API_KEY`, `TASKGEN_ADJUDICATION_API_KEY`. `--keyfile` / `--review-keyfile` beat single keys. Env secret values are hidden in `--help`.
 
 GPT-5 / o-series / Luna omit unsupported sampling fields. Qwen and DeepSeek-v4 force direct output (`reasoning_effort=none`, thinking off). DeepSeek-v4 generation uses a 2048-token cap and `<END_TASK>` stop. Provider reasoning traces are never stored.
+
+Keep review enabled for production datasets. `--skip-review` is an explicit diagnostic mode: generated prompts still pass schema, coordinate compilation, deterministic checks, and deduplication; `reviews.jsonl` remains empty; and `run.json` records review as skipped. Generation and review are now overlapped safely with independent semaphores: at most `--workers` generation requests and at most `--review-workers` review/adjudication pipelines are active at once. A candidate is persisted before its review request begins, so `candidates.jsonl`, `reviews.jsonl`, `rejected.jsonl`, and the CLI counters show live progress instead of waiting for a whole wave. Tune both limits to the provider/GPU capacity; if one endpoint serves both phases, benchmark the combined load rather than assuming that more workers is always faster. Lowering false rejection through capability constraints, the four-outcome rubric, and calibration usually saves more time than blind concurrency.
 
 ## Other commands
 
@@ -261,7 +288,7 @@ taskgen atif export --input data/audit.v1.jsonl --output data/atif.v1.7.jsonl
 taskgen atif import --input data/external.atif.v1.7.jsonl --output data/audit.v1.jsonl
 ```
 
-ATIF is interchange for **completed trajectories**, not prompt-generation. Imports are tagged `external_atif_unverified` until independently replayed. Schemas under `schemas/`.
+ATIF-v1.7 is the interchange format for **completed trajectories**, not prompt-generation. Imports are tagged `external_atif_unverified` until independently replayed. Schemas under `schemas/`.
 
 ## Contributors
 

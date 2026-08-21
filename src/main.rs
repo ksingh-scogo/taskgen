@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs::File;
@@ -18,6 +20,7 @@ use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use tokio::sync::Semaphore;
 
 pub mod artifacts;
 pub mod atif;
@@ -1120,6 +1123,8 @@ struct AtomicStats {
     review_rejects: AtomicUsize,
     review_needs_verification: AtomicUsize,
     attempts: AtomicUsize,
+    generated_candidates: AtomicUsize,
+    reviewed_candidates: AtomicUsize,
     tasks: AtomicUsize,
     errors: AtomicUsize,
 }
@@ -1140,10 +1145,22 @@ impl AtomicStats {
             review_rejects: AtomicUsize::new(0),
             review_needs_verification: AtomicUsize::new(0),
             attempts: AtomicUsize::new(0),
+            generated_candidates: AtomicUsize::new(0),
+            reviewed_candidates: AtomicUsize::new(0),
             tasks: AtomicUsize::new(0),
             errors: AtomicUsize::new(0),
         }
     }
+}
+
+fn update_live_progress(progress: &ProgressBar, stats: &AtomicStats, stage: &str) {
+    let generated = stats.generated_candidates.load(Ordering::Relaxed);
+    let reviewed = stats.reviewed_candidates.load(Ordering::Relaxed);
+    let accepted = stats.tasks.load(Ordering::Relaxed);
+    let rejected = stats.errors.load(Ordering::Relaxed);
+    progress.set_message(format!(
+        "{stage} | generated {generated} | reviewed {reviewed} | accepted {accepted} | rejected {rejected}"
+    ));
 }
 
 #[cfg(test)]
@@ -2841,6 +2858,21 @@ fn generation_run_report(
     let logical_cpus = std::thread::available_parallelism()
         .map(|value| value.get())
         .unwrap_or(1);
+    let pipeline = serde_json::json!({
+        "mode": if context.args.skip_review {
+            "streaming_generation_only"
+        } else {
+            "streaming_generation_review_overlap"
+        },
+        "generation_review_overlap": !context.args.skip_review,
+        "max_in_flight_items": context.args.workers.saturating_add(
+            if context.args.skip_review {
+                0
+            } else {
+                context.args.review_workers
+            },
+        ),
+    });
 
     Ok(serde_json::json!({
         "schema_version": "scogo.taskgen.run.v3",
@@ -2862,6 +2894,8 @@ fn generation_run_report(
         "final_records": outcome.final_records,
         "accepted_distribution": outcome.accepted_distribution,
         "candidate_attempts": candidate_attempts,
+        "generated_candidates": outcome.stats.generated_candidates.load(Ordering::Relaxed),
+        "reviewed_candidates": outcome.stats.reviewed_candidates.load(Ordering::Relaxed),
         "rejected_candidates": outcome.stats.errors.load(Ordering::Relaxed),
         "coordinate_replacements": outcome.stats.coordinate_replacements.load(Ordering::Relaxed),
         "concurrency": {
@@ -2871,6 +2905,7 @@ fn generation_run_report(
             "runtime_worker_threads": runtime_worker_threads(),
             "logical_cpus": logical_cpus,
         },
+        "pipeline": pipeline,
         "generation": {
             "model": context.args.model,
             "effective_models": context.effective_generation_models,
@@ -2926,6 +2961,12 @@ fn generation_run_report(
         "throughput": {
             "tasks_per_minute": if duration_minutes > 0.0 { accepted as f64 / duration_minutes } else { 0.0 },
             "candidates_per_minute": if duration_minutes > 0.0 { candidate_attempts as f64 / duration_minutes } else { 0.0 },
+        },
+        "progress": {
+            "generated_candidates": outcome.stats.generated_candidates.load(Ordering::Relaxed),
+            "reviewed_candidates": outcome.stats.reviewed_candidates.load(Ordering::Relaxed),
+            "accepted": accepted,
+            "rejected": outcome.stats.errors.load(Ordering::Relaxed),
         },
         "efficiency": {
             "candidate_acceptance_rate": if candidate_attempts > 0 { accepted as f64 / candidate_attempts as f64 } else { 0.0 },
@@ -3002,6 +3043,23 @@ fn spawn_shutdown_listener(
         *signal_reason.lock().unwrap() = Some(reason.to_string());
         cancel.store(true, Ordering::Relaxed);
     })
+}
+
+fn write_live_artifact<F>(
+    artifacts: &Arc<std::sync::Mutex<Option<artifacts::RunArtifacts>>>,
+    write: F,
+) -> Result<()>
+where
+    F: FnOnce(&mut artifacts::RunArtifacts) -> Result<()>,
+{
+    let mut guard = artifacts
+        .lock()
+        .map_err(|_| anyhow::anyhow!("run artifacts mutex poisoned"))?;
+    let run = guard
+        .as_mut()
+        .context("run artifacts are no longer available")?;
+    write(run)?;
+    run.flush_visible()
 }
 
 async fn run_generate(args: GenerateArgs) -> Result<()> {
@@ -3191,6 +3249,11 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             "runtime": "tokio-multi-thread",
             "runtime_worker_threads": runtime_worker_threads(),
             "logical_cpus": std::thread::available_parallelism().map(|value| value.get()).unwrap_or(1),
+        },
+        "pipeline": {
+            "mode": if args.skip_review { "streaming_generation_only" } else { "streaming_generation_review_overlap" },
+            "generation_review_overlap": !args.skip_review,
+            "max_in_flight_items": args.workers.saturating_add(if args.skip_review { 0 } else { args.review_workers }),
         }
     });
     let artifacts =
@@ -3218,7 +3281,9 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     let explicit_review_model = args.review_model.is_some();
     let explicit_adjudication_model = args.adjudication_model.is_some();
     let mut repair_queue: VecDeque<GenerationWorkItem> = VecDeque::new();
-    let mut seen_candidate_hashes = HashSet::new();
+    let seen_candidate_hashes = Arc::new(std::sync::Mutex::new(HashSet::new()));
+    let generation_permits = Arc::new(Semaphore::new(args.workers));
+    let review_permits = Arc::new(Semaphore::new(args.review_workers));
     let mut next_sequence = 1usize;
     let mut wave = 0usize;
     let mut execution_error: Option<String> = None;
@@ -3284,44 +3349,68 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         }
 
         pb.set_message(format!(
-            "wave {wave}: generating {} candidates",
+            "wave {wave}: generating/reviewing {} candidates",
             work_items.len()
         ));
-        let mut generated: Vec<(
-            GenerationWorkItem,
-            std::result::Result<StagedCandidate, String>,
-        )> = stream::iter(work_items)
+        let pipeline_limit = args
+            .workers
+            .saturating_add(if args.skip_review {
+                0
+            } else {
+                args.review_workers
+            })
+            .max(1);
+        let pipeline_results: Vec<Result<Option<GenerationWorkItem>>> = stream::iter(work_items)
             .map(|work| {
+                let artifacts = artifacts.clone();
                 let clients = clients.clone();
                 let proxy_counter = proxy_counter.clone();
                 let generation_provider = generation_provider.clone();
+                let review_provider = review_provider.clone();
+                let adjudication_provider = adjudication_provider.clone();
                 let free_models = free_models.clone();
                 let model_counter = model_counter.clone();
                 let embedder = embedder.clone();
+                let dedup_index = dedup_index.clone();
+                let seen_candidate_hashes = seen_candidate_hashes.clone();
                 let stats = stats.clone();
                 let generation_telemetry = generation_telemetry.clone();
+                let review_telemetry = review_telemetry.clone();
+                let adjudication_telemetry = adjudication_telemetry.clone();
                 let cancel = cancel.clone();
                 let consecutive_availability_failures = consecutive_availability_failures.clone();
+                let generation_permits = generation_permits.clone();
+                let review_permits = review_permits.clone();
                 let pb = pb.clone();
                 let system_prompt = system_prompt.clone();
+                let review_system_prompt = review_system_prompt.clone();
                 let taxonomy = worker_taxonomy.clone();
+                let reference_store = reference_store.clone();
+                let taxonomy_id = taxonomy_id.clone();
+                let taxonomy_kind = taxonomy_kind.clone();
                 let temperature = args.temperature;
                 let max_output_tokens = args.max_output_tokens;
+                let review_token_override = args.review_max_output_tokens;
+                let max_repairs_per_coordinate = args.max_repairs_per_coordinate;
                 async move {
-                    let result = async {
-                        let use_model = match &free_models {
-                            Some(models) => {
-                                let index =
-                                    model_counter.fetch_add(1, Ordering::Relaxed) % models.len();
-                                models[index].clone()
-                            }
-                            None => generation_provider.model.clone(),
-                        };
-                        let client_index =
-                            proxy_counter.fetch_add(1, Ordering::Relaxed) % clients.len();
-                        let client = &clients[client_index];
-                        let credential = generation_provider.credentials.next();
-                        let generated = generate_task(GenerateTaskRequest {
+                    let use_model = match &free_models {
+                        Some(models) => {
+                            let index =
+                                model_counter.fetch_add(1, Ordering::Relaxed) % models.len();
+                            models[index].clone()
+                        }
+                        None => generation_provider.model.clone(),
+                    };
+                    let client_index =
+                        proxy_counter.fetch_add(1, Ordering::Relaxed) % clients.len();
+                    let client = &clients[client_index];
+                    let credential = generation_provider.credentials.next();
+                    let generated = {
+                        let _permit = generation_permits
+                            .acquire()
+                            .await
+                            .map_err(|_| anyhow::anyhow!("generation pipeline cancelled"))?;
+                        let result = generate_task(GenerateTaskRequest {
                             client,
                             api_base: generation_provider.api_base.as_str(),
                             api_key: credential.expose(),
@@ -3337,12 +3426,34 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                             progress: &pb,
                             telemetry: &generation_telemetry,
                         })
-                        .await
-                        .map_err(|error| error.to_string())?;
-                        stats.input_tokens.fetch_add(generated.1, Ordering::Relaxed);
-                        stats
-                            .output_tokens
-                            .fetch_add(generated.2, Ordering::Relaxed);
+                        .await;
+                        drop(_permit);
+                        result
+                    };
+                    let generated = match generated {
+                        Ok(generated) => generated,
+                        Err(error) => {
+                            stats.errors.fetch_add(1, Ordering::Relaxed);
+                            let reason = error.to_string();
+                            write_live_artifact(&artifacts, |run| {
+                                run.write_rejection(&serde_json::json!({
+                                    "schema_version":"scogo.taskgen.rejection.v2",
+                                    "candidate_sequence":work.sequence,
+                                    "wave":work.wave,
+                                    "stage":"generation",
+                                    "reason":reason,
+                                    "coordinate":work.sample,
+                                }))
+                            })?;
+                            update_live_progress(&pb, &stats, "generation failed");
+                            return Ok(None);
+                        }
+                    };
+                    stats.input_tokens.fetch_add(generated.1, Ordering::Relaxed);
+                    stats
+                        .output_tokens
+                        .fetch_add(generated.2, Ordering::Relaxed);
+                    let candidate = async {
                         let entry = TaskEntry {
                             schema_version: Some("scogo.taskgen.task.v2".into()),
                             prompt: generated.0,
@@ -3361,19 +3472,13 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                                 &entry.domain,
                                 &entry.subdomain,
                                 entry.coordinates.as_ref().ok_or_else(|| {
-                                    "generated task is missing coordinates".to_string()
+                                    anyhow::anyhow!("generated task is missing coordinates")
                                 })?,
                             )
-                            .map_err(|error| error.to_string())?;
-                        let serialized =
-                            serialize_task_entry(&entry).map_err(|error| error.to_string())?;
+                            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                        let serialized = serialize_task_entry(&entry)?;
                         let embedding = match &embedder {
-                            Some(embedder) => Some(
-                                embedder
-                                    .embed(&entry.prompt)
-                                    .await
-                                    .map_err(|error| error.to_string())?,
-                            ),
+                            Some(embedder) => Some(embedder.embed(&entry.prompt).await?),
                             None => None,
                         };
                         let candidate_id = {
@@ -3383,7 +3488,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                             format!("{:x}", hasher.finalize())
                         };
                         let deterministic_checks = deterministic_candidate_checks(&entry);
-                        Ok(StagedCandidate {
+                        Ok::<StagedCandidate, anyhow::Error>(StagedCandidate {
                             work: work.clone(),
                             candidate_id,
                             entry,
@@ -3393,192 +3498,153 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                         })
                     }
                     .await;
-                    (work, result)
-                }
-            })
-            .buffer_unordered(args.workers)
-            .collect()
-            .await;
-        generated.sort_by_key(|(work, _)| work.sequence);
+                    let candidate = match candidate {
+                        Ok(candidate) => candidate,
+                        Err(error) => {
+                            stats.errors.fetch_add(1, Ordering::Relaxed);
+                            let reason = format!("{error:#}");
+                            write_live_artifact(&artifacts, |run| {
+                                run.write_rejection(&serde_json::json!({
+                                    "schema_version":"scogo.taskgen.rejection.v2",
+                                    "candidate_sequence":work.sequence,
+                                    "wave":work.wave,
+                                    "stage":"generation",
+                                    "reason":reason,
+                                    "coordinate":work.sample,
+                                }))
+                            })?;
+                            update_live_progress(&pb, &stats, "generation rejected");
+                            return Ok(None);
+                        }
+                    };
+                    let prompt_hash = dedup::prompt_sha256(&candidate.entry.prompt);
+                    let candidate_record = serde_json::json!({
+                        "schema_version":"scogo.taskgen.candidate.v1",
+                        "candidate_id":candidate.candidate_id,
+                        "sequence":candidate.work.sequence,
+                        "wave":candidate.work.wave,
+                        "repair_of":candidate.work.repair_of,
+                        "repair_count":candidate.work.repair_count,
+                        "prompt_sha256":prompt_hash,
+                        "deterministic_checks":candidate.deterministic_checks,
+                        "candidate":candidate.entry,
+                    });
+                    write_live_artifact(&artifacts, |run| run.write_candidate(&candidate_record))?;
+                    stats.generated_candidates.fetch_add(1, Ordering::Relaxed);
+                    update_live_progress(&pb, &stats, "generation complete");
 
-        let mut review_candidates = Vec::new();
-        for (work, result) in generated {
-            let candidate = match result {
-                Ok(candidate) => candidate,
-                Err(reason) => {
-                    stats.errors.fetch_add(1, Ordering::Relaxed);
-                    artifacts
-                        .lock()
-                        .unwrap()
-                        .as_mut()
-                        .unwrap()
-                        .write_rejection(&serde_json::json!({
-                            "schema_version":"scogo.taskgen.rejection.v2",
-                            "candidate_sequence":work.sequence,
-                            "wave":work.wave,
-                            "stage":"generation",
-                            "reason":reason,
-                            "coordinate":work.sample,
-                        }))?;
-                    continue;
-                }
-            };
-            let prompt_hash = dedup::prompt_sha256(&candidate.entry.prompt);
-            artifacts
-                .lock()
-                .unwrap()
-                .as_mut()
-                .unwrap()
-                .write_candidate(&serde_json::json!({
-                    "schema_version":"scogo.taskgen.candidate.v1",
-                    "candidate_id":candidate.candidate_id,
-                    "sequence":candidate.work.sequence,
-                    "wave":candidate.work.wave,
-                    "repair_of":candidate.work.repair_of,
-                    "repair_count":candidate.work.repair_count,
-                    "prompt_sha256":prompt_hash,
-                    "deterministic_checks":candidate.deterministic_checks,
-                    "candidate":candidate.entry,
-                }))?;
-            if !candidate.deterministic_checks.hard_failures.is_empty() {
-                stats.errors.fetch_add(1, Ordering::Relaxed);
-                artifacts
-                    .lock()
-                    .unwrap()
-                    .as_mut()
-                    .unwrap()
-                    .write_rejection(&serde_json::json!({
-                        "schema_version":"scogo.taskgen.rejection.v2",
-                        "candidate_id":candidate.candidate_id,
-                        "stage":"deterministic_validation",
-                        "hard_failures":candidate.deterministic_checks.hard_failures,
-                        "candidate":candidate.entry,
-                    }))?;
-                continue;
-            }
-            if !seen_candidate_hashes.insert(prompt_hash) {
-                stats.errors.fetch_add(1, Ordering::Relaxed);
-                artifacts
-                    .lock()
-                    .unwrap()
-                    .as_mut()
-                    .unwrap()
-                    .write_rejection(&serde_json::json!({
-                        "schema_version":"scogo.taskgen.rejection.v2",
-                        "candidate_id":candidate.candidate_id,
-                        "stage":"dedup_precheck",
-                        "reason":"exact candidate-pool duplicate",
-                        "candidate":candidate.entry,
-                    }))?;
-                continue;
-            }
-            let dedup_candidate = dedup::DedupCandidate {
-                prompt: &candidate.entry.prompt,
-                language: candidate.entry.language.as_deref(),
-                domain: &candidate.entry.domain,
-                subdomain: &candidate.entry.subdomain,
-            };
-            let duplicate = dedup_index
-                .lock()
-                .unwrap()
-                .find_duplicate(&dedup_candidate, candidate.embedding.as_deref())?;
-            if let Some(duplicate) = duplicate {
-                stats.errors.fetch_add(1, Ordering::Relaxed);
-                artifacts
-                    .lock()
-                    .unwrap()
-                    .as_mut()
-                    .unwrap()
-                    .write_rejection(&serde_json::json!({
-                        "schema_version":"scogo.taskgen.rejection.v2",
-                        "candidate_id":candidate.candidate_id,
-                        "stage":"dedup_precheck",
-                        "duplicate":duplicate,
-                        "candidate":candidate.entry,
-                    }))?;
-                continue;
-            }
-            review_candidates.push(candidate);
-        }
-
-        if args.skip_review {
-            for candidate in review_candidates {
-                let dedup_candidate = dedup::DedupCandidate {
-                    prompt: &candidate.entry.prompt,
-                    language: candidate.entry.language.as_deref(),
-                    domain: &candidate.entry.domain,
-                    subdomain: &candidate.entry.subdomain,
-                };
-                let duplicate = {
-                    let mut index = dedup_index.lock().unwrap();
-                    if let Some(duplicate) =
-                        index.find_duplicate(&dedup_candidate, candidate.embedding.as_deref())?
-                    {
-                        Some(duplicate)
-                    } else {
-                        index.insert(dedup_candidate, candidate.embedding)?;
-                        None
-                    }
-                };
-                if let Some(duplicate) = duplicate {
-                    stats.errors.fetch_add(1, Ordering::Relaxed);
-                    artifacts
-                        .lock()
-                        .unwrap()
-                        .as_mut()
-                        .unwrap()
-                        .write_rejection(&serde_json::json!({
+                    if !candidate.deterministic_checks.hard_failures.is_empty() {
+                        stats.errors.fetch_add(1, Ordering::Relaxed);
+                        let rejection = serde_json::json!({
                             "schema_version":"scogo.taskgen.rejection.v2",
                             "candidate_id":candidate.candidate_id,
-                            "stage":"dedup_final",
+                            "stage":"deterministic_validation",
+                            "hard_failures":candidate.deterministic_checks.hard_failures,
+                            "candidate":candidate.entry,
+                        });
+                        write_live_artifact(&artifacts, |run| run.write_rejection(&rejection))?;
+                        update_live_progress(&pb, &stats, "candidate rejected");
+                        return Ok(None);
+                    }
+                    let duplicate_hash = {
+                        let mut hashes = seen_candidate_hashes
+                            .lock()
+                            .map_err(|_| anyhow::anyhow!("candidate hash mutex poisoned"))?;
+                        !hashes.insert(prompt_hash.clone())
+                    };
+                    if duplicate_hash {
+                        stats.errors.fetch_add(1, Ordering::Relaxed);
+                        let rejection = serde_json::json!({
+                            "schema_version":"scogo.taskgen.rejection.v2",
+                            "candidate_id":candidate.candidate_id,
+                            "stage":"dedup_precheck",
+                            "reason":"exact candidate-pool duplicate",
+                            "candidate":candidate.entry,
+                        });
+                        write_live_artifact(&artifacts, |run| run.write_rejection(&rejection))?;
+                        update_live_progress(&pb, &stats, "candidate rejected");
+                        return Ok(None);
+                    }
+                    let dedup_candidate = dedup::DedupCandidate {
+                        prompt: &candidate.entry.prompt,
+                        language: candidate.entry.language.as_deref(),
+                        domain: &candidate.entry.domain,
+                        subdomain: &candidate.entry.subdomain,
+                    };
+                    let duplicate = dedup_index
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("dedup index mutex poisoned"))?
+                        .find_duplicate(&dedup_candidate, candidate.embedding.as_deref())?;
+                    if let Some(duplicate) = duplicate {
+                        stats.errors.fetch_add(1, Ordering::Relaxed);
+                        let rejection = serde_json::json!({
+                            "schema_version":"scogo.taskgen.rejection.v2",
+                            "candidate_id":candidate.candidate_id,
+                            "stage":"dedup_precheck",
                             "duplicate":duplicate,
                             "candidate":candidate.entry,
-                        }))?;
-                    continue;
-                }
-                artifacts
-                    .lock()
-                    .unwrap()
-                    .as_mut()
-                    .unwrap()
-                    .write_accepted_line(&candidate.serialized)?;
-                let accepted = stats.tasks.fetch_add(1, Ordering::Relaxed) + 1;
-                pb.inc(1);
-                pb.set_message(format!("{accepted} accepted | review skipped"));
-            }
-            continue;
-        }
+                        });
+                        write_live_artifact(&artifacts, |run| run.write_rejection(&rejection))?;
+                        update_live_progress(&pb, &stats, "candidate rejected");
+                        return Ok(None);
+                    }
 
-        pb.set_message(format!(
-            "wave {wave}: reviewing {} candidates",
-            review_candidates.len()
-        ));
-        let mut reviewed: Vec<(
-            StagedCandidate,
-            std::result::Result<CandidateEvaluation, String>,
-        )> = stream::iter(review_candidates)
-            .map(|candidate| {
-                let mut effective_review_provider = review_provider.clone();
-                if free_models.is_some() && !explicit_review_model {
-                    effective_review_provider.model = candidate.entry.taskgen_model.clone();
-                }
-                let mut effective_adjudication_provider = adjudication_provider.clone();
-                if free_models.is_some() && !explicit_review_model && !explicit_adjudication_model {
-                    effective_adjudication_provider.model = candidate.entry.taskgen_model.clone();
-                }
-                let client_index = proxy_counter.fetch_add(1, Ordering::Relaxed) % clients.len();
-                let client = clients[client_index].clone();
-                let review_system_prompt = review_system_prompt.clone();
-                let review_telemetry = review_telemetry.clone();
-                let adjudication_telemetry = adjudication_telemetry.clone();
-                let reference_store = reference_store.clone();
-                let taxonomy_id = taxonomy_id.clone();
-                let taxonomy_kind = taxonomy_kind.clone();
-                let max_tokens = review_max_output_tokens(
-                    &effective_review_provider.model,
-                    args.review_max_output_tokens,
-                );
-                async move {
+                    if args.skip_review {
+                        let duplicate = {
+                            let mut index = dedup_index
+                                .lock()
+                                .map_err(|_| anyhow::anyhow!("dedup index mutex poisoned"))?;
+                            if let Some(duplicate) =
+                                index.find_duplicate(&dedup_candidate, candidate.embedding.as_deref())?
+                            {
+                                Some(duplicate)
+                            } else {
+                                index.insert(dedup_candidate, candidate.embedding)?;
+                                None
+                            }
+                        };
+                        if let Some(duplicate) = duplicate {
+                            stats.errors.fetch_add(1, Ordering::Relaxed);
+                            let rejection = serde_json::json!({
+                                "schema_version":"scogo.taskgen.rejection.v2",
+                                "candidate_id":candidate.candidate_id,
+                                "stage":"dedup_final",
+                                "duplicate":duplicate,
+                                "candidate":candidate.entry,
+                            });
+                            write_live_artifact(&artifacts, |run| run.write_rejection(&rejection))?;
+                            update_live_progress(&pb, &stats, "candidate rejected");
+                            return Ok(None);
+                        }
+                        write_live_artifact(&artifacts, |run| {
+                            run.write_accepted_line(&candidate.serialized)
+                        })?;
+                        let accepted = stats.tasks.fetch_add(1, Ordering::Relaxed) + 1;
+                        pb.inc(1);
+                        update_live_progress(&pb, &stats, "accepted (review skipped)");
+                        pb.set_message(format!(
+                            "accepted {accepted} | generated {} | reviewed {} | rejected {}",
+                            stats.generated_candidates.load(Ordering::Relaxed),
+                            stats.reviewed_candidates.load(Ordering::Relaxed),
+                            stats.errors.load(Ordering::Relaxed)
+                        ));
+                        return Ok(None);
+                    }
+
+                    let mut effective_review_provider = review_provider.clone();
+                    if free_models.is_some() && !explicit_review_model {
+                        effective_review_provider.model = candidate.entry.taskgen_model.clone();
+                    }
+                    let mut effective_adjudication_provider = adjudication_provider.clone();
+                    if free_models.is_some() && !explicit_review_model && !explicit_adjudication_model {
+                        effective_adjudication_provider.model = candidate.entry.taskgen_model.clone();
+                    }
+                    let client_index = proxy_counter.fetch_add(1, Ordering::Relaxed) % clients.len();
+                    let client = clients[client_index].clone();
+                    let max_tokens = review_max_output_tokens(
+                        &effective_review_provider.model,
+                        review_token_override,
+                    );
                     let context = CandidateReviewContext {
                         taxonomy_id,
                         taxonomy_kind,
@@ -3591,163 +3657,136 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                         adjudication_telemetry,
                         reference_store,
                     };
-                    let result = evaluate_candidate(
-                        &candidate.entry,
-                        candidate.deterministic_checks.clone(),
-                        context,
-                    )
-                    .await
-                    .map_err(|error| format!("{error:#}"));
-                    (candidate, result)
-                }
-            })
-            .buffer_unordered(args.review_workers)
-            .collect()
-            .await;
-        reviewed.sort_by_key(|(candidate, _)| candidate.work.sequence);
-
-        for (candidate, evaluation) in reviewed {
-            let evaluation = match evaluation {
-                Ok(evaluation) => evaluation,
-                Err(reason) => {
-                    stats.errors.fetch_add(1, Ordering::Relaxed);
-                    artifacts
-                        .lock()
-                        .unwrap()
-                        .as_mut()
-                        .unwrap()
-                        .write_rejection(&serde_json::json!({
-                            "schema_version":"scogo.taskgen.rejection.v2",
-                            "candidate_id":candidate.candidate_id,
-                            "stage":"review_error",
-                            "reason":reason,
-                            "candidate":candidate.entry,
-                        }))?;
-                    continue;
-                }
-            };
-            stats
-                .review_input_tokens
-                .fetch_add(evaluation.review.input_tokens, Ordering::Relaxed);
-            stats
-                .review_output_tokens
-                .fetch_add(evaluation.review.output_tokens, Ordering::Relaxed);
-            if let Some(adjudication) = &evaluation.adjudication {
-                stats
-                    .adjudication_input_tokens
-                    .fetch_add(adjudication.input_tokens, Ordering::Relaxed);
-                stats
-                    .adjudication_output_tokens
-                    .fetch_add(adjudication.output_tokens, Ordering::Relaxed);
-            }
-            match evaluation.review.decision.outcome {
-                review::ReviewOutcome::Accept => {
-                    stats.review_accepts.fetch_add(1, Ordering::Relaxed);
-                }
-                review::ReviewOutcome::Revise => {
-                    stats.review_revises.fetch_add(1, Ordering::Relaxed);
-                }
-                review::ReviewOutcome::Reject => {
-                    stats.review_rejects.fetch_add(1, Ordering::Relaxed);
-                }
-                review::ReviewOutcome::NeedsVerification => {
+                    let evaluation = {
+                        let _permit = review_permits
+                            .acquire()
+                            .await
+                            .map_err(|_| anyhow::anyhow!("review pipeline cancelled"))?;
+                        let result = evaluate_candidate(
+                            &candidate.entry,
+                            candidate.deterministic_checks.clone(),
+                            context,
+                        )
+                        .await;
+                        drop(_permit);
+                        result
+                    };
+                    stats.reviewed_candidates.fetch_add(1, Ordering::Relaxed);
+                    update_live_progress(&pb, &stats, "review complete");
+                    let evaluation = match evaluation {
+                        Ok(evaluation) => evaluation,
+                        Err(error) => {
+                            stats.errors.fetch_add(1, Ordering::Relaxed);
+                            let rejection = serde_json::json!({
+                                "schema_version":"scogo.taskgen.rejection.v2",
+                                "candidate_id":candidate.candidate_id,
+                                "stage":"review_error",
+                                "reason":format!("{error:#}"),
+                                "candidate":candidate.entry,
+                            });
+                            write_live_artifact(&artifacts, |run| run.write_rejection(&rejection))?;
+                            update_live_progress(&pb, &stats, "review rejected");
+                            return Ok(None);
+                        }
+                    };
                     stats
-                        .review_needs_verification
-                        .fetch_add(1, Ordering::Relaxed);
-                }
-            }
+                        .review_input_tokens
+                        .fetch_add(evaluation.review.input_tokens, Ordering::Relaxed);
+                    stats
+                        .review_output_tokens
+                        .fetch_add(evaluation.review.output_tokens, Ordering::Relaxed);
+                    if let Some(adjudication) = &evaluation.adjudication {
+                        stats
+                            .adjudication_input_tokens
+                            .fetch_add(adjudication.input_tokens, Ordering::Relaxed);
+                        stats
+                            .adjudication_output_tokens
+                            .fetch_add(adjudication.output_tokens, Ordering::Relaxed);
+                    }
+                    match evaluation.review.decision.outcome {
+                        review::ReviewOutcome::Accept => {
+                            stats.review_accepts.fetch_add(1, Ordering::Relaxed);
+                        }
+                        review::ReviewOutcome::Revise => {
+                            stats.review_revises.fetch_add(1, Ordering::Relaxed);
+                        }
+                        review::ReviewOutcome::Reject => {
+                            stats.review_rejects.fetch_add(1, Ordering::Relaxed);
+                        }
+                        review::ReviewOutcome::NeedsVerification => {
+                            stats
+                                .review_needs_verification
+                                .fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
 
-            if evaluation.review.decision.outcome == review::ReviewOutcome::Revise
-                && candidate.work.repair_count < args.max_repairs_per_coordinate
-            {
-                repair_queue.push_back(GenerationWorkItem {
-                    sequence: 0,
-                    wave: 0,
-                    sample: candidate.work.sample.clone(),
-                    language: candidate.work.language.clone(),
-                    feedback: Some(GenerationFeedback {
-                        previous_prompt: Some(candidate.entry.prompt.clone()),
-                        review_summary: evaluation.review.decision.summary.clone(),
-                        retry_guidance: evaluation.review.decision.retry_guidance.clone(),
-                    }),
-                    repair_of: Some(candidate.candidate_id.clone()),
-                    repair_count: candidate.work.repair_count + 1,
-                });
-            }
+                    let repair = if evaluation.review.decision.outcome == review::ReviewOutcome::Revise
+                        && candidate.work.repair_count < max_repairs_per_coordinate
+                    {
+                        Some(GenerationWorkItem {
+                            sequence: 0,
+                            wave: 0,
+                            sample: candidate.work.sample.clone(),
+                            language: candidate.work.language.clone(),
+                            feedback: Some(GenerationFeedback {
+                                previous_prompt: Some(candidate.entry.prompt.clone()),
+                                review_summary: evaluation.review.decision.summary.clone(),
+                                retry_guidance: evaluation.review.decision.retry_guidance.clone(),
+                            }),
+                            repair_of: Some(candidate.candidate_id.clone()),
+                            repair_count: candidate.work.repair_count + 1,
+                        })
+                    } else {
+                        None
+                    };
 
-            let mut final_disposition = if evaluation.accepted() {
-                "accepted"
-            } else if evaluation.review.decision.outcome == review::ReviewOutcome::Revise
-                && candidate.work.repair_count < args.max_repairs_per_coordinate
-            {
-                "revise_queued"
-            } else if evaluation.review.decision.outcome == review::ReviewOutcome::NeedsVerification
-            {
-                "verification_rejected"
-            } else {
-                "rejected"
-            };
+                    let mut final_disposition = if evaluation.accepted() {
+                        "accepted"
+                    } else if repair.is_some() {
+                        "revise_queued"
+                    } else if evaluation.review.decision.outcome == review::ReviewOutcome::NeedsVerification
+                    {
+                        "verification_rejected"
+                    } else {
+                        "rejected"
+                    };
+                    let mut duplicate = None;
+                    if evaluation.accepted() {
+                        let dedup_candidate = dedup::DedupCandidate {
+                            prompt: &candidate.entry.prompt,
+                            language: candidate.entry.language.as_deref(),
+                            domain: &candidate.entry.domain,
+                            subdomain: &candidate.entry.subdomain,
+                        };
+                        let mut index = dedup_index
+                            .lock()
+                            .map_err(|_| anyhow::anyhow!("dedup index mutex poisoned"))?;
+                        if let Some(hit) =
+                            index.find_duplicate(&dedup_candidate, candidate.embedding.as_deref())?
+                        {
+                            duplicate = Some(hit);
+                            final_disposition = "duplicate";
+                        } else {
+                            index.insert(dedup_candidate, candidate.embedding)?;
+                        }
+                    }
 
-            let mut duplicate = None;
-            if evaluation.accepted() {
-                let dedup_candidate = dedup::DedupCandidate {
-                    prompt: &candidate.entry.prompt,
-                    language: candidate.entry.language.as_deref(),
-                    domain: &candidate.entry.domain,
-                    subdomain: &candidate.entry.subdomain,
-                };
-                let mut index = dedup_index.lock().unwrap();
-                if let Some(hit) =
-                    index.find_duplicate(&dedup_candidate, candidate.embedding.as_deref())?
-                {
-                    duplicate = Some(hit);
-                    final_disposition = "duplicate";
-                } else {
-                    index.insert(dedup_candidate, candidate.embedding)?;
-                }
-            }
-
-            artifacts
-                .lock()
-                .unwrap()
-                .as_mut()
-                .unwrap()
-                .write_review(&serde_json::json!({
-                    "schema_version":"scogo.taskgen.review-record.v3",
-                    "candidate_id":candidate.candidate_id,
-                    "sequence":candidate.work.sequence,
-                    "wave":candidate.work.wave,
-                    "review_model":evaluation.review.model,
-                    "review_input_tokens":evaluation.review.input_tokens,
-                    "review_output_tokens":evaluation.review.output_tokens,
-                    "decision_normalization":evaluation.review.normalization,
-                    "decision":evaluation.review.decision,
-                    "references":evaluation.references,
-                    "adjudication":evaluation.adjudication,
-                    "final_disposition":final_disposition,
-                }))?;
-
-            if final_disposition == "accepted" {
-                artifacts
-                    .lock()
-                    .unwrap()
-                    .as_mut()
-                    .unwrap()
-                    .write_accepted_line(&candidate.serialized)?;
-                let accepted = stats.tasks.fetch_add(1, Ordering::Relaxed) + 1;
-                pb.inc(1);
-                pb.set_message(format!(
-                    "{accepted} accepted | {} rejected",
-                    stats.errors.load(Ordering::Relaxed)
-                ));
-            } else {
-                stats.errors.fetch_add(1, Ordering::Relaxed);
-                artifacts
-                    .lock()
-                    .unwrap()
-                    .as_mut()
-                    .unwrap()
-                    .write_rejection(&serde_json::json!({
+                    let review_record = serde_json::json!({
+                        "schema_version":"scogo.taskgen.review-record.v3",
+                        "candidate_id":candidate.candidate_id,
+                        "sequence":candidate.work.sequence,
+                        "wave":candidate.work.wave,
+                        "review_model":evaluation.review.model,
+                        "review_input_tokens":evaluation.review.input_tokens,
+                        "review_output_tokens":evaluation.review.output_tokens,
+                        "decision_normalization":evaluation.review.normalization,
+                        "decision":evaluation.review.decision,
+                        "references":evaluation.references,
+                        "adjudication":evaluation.adjudication,
+                        "final_disposition":final_disposition,
+                    });
+                    let accepted = final_disposition == "accepted";
+                    let rejection = (!accepted).then(|| serde_json::json!({
                         "schema_version":"scogo.taskgen.rejection.v2",
                         "candidate_id":candidate.candidate_id,
                         "stage":if final_disposition == "duplicate" {"dedup_final"} else {"model_review_v3"},
@@ -3756,7 +3795,38 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                         "decision":evaluation.review.decision,
                         "adjudication":evaluation.adjudication,
                         "candidate":candidate.entry,
-                    }))?;
+                    }));
+                    write_live_artifact(&artifacts, |run| {
+                        run.write_review(&review_record)?;
+                        if accepted {
+                            run.write_accepted_line(&candidate.serialized)?;
+                        } else if let Some(rejection) = &rejection {
+                            run.write_rejection(rejection)?;
+                        }
+                        Ok(())
+                    })?;
+                    if accepted {
+                        let accepted_count = stats.tasks.fetch_add(1, Ordering::Relaxed) + 1;
+                        pb.inc(1);
+                        pb.set_message(format!(
+                            "accepted {accepted_count} | generated {} | reviewed {} | rejected {}",
+                            stats.generated_candidates.load(Ordering::Relaxed),
+                            stats.reviewed_candidates.load(Ordering::Relaxed),
+                            stats.errors.load(Ordering::Relaxed)
+                        ));
+                    } else {
+                        stats.errors.fetch_add(1, Ordering::Relaxed);
+                        update_live_progress(&pb, &stats, "review rejected");
+                    }
+                    Ok(repair)
+                }
+            })
+            .buffer_unordered(pipeline_limit)
+            .collect()
+            .await;
+        for result in pipeline_results {
+            if let Some(repair) = result? {
+                repair_queue.push_back(repair);
             }
         }
     }
@@ -5063,6 +5133,8 @@ mod tests {
             3
         );
         assert_eq!(report["concurrency"]["generation_workers"], 2);
+        assert_eq!(report["pipeline"]["generation_review_overlap"], true);
+        assert_eq!(report["pipeline"]["max_in_flight_items"], 7);
         assert_eq!(report["efficiency"]["top_up_waves"], 1);
         assert_eq!(report["generation"]["effective_models"][0], "test-model");
         assert_eq!(report["review"]["effective_models"][0], "test-model");
@@ -5094,6 +5166,146 @@ mod tests {
         );
         assert!(generation_calls >= 3);
         assert!(review_calls >= 3);
+    }
+
+    #[tokio::test]
+    async fn generation_publishes_candidates_immediately_and_overlaps_review() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::time::{Duration, Instant};
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+        #[derive(Clone)]
+        struct OverlapResponder {
+            generations: Arc<AtomicUsize>,
+            generation_responses_completed: Arc<AtomicUsize>,
+            review_overlapped_generation: Arc<AtomicBool>,
+        }
+
+        impl Respond for OverlapResponder {
+            fn respond(&self, request: &Request) -> ResponseTemplate {
+                let body = String::from_utf8_lossy(&request.body);
+                if body.contains("Review this prompt seed") {
+                    if self.generation_responses_completed.load(Ordering::SeqCst) < 4 {
+                        self.review_overlapped_generation
+                            .store(true, Ordering::SeqCst);
+                    }
+                    return ResponseTemplate::new(200)
+                        .set_delay(Duration::from_millis(300))
+                        .set_body_json(serde_json::json!({
+                            "choices": [{"message": {"content": include_str!(
+                                "../tests/fixtures/canonical/valid-review-v3.json"
+                            )}}],
+                            "usage": {"prompt_tokens": 10, "completion_tokens": 5}
+                        }));
+                }
+
+                let number = self.generations.fetch_add(1, Ordering::SeqCst) + 1;
+                let delay = if number <= 2 { 80 } else { 300 };
+                let generation_responses_completed = self.generation_responses_completed.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(delay));
+                    generation_responses_completed.fetch_add(1, Ordering::SeqCst);
+                });
+                ResponseTemplate::new(200)
+                    .set_delay(Duration::from_millis(delay))
+                    .set_body_json(serde_json::json!({
+                        "choices": [{
+                            "finish_reason": "stop",
+                            "message": {"content": format!(
+                                "Candidate {number}: application latency increased after maintenance while interface counters and flow telemetry disagree. Which read-only evidence should the on-call collect next before proposing a change?"
+                            )}
+                        }],
+                        "usage": {"prompt_tokens": 20, "completion_tokens": 12}
+                    }))
+            }
+        }
+
+        let server = MockServer::start().await;
+        let generations = Arc::new(AtomicUsize::new(0));
+        let generation_responses_completed = Arc::new(AtomicUsize::new(0));
+        let review_overlapped_generation = Arc::new(AtomicBool::new(false));
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(OverlapResponder {
+                generations: generations.clone(),
+                generation_responses_completed: generation_responses_completed.clone(),
+                review_overlapped_generation: review_overlapped_generation.clone(),
+            })
+            .mount(&server)
+            .await;
+
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("overlap-run");
+        let cli = Cli::try_parse_from([
+            "taskgen",
+            "generate",
+            "--api-base",
+            &format!("{}/v1", server.uri()),
+            "--api-key",
+            "test-key",
+            "--model",
+            "test-model",
+            "--taxonomy",
+            "docs/netops-taxonomy.yaml",
+            "--count",
+            "4",
+            "--workers",
+            "2",
+            "--review-workers",
+            "2",
+            "--seed",
+            "987",
+            "--dedup-mode",
+            "lexical",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+        ])
+        .unwrap();
+        let Command::Generate(args) = cli.command else {
+            panic!("expected generate command");
+        };
+
+        let started = Instant::now();
+        let run = tokio::spawn(run_generate(*args));
+        let candidate_path = run_dir.join("candidates.jsonl");
+        let mut published_candidates = 0;
+        for _ in 0..100 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            published_candidates = std::fs::read_to_string(&candidate_path)
+                .unwrap()
+                .lines()
+                .count();
+            if published_candidates > 0 {
+                break;
+            }
+        }
+        assert!(
+            published_candidates > 0,
+            "a completed generation must be visible before the full wave finishes (generations={}, file={:?})",
+            generations.load(Ordering::SeqCst),
+            std::fs::read_to_string(&candidate_path).unwrap()
+        );
+        assert!(
+            generations.load(Ordering::SeqCst) < 4,
+            "all generation requests completed before the first candidate was published"
+        );
+
+        tokio::time::timeout(Duration::from_secs(5), run)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(
+            review_overlapped_generation.load(Ordering::SeqCst),
+            "review requests must be allowed to run while later generations are in flight"
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(1600),
+            "generation/review stages still appear serialized: {:?}",
+            started.elapsed()
+        );
+        assert_eq!(generations.load(Ordering::SeqCst), 4);
     }
 
     #[tokio::test]
@@ -5411,6 +5623,7 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(paths.run).unwrap()).unwrap();
         assert_eq!(report["review"]["enabled"], false);
         assert_eq!(report["review"]["status"], "skipped");
+        assert_eq!(report["pipeline"]["generation_review_overlap"], false);
         assert_eq!(report["requests"]["review"]["requests"], 0);
     }
 

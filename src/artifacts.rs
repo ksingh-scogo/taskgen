@@ -174,6 +174,23 @@ impl RunArtifacts {
         Ok(())
     }
 
+    /// Flush buffered records so operators can tail a live run directory.
+    ///
+    /// This intentionally does not call `sync_all`; the terminal flush still
+    /// provides the durability barrier before publication. Live progress needs
+    /// visibility without turning every model response into four fsyncs.
+    pub fn flush_visible(&mut self) -> Result<()> {
+        self.accepted.flush()?;
+        self.candidates.flush()?;
+        self.reviews.flush()?;
+        self.rejected.flush()?;
+        self.accepted_since_flush = 0;
+        self.candidates_since_flush = 0;
+        self.reviews_since_flush = 0;
+        self.rejected_since_flush = 0;
+        Ok(())
+    }
+
     pub fn publish<T: Serialize>(mut self, report: &T) -> Result<PublishedPaths> {
         self.flush()?;
         let report_temporary = write_json_temporary(&self.published.run, report)?;
@@ -234,18 +251,11 @@ impl RunArtifacts {
     }
 
     pub fn flush(&mut self) -> Result<()> {
-        self.accepted.flush()?;
-        self.candidates.flush()?;
-        self.reviews.flush()?;
-        self.rejected.flush()?;
+        self.flush_visible()?;
         self.accepted.get_ref().sync_all()?;
         self.candidates.get_ref().sync_all()?;
         self.reviews.get_ref().sync_all()?;
         self.rejected.get_ref().sync_all()?;
-        self.accepted_since_flush = 0;
-        self.candidates_since_flush = 0;
-        self.reviews_since_flush = 0;
-        self.rejected_since_flush = 0;
         Ok(())
     }
 }
