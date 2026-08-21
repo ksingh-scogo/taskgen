@@ -17,7 +17,7 @@ taskgen generate -c N
   => no partial final dataset is published on failure
 ```
 
-`-c N` is not a request for N model attempts. Taskgen runs explicit generation and review waves. It generates the current acceptance deficit, persists every candidate, reviews that pool independently, repairs only `revise` outcomes once, and samples fresh compatible coordinates for every remaining deficit. It publishes only after exactly N unique candidates are accepted. `--max-candidates` bounds the entire run and defaults to `max(100, 20 × count)`.
+`-c N` is not a request for N model attempts. Taskgen runs bounded top-up waves, but each coordinate slot now flows through generation and review independently: a completed candidate is written and flushed immediately, then enters review while later generation requests continue. It repairs only `revise` outcomes once, samples fresh compatible coordinates for every remaining deficit, and publishes only after exactly N unique candidates are accepted. `--max-candidates` bounds the entire run and defaults to `max(100, 20 × count)`.
 
 The model reviewer is an auditable gate, not an infallible source of truth. Its model, prompt, token usage, decisions, rejection reasons, and retry guidance are retained in sidecars.
 
@@ -178,11 +178,11 @@ data/runs/netops-001/
 └── run.json
 ```
 
-`run.json` is created with `status: running` before generation and atomically updated to `success` or `failed`. `candidates.jsonl` is durable before review starts. `tasks.jsonl` exists only after every staged row passes the task schema, coordinate compiler, review/adjudication policy, and final deduplication and the exact accepted count is reached. Incomplete runs retain `accepted.partial.jsonl`, candidates, reviews, rejections, and their terminal report in the same directory.
+`run.json` is created with `status: running` before generation and atomically updated to `success` or `failed`. `candidates.jsonl`, `reviews.jsonl`, `rejected.jsonl`, and `accepted.partial.jsonl` are flushed after each completed pipeline item so operators can tail them while the run is active; the terminal flush adds the durability barrier. `tasks.jsonl` exists only after every staged row passes the task schema, coordinate compiler, review/adjudication policy, and final deduplication and the exact accepted count is reached. Incomplete runs retain `accepted.partial.jsonl`, candidates, reviews, rejections, and their terminal report in the same directory.
 
 `--append-from <FILE> -c N` creates a new run containing the source records plus exactly N newly accepted records. The source dataset is never modified, and its records are loaded into the dedup index so new candidates cannot duplicate them.
 
-The report records start/end timestamps, duration, seed, generation/review/adjudication models, separate generation and review concurrency, top-up waves, review outcome counts, request timing, retries, 429s, timeouts, rejection reasons, coordinate replacements, candidate yield, accepted coordinate distributions, throughput, token usage, sanitized endpoint origins, and artifact size/SHA-256 metadata. It never records credentials.
+The report records start/end timestamps, duration, seed, generation/review/adjudication models, separate generation and review concurrency, streaming/overlap mode and in-flight limit, top-up waves, review outcome counts, request timing, retries, 429s, timeouts, rejection reasons, coordinate replacements, candidate yield, accepted coordinate distributions, throughput, token usage, sanitized endpoint origins, and artifact size/SHA-256 metadata. It never records credentials.
 
 ### Prompt record
 
@@ -222,10 +222,10 @@ Every final line validates against `schemas/task-v2.schema.json`:
 |---|---:|---|
 | `--taxonomy <FILE>` | embedded IT Ops | Runtime taxonomy |
 | `-c, --count <N>` | `250` | Newly accepted records required for success |
-| `-w, --workers <N>` | `5` | Concurrent coordinate slots |
+| `-w, --workers <N>` | `5` | Maximum concurrent generation requests |
 | `--request-timeout-seconds <N>` | `120` | Per generation/review HTTP request timeout |
 | `--max-candidates <N>` | `max(100, 20 × count)` | Global candidate ceiling across all top-up waves |
-| `--review-workers <N>` | `5` | Independent review-stage concurrency |
+| `--review-workers <N>` | `5` | Maximum concurrent review/adjudication pipelines |
 | `--max-repairs-per-coordinate <0|1>` | `1` | Bounded repair count for `revise` only |
 | `--max-repairs-per-coordinate <N>` | `2` | Repairs before recomposing axes for the same subject |
 | `--review-model <MODEL>` | generation model | Separate review-call model |
@@ -251,7 +251,7 @@ GPT-5, o-series, and Luna request bodies omit unsupported sampling fields. Qwen 
 
 ### Throughput tuning
 
-Keep review enabled for production datasets. `--skip-review` is an explicit diagnostic mode: generated prompts still pass schema, coordinate compilation, deterministic checks, and deduplication; `reviews.jsonl` remains empty; and `run.json` records review as skipped. Tune `--workers` and `--review-workers` independently. When one local endpoint serves both phases, the staged pipeline prevents generation and review from competing within the same wave. Lowering false rejection through capability constraints, the four-outcome rubric, and calibration usually saves more time than blind concurrency.
+Keep review enabled for production datasets. `--skip-review` is an explicit diagnostic mode: generated prompts still pass schema, coordinate compilation, deterministic checks, and deduplication; `reviews.jsonl` remains empty; and `run.json` records review as skipped. Generation and review are now overlapped safely with independent semaphores: at most `--workers` generation requests and at most `--review-workers` review/adjudication pipelines are active at once. A candidate is persisted before its review request begins, so `candidates.jsonl`, `reviews.jsonl`, `rejected.jsonl`, and the CLI counters show live progress instead of waiting for a whole wave. Tune both limits to the provider/GPU capacity; if one endpoint serves both phases, benchmark the combined load rather than assuming that more workers is always faster. Lowering false rejection through capability constraints, the four-outcome rubric, and calibration usually saves more time than blind concurrency.
 
 ## Standalone Rust dedup
 
