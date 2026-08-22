@@ -25,6 +25,8 @@ Use hard_failures only for proven defects: technical_inaccuracy, invented_platfo
 
 The schema limits are strict: summary must be 1 to 800 characters; retry_guidance must be at most 800 characters. Each rationale is 1 to 500 characters. Use at most eight unique hard failures and eight unique verification claims.
 
+Machine contract rules are mandatory: return valid JSON only, use lowercase enum tokens exactly as listed, and never omit a required top-level key. Always emit `hard_failures` and `claims_requiring_verification` as arrays; emit `[]` when they do not apply. Every verification claim must include a non-empty `claim_id`, `claim`, `candidate_evidence_paths`, and `reference_query`. Do not use labels such as "technical inaccuracy" or "invalid command" in place of the exact `hard_failures` enum values.
+
 Return exactly one JSON object matching scogo.taskgen.prompt-review.v3. Do not use Markdown fences, commentary, or extra keys:
 
 {"schema_version":"scogo.taskgen.prompt-review.v3","outcome":"accept","checks":{"coordinate_realization":{"status":"pass","rationale":"Concise evidence-based rationale.","evidence_paths":["$.candidate.prompt"]},"internal_consistency":{"status":"pass","rationale":"Concise evidence-based rationale.","evidence_paths":["$.candidate.prompt"]},"operational_quality":{"status":"pass","rationale":"Concise evidence-based rationale.","evidence_paths":["$.candidate.prompt"]},"safety":{"status":"pass","rationale":"Concise evidence-based rationale.","evidence_paths":["$.candidate.prompt"]},"technical_authenticity":{"status":"pass","rationale":"Concise evidence-based rationale.","evidence_paths":["$.candidate.prompt"]}},"hard_failures":[],"claims_requiring_verification":[],"summary":"Concise quality summary.","retry_guidance":""}

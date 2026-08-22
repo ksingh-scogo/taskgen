@@ -113,6 +113,10 @@ taskgen generate \
 
 Adjudication runs only on `needs_verification`. Point `--review-reference-dir` at local `.md`/`.txt`/`.json`/`.yaml` vendor docs; a separate adjudicator is `--adjudication-model` / `--adjudication-api-base` / `--adjudication-api-key`.
 
+Reviewer and adjudicator calls negotiate structured output without assuming a specific provider: Taskgen prefers strict `json_schema`, falls back to `json_object` when a gateway or upstream model rejects the schema, and finally falls back to prompt-only JSON while retaining canonical schema validation. Qwen models start with `json_object`; DeepSeek-v4 and other models start with the strict schema. Normalized enum aliases and repaired internal claim IDs are recorded in `decision_normalization`, never silently treated as model-perfect output.
+
+If a provider publishes a request limit, set `--review-requests-per-minute` to that shared review/adjudication budget. For example, a 10-request/minute reviewer should use `--review-requests-per-minute 10`; this limiter is independent of `--review-workers` and counts retries and structured-output fallback requests.
+
 **Keys, proxies, budget**
 
 ```bash
@@ -246,6 +250,7 @@ Every final line validates against `schemas/task-v2.schema.json`:
 | `--request-timeout-seconds <N>` | `120` | Per generation/review HTTP request timeout |
 | `--max-candidates <N>` | `max(100, 20 × count)` | Global candidate ceiling across all top-up waves |
 | `--review-workers <N>` | `5` | Maximum concurrent review/adjudication pipelines |
+| `--review-requests-per-minute <N>` | none | Shared client-side review/adjudication request rate limit |
 | `--max-repairs-per-coordinate <0|1>` | `1` | Bounded repair count for `revise` only |
 | `--review-model <MODEL>` | generation model | Separate review-call model |
 | `--review-api-base <URL>` | generation endpoint | Reviewer provider endpoint |
@@ -268,7 +273,7 @@ Every final line validates against `schemas/task-v2.schema.json`:
 
 `--api-key` reads `OPENAI_API_KEY`. Reviewer/adjudicator: `TASKGEN_REVIEW_API_KEY`, `TASKGEN_ADJUDICATION_API_KEY`. `--keyfile` / `--review-keyfile` beat single keys. Env secret values are hidden in `--help`.
 
-GPT-5 / o-series / Luna omit unsupported sampling fields. Qwen and DeepSeek-v4 force direct output (`reasoning_effort=none`, thinking off). DeepSeek-v4 generation uses a 2048-token cap and `<END_TASK>` stop. Provider reasoning traces are never stored.
+GPT-5 / o-series / Luna omit unsupported sampling fields. Qwen and DeepSeek-v4 force direct output (`reasoning_effort=none`, thinking off). DeepSeek-v4 generation uses a 2048-token cap and `<END_TASK>` stop. Provider reasoning traces are never stored. Structured reviewer calls negotiate `json_schema`, `json_object`, and prompt-only JSON per provider capability; final responses always pass Taskgen’s canonical review schema and policy checks.
 
 Keep review enabled for production datasets. `--skip-review` is an explicit diagnostic mode: generated prompts still pass schema, coordinate compilation, deterministic checks, and deduplication; `reviews.jsonl` remains empty; and `run.json` records review as skipped. Generation and review are now overlapped safely with independent semaphores: at most `--workers` generation requests and at most `--review-workers` review/adjudication pipelines are active at once. A candidate is persisted before its review request begins, so `candidates.jsonl`, `reviews.jsonl`, `rejected.jsonl`, and the CLI counters show live progress instead of waiting for a whole wave. Tune both limits to the provider/GPU capacity; if one endpoint serves both phases, benchmark the combined load rather than assuming that more workers is always faster. Lowering false rejection through capability constraints, the four-outcome rubric, and calibration usually saves more time than blind concurrency.
 
