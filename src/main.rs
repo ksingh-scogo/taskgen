@@ -269,6 +269,10 @@ struct ReviewArgs {
     #[arg(long, default_value_t = 5, value_parser = parse_positive_usize)]
     review_workers: usize,
 
+    /// Maximum combined review and adjudication requests per minute. Omit for no client-side limit.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    review_requests_per_minute: Option<u32>,
+
     #[arg(long)]
     run_dir: Option<PathBuf>,
 
@@ -430,6 +434,10 @@ struct GenerateArgs {
     /// Maximum number of rubric reviews processed concurrently in each review stage.
     #[arg(long, default_value_t = 5, value_parser = parse_positive_usize)]
     review_workers: usize,
+
+    /// Maximum combined review and adjudication requests per minute. Omit for no client-side limit.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    review_requests_per_minute: Option<u32>,
 
     /// Global generated-candidate limit. Defaults to max(100, 20 * count).
     #[arg(long, value_parser = parse_positive_usize)]
@@ -690,6 +698,7 @@ struct CandidateReviewContext {
     review_telemetry: Arc<telemetry::RequestTelemetry>,
     adjudication_telemetry: Arc<telemetry::RequestTelemetry>,
     reference_store: Arc<references::ReferenceStore>,
+    review_rate_limiter: Option<Arc<review::ReviewRateLimiter>>,
 }
 
 impl CandidateEvaluation {
@@ -715,6 +724,7 @@ async fn evaluate_candidate(
         context.client.clone(),
         context.review_max_tokens,
         context.review_telemetry,
+        context.review_rate_limiter.clone(),
     )?;
     let reviewed = reviewer
         .review(review::ReviewRequest {
@@ -748,6 +758,7 @@ async fn evaluate_candidate(
         context.client,
         1024,
         context.adjudication_telemetry,
+        context.review_rate_limiter,
     )?;
     let adjudication = adjudicator
         .adjudicate(review::AdjudicationRequest {
@@ -2326,6 +2337,8 @@ async fn run_review(args: ReviewArgs) -> Result<()> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
         .build()?;
+    let review_rate_limiter =
+        review::ReviewRateLimiter::from_requests_per_minute(args.review_requests_per_minute)?;
 
     #[derive(Debug)]
     struct StandaloneCandidate {
@@ -2465,6 +2478,7 @@ async fn run_review(args: ReviewArgs) -> Result<()> {
             let review_telemetry = review_telemetry.clone();
             let adjudication_telemetry = adjudication_telemetry.clone();
             let reference_store = reference_store.clone();
+            let review_rate_limiter = review_rate_limiter.clone();
             async move {
                 let context = CandidateReviewContext {
                     taxonomy_id,
@@ -2477,6 +2491,7 @@ async fn run_review(args: ReviewArgs) -> Result<()> {
                     review_telemetry,
                     adjudication_telemetry,
                     reference_store,
+                    review_rate_limiter,
                 };
                 let result = evaluate_candidate(
                     &candidate.entry,
@@ -2575,7 +2590,10 @@ async fn run_review(args: ReviewArgs) -> Result<()> {
         "accepted_records":accepted,
         "rejected_records":rejected,
         "review_errors":review_errors,
-        "concurrency":{"review_workers":args.review_workers},
+        "concurrency":{
+            "review_workers":args.review_workers,
+            "review_requests_per_minute":args.review_requests_per_minute
+        },
         "review":{"model":review_provider.model,"endpoint_origin":review_provider.api_base.origin().ascii_serialization()},
         "adjudication":{"model":adjudication_provider.model,"endpoint_origin":adjudication_provider.api_base.origin().ascii_serialization()},
         "requests":{"review":review_telemetry.snapshot(),"adjudication":adjudication_telemetry.snapshot()},
@@ -2901,6 +2919,7 @@ fn generation_run_report(
         "concurrency": {
             "generation_workers": context.args.workers,
             "review_workers": context.args.review_workers,
+            "review_requests_per_minute": context.args.review_requests_per_minute,
             "runtime": "tokio-multi-thread",
             "runtime_worker_threads": runtime_worker_threads(),
             "logical_cpus": logical_cpus,
@@ -3246,6 +3265,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         "concurrency": {
             "generation_workers": args.workers,
             "review_workers": args.review_workers,
+            "review_requests_per_minute": args.review_requests_per_minute,
             "runtime": "tokio-multi-thread",
             "runtime_worker_threads": runtime_worker_threads(),
             "logical_cpus": std::thread::available_parallelism().map(|value| value.get()).unwrap_or(1),
@@ -3266,6 +3286,8 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     let generation_telemetry = Arc::new(telemetry::RequestTelemetry::default());
     let review_telemetry = Arc::new(telemetry::RequestTelemetry::default());
     let adjudication_telemetry = Arc::new(telemetry::RequestTelemetry::default());
+    let review_rate_limiter =
+        review::ReviewRateLimiter::from_requests_per_minute(args.review_requests_per_minute)?;
     let cancel = Arc::new(AtomicBool::new(false));
     let signal_reason = Arc::new(std::sync::Mutex::new(None));
     let shutdown_listener = spawn_shutdown_listener(cancel.clone(), signal_reason.clone());
@@ -3377,6 +3399,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                 let generation_telemetry = generation_telemetry.clone();
                 let review_telemetry = review_telemetry.clone();
                 let adjudication_telemetry = adjudication_telemetry.clone();
+                let review_rate_limiter = review_rate_limiter.clone();
                 let cancel = cancel.clone();
                 let consecutive_availability_failures = consecutive_availability_failures.clone();
                 let generation_permits = generation_permits.clone();
@@ -3656,6 +3679,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                         review_telemetry,
                         adjudication_telemetry,
                         reference_store,
+                        review_rate_limiter,
                     };
                     let evaluation = {
                         let _permit = review_permits
@@ -4209,6 +4233,21 @@ mod tests {
         };
         assert_eq!(args.review_workers, 2);
         assert_eq!(args.max_candidates, Some(40));
+    }
+
+    #[test]
+    fn parses_provider_neutral_review_rate_limit_flag() {
+        assert!(
+            Cli::try_parse_from([
+                "taskgen",
+                "generate",
+                "--api-key",
+                "x",
+                "--review-requests-per-minute",
+                "10",
+            ])
+            .is_ok()
+        );
     }
 
     #[test]
@@ -5507,6 +5546,7 @@ mod tests {
             system_prompt_file: None,
             max_output_tokens: None,
             review_workers: 1,
+            review_requests_per_minute: None,
             run_dir: Some(run_dir.clone()),
             review_reference_dir: None,
             adjudication_model: None,

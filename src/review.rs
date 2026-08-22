@@ -11,6 +11,54 @@ use crate::schema::{self, SchemaKind};
 
 const REVIEW_TEXT_MAX_CHARS: usize = 800;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StructuredOutputFormat {
+    JsonSchema,
+    JsonObject,
+    PromptOnly,
+}
+
+impl StructuredOutputFormat {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::JsonSchema => "json_schema",
+            Self::JsonObject => "json_object",
+            Self::PromptOnly => "prompt_only",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ReviewRateLimiter {
+    interval: Duration,
+    next_request_at: Arc<tokio::sync::Mutex<Instant>>,
+}
+
+impl ReviewRateLimiter {
+    pub fn from_requests_per_minute(requests_per_minute: Option<u32>) -> Result<Option<Arc<Self>>> {
+        let Some(requests_per_minute) = requests_per_minute else {
+            return Ok(None);
+        };
+        if requests_per_minute == 0 {
+            bail!("review requests per minute must be positive");
+        }
+        let interval = Duration::from_secs_f64(60.0 / f64::from(requests_per_minute));
+        Ok(Some(Arc::new(Self {
+            interval,
+            next_request_at: Arc::new(tokio::sync::Mutex::new(Instant::now())),
+        })))
+    }
+
+    async fn acquire(&self) {
+        let mut next_request_at = self.next_request_at.lock().await;
+        let now = Instant::now();
+        if *next_request_at > now {
+            tokio::time::sleep(*next_request_at - now).await;
+        }
+        *next_request_at = Instant::now() + self.interval;
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ReviewOutcome {
@@ -180,7 +228,16 @@ impl ReviewDecision {
         } else {
             trimmed
         };
-        let mut value: Value = serde_json::from_str(json_text).context("invalid review JSON")?;
+        Self::parse_and_validate_with_format(json_text, StructuredOutputFormat::PromptOnly)
+    }
+
+    fn parse_and_validate_with_format(
+        raw: &str,
+        response_format: StructuredOutputFormat,
+    ) -> Result<(Self, ReviewNormalization)> {
+        let mut value: Value = serde_json::from_str(raw).context("invalid review JSON")?;
+        let (hard_failure_aliases_normalized, claim_ids_repaired) =
+            normalize_review_contract(&mut value);
         let normalization = ReviewNormalization {
             summary_truncated: clip_string_field(&mut value, "summary", REVIEW_TEXT_MAX_CHARS),
             retry_guidance_truncated: clip_string_field(
@@ -188,6 +245,9 @@ impl ReviewDecision {
                 "retry_guidance",
                 REVIEW_TEXT_MAX_CHARS,
             ),
+            hard_failure_aliases_normalized,
+            claim_ids_repaired,
+            response_format: response_format.as_str().to_string(),
         };
         schema::validate_instance(SchemaKind::PromptReviewV3, &value)
             .context("review JSON failed schema validation")?;
@@ -252,6 +312,85 @@ fn clip_string_field(value: &mut Value, field: &str, max_chars: usize) -> bool {
 pub struct ReviewNormalization {
     pub summary_truncated: bool,
     pub retry_guidance_truncated: bool,
+    pub hard_failure_aliases_normalized: usize,
+    pub claim_ids_repaired: usize,
+    pub response_format: String,
+}
+
+fn normalize_review_contract(value: &mut Value) -> (usize, usize) {
+    let mut hard_failure_aliases_normalized = 0;
+    let mut claim_ids_repaired = 0;
+
+    if let Some(hard_failures) = value.get_mut("hard_failures").and_then(Value::as_array_mut) {
+        for failure in hard_failures {
+            let Some(raw) = failure.as_str() else {
+                continue;
+            };
+            let normalized = normalize_hard_failure(raw);
+            if normalized != raw {
+                *failure = Value::String(normalized.to_string());
+                hard_failure_aliases_normalized += 1;
+            }
+        }
+    }
+
+    if let Some(claims) = value
+        .get_mut("claims_requiring_verification")
+        .and_then(Value::as_array_mut)
+    {
+        for (index, claim) in claims.iter_mut().enumerate() {
+            let Some(object) = claim.as_object_mut() else {
+                continue;
+            };
+            if object
+                .get("claim_id")
+                .and_then(Value::as_str)
+                .is_some_and(|claim_id| !claim_id.trim().is_empty())
+            {
+                continue;
+            }
+            object.remove("claim_id");
+            let alias = object.remove("claimId").or_else(|| object.remove("id"));
+            object.insert(
+                "claim_id".to_string(),
+                alias.unwrap_or_else(|| Value::String(format!("claim-{}", index + 1))),
+            );
+            claim_ids_repaired += 1;
+        }
+    }
+
+    (hard_failure_aliases_normalized, claim_ids_repaired)
+}
+
+fn normalize_hard_failure(raw: &str) -> String {
+    let normalized = raw
+        .trim()
+        .to_ascii_lowercase()
+        .replace([' ', '-', '/'], "_");
+    match normalized.as_str() {
+        "technical_inaccuracy" | "technical_error" => "technical_inaccuracy",
+        "invented_platform_feature" | "invented_feature" => "invented_platform_feature",
+        "invalid_command_or_syntax" | "invalid_command" => "invalid_command_or_syntax",
+        "protocol_or_architecture_error" | "architecture_error" => "protocol_or_architecture_error",
+        "unsupported_causality" => "unsupported_causality",
+        "numerical_or_temporal_inconsistency" | "numeric_or_temporal_inconsistency" => {
+            "numerical_or_temporal_inconsistency"
+        }
+        "internal_contradiction" => "internal_contradiction",
+        "coordinate_mismatch" => "coordinate_mismatch",
+        "insufficient_or_invalid_evidence" | "invalid_evidence" => {
+            "insufficient_or_invalid_evidence"
+        }
+        "not_operational" => "not_operational",
+        "unsafe_or_unapproved_change" | "unsafe_change" => "unsafe_or_unapproved_change",
+        "hidden_answer_or_solution_leakage" | "solution_leakage" => {
+            "hidden_answer_or_solution_leakage"
+        }
+        "scope_violation" => "scope_violation",
+        "ambiguous_or_unanswerable" | "unanswerable" => "ambiguous_or_unanswerable",
+        _ => return raw.to_string(),
+    }
+    .to_string()
 }
 
 #[derive(Debug, Clone)]
@@ -283,12 +422,16 @@ pub struct ReviewClient {
     client: reqwest::Client,
     max_output_tokens: u64,
     telemetry: Arc<crate::telemetry::RequestTelemetry>,
+    rate_limiter: Option<Arc<ReviewRateLimiter>>,
 }
 
 #[derive(Debug)]
 enum ReviewAttemptError {
     RateLimit {
         retry_after_seconds: Option<u64>,
+        message: String,
+    },
+    UnsupportedResponseFormat {
         message: String,
     },
     Retryable(anyhow::Error),
@@ -299,6 +442,7 @@ impl ReviewAttemptError {
     fn into_anyhow(self) -> anyhow::Error {
         match self {
             Self::RateLimit { message, .. } => anyhow::anyhow!(message),
+            Self::UnsupportedResponseFormat { message } => anyhow::anyhow!(message),
             Self::Retryable(error) | Self::Fatal(error) => error,
         }
     }
@@ -308,16 +452,59 @@ struct StructuredResponse {
     payload: Value,
     content: String,
     elapsed_ms: u64,
+    response_format: StructuredOutputFormat,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn request_structured_once(
     provider: &ProviderConfig,
     client: &reqwest::Client,
     max_output_tokens: u64,
     telemetry: &crate::telemetry::RequestTelemetry,
+    rate_limiter: Option<&Arc<ReviewRateLimiter>>,
     system_content: &str,
     user_content: String,
     operation: &str,
+) -> std::result::Result<StructuredResponse, ReviewAttemptError> {
+    let formats = preferred_response_formats(&provider.model);
+    let mut unsupported = Vec::new();
+    for response_format in formats {
+        match request_structured_with_format(
+            provider,
+            client,
+            max_output_tokens,
+            telemetry,
+            rate_limiter,
+            system_content,
+            user_content.clone(),
+            operation,
+            response_format,
+        )
+        .await
+        {
+            Err(ReviewAttemptError::UnsupportedResponseFormat { message }) => {
+                unsupported.push(message);
+            }
+            result => return result,
+        }
+    }
+    Err(ReviewAttemptError::Fatal(anyhow::anyhow!(
+        "{operation} provider rejected every supported response format: {}",
+        unsupported.join("; ")
+    )))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn request_structured_with_format(
+    provider: &ProviderConfig,
+    client: &reqwest::Client,
+    max_output_tokens: u64,
+    telemetry: &crate::telemetry::RequestTelemetry,
+    rate_limiter: Option<&Arc<ReviewRateLimiter>>,
+    system_content: &str,
+    user_content: String,
+    operation: &str,
+    response_format: StructuredOutputFormat,
 ) -> std::result::Result<StructuredResponse, ReviewAttemptError> {
     let is_qwen = provider.model.to_ascii_lowercase().contains("qwen");
     let user_content = if is_qwen {
@@ -344,13 +531,16 @@ async fn request_structured_once(
         body["temperature"] = json!(0.0);
     }
     apply_model_reasoning_controls(&provider.model, &mut body);
-    apply_model_response_schema(&provider.model, &mut body, operation)
+    apply_model_response_format(&provider.model, &mut body, operation, response_format)
         .map_err(ReviewAttemptError::Fatal)?;
     let url = format!(
         "{}/chat/completions",
         provider.api_base.as_str().trim_end_matches('/')
     );
     let credential = provider.credentials.next();
+    if let Some(rate_limiter) = rate_limiter {
+        rate_limiter.acquire().await;
+    }
     let started = Instant::now();
     let response = client
         .post(url)
@@ -397,6 +587,19 @@ async fn request_structured_once(
         });
     }
     if !status.is_success() {
+        if (status == reqwest::StatusCode::BAD_REQUEST
+            || status == reqwest::StatusCode::UNPROCESSABLE_ENTITY)
+            && response_format != StructuredOutputFormat::PromptOnly
+            && looks_like_unsupported_response_format(&raw)
+        {
+            return Err(ReviewAttemptError::UnsupportedResponseFormat {
+                message: format!(
+                    "{operation} provider rejected {}: {}",
+                    response_format.as_str(),
+                    truncate(&raw, 500)
+                ),
+            });
+        }
         telemetry.record_error(elapsed_millis(started.elapsed()));
         let error = anyhow::anyhow!(
             "{operation} API returned HTTP {status}: {}",
@@ -420,6 +623,7 @@ async fn request_structured_once(
         payload,
         content,
         elapsed_ms: elapsed_millis(started.elapsed()),
+        response_format,
     })
 }
 
@@ -482,6 +686,7 @@ impl ReviewClient {
         client: reqwest::Client,
         max_output_tokens: u64,
         telemetry: Arc<crate::telemetry::RequestTelemetry>,
+        rate_limiter: Option<Arc<ReviewRateLimiter>>,
     ) -> Result<Self> {
         if max_output_tokens == 0 {
             bail!("review max output tokens must be positive");
@@ -491,6 +696,7 @@ impl ReviewClient {
             client,
             max_output_tokens,
             telemetry,
+            rate_limiter,
         })
     }
 
@@ -511,19 +717,22 @@ impl ReviewClient {
             &self.client,
             self.max_output_tokens,
             &self.telemetry,
+            self.rate_limiter.as_ref(),
             &request.system_prompt,
             user_content,
             "review",
         )
         .await?;
-        let (decision, normalization) =
-            match ReviewDecision::parse_and_validate_with_metadata(&response.content) {
-                Ok(value) => value,
-                Err(error) => {
-                    self.telemetry.record_error(response.elapsed_ms);
-                    return Err(ReviewAttemptError::Retryable(error));
-                }
-            };
+        let (decision, normalization) = match ReviewDecision::parse_and_validate_with_format(
+            &response.content,
+            response.response_format,
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                self.telemetry.record_error(response.elapsed_ms);
+                return Err(ReviewAttemptError::Retryable(error));
+            }
+        };
         self.telemetry.record_success(response.elapsed_ms);
         let (input_tokens, output_tokens) = usage_tokens(&response.payload);
         Ok(ReviewResult {
@@ -570,6 +779,7 @@ pub struct AdjudicationClient {
     client: reqwest::Client,
     max_output_tokens: u64,
     telemetry: Arc<crate::telemetry::RequestTelemetry>,
+    rate_limiter: Option<Arc<ReviewRateLimiter>>,
 }
 
 impl AdjudicationClient {
@@ -578,6 +788,7 @@ impl AdjudicationClient {
         client: reqwest::Client,
         max_output_tokens: u64,
         telemetry: Arc<crate::telemetry::RequestTelemetry>,
+        rate_limiter: Option<Arc<ReviewRateLimiter>>,
     ) -> Result<Self> {
         if max_output_tokens == 0 {
             bail!("adjudication max output tokens must be positive");
@@ -587,6 +798,7 @@ impl AdjudicationClient {
             client,
             max_output_tokens,
             telemetry,
+            rate_limiter,
         })
     }
 
@@ -606,6 +818,7 @@ impl AdjudicationClient {
             &self.client,
             self.max_output_tokens,
             &self.telemetry,
+            self.rate_limiter.as_ref(),
             &request.system_prompt,
             user_content,
             "adjudication",
@@ -713,8 +926,48 @@ fn apply_model_reasoning_controls(model: &str, body: &mut Value) {
     }
 }
 
+fn preferred_response_formats(model: &str) -> Vec<StructuredOutputFormat> {
+    if model.to_ascii_lowercase().contains("qwen") {
+        vec![
+            StructuredOutputFormat::JsonObject,
+            StructuredOutputFormat::JsonSchema,
+            StructuredOutputFormat::PromptOnly,
+        ]
+    } else {
+        vec![
+            StructuredOutputFormat::JsonSchema,
+            StructuredOutputFormat::JsonObject,
+            StructuredOutputFormat::PromptOnly,
+        ]
+    }
+}
+
+#[cfg(test)]
 fn apply_model_response_schema(model: &str, body: &mut Value, operation: &str) -> Result<()> {
-    if !model.to_ascii_lowercase().contains("deepseek-v4") {
+    let response_format = preferred_response_formats(model)
+        .into_iter()
+        .next()
+        .context("no structured response format configured")?;
+    apply_model_response_format(model, body, operation, response_format)
+}
+
+fn apply_model_response_format(
+    _model: &str,
+    body: &mut Value,
+    operation: &str,
+    response_format: StructuredOutputFormat,
+) -> Result<()> {
+    if !matches!(operation, "review" | "adjudication") {
+        bail!("unsupported structured review operation: {operation}");
+    }
+    if response_format == StructuredOutputFormat::PromptOnly {
+        body.as_object_mut()
+            .context("structured request body must be a JSON object")?
+            .remove("response_format");
+        return Ok(());
+    }
+    if response_format == StructuredOutputFormat::JsonObject {
+        body["response_format"] = json!({"type": "json_object"});
         return Ok(());
     }
     let (name, raw_schema) = match operation {
@@ -735,10 +988,28 @@ fn apply_model_response_schema(model: &str, body: &mut Value, operation: &str) -
         "type": "json_schema",
         "json_schema": {
             "name": name,
+            "strict": true,
             "schema": schema
         }
     });
     Ok(())
+}
+
+fn looks_like_unsupported_response_format(raw: &str) -> bool {
+    let lower = raw.to_ascii_lowercase();
+    [
+        "response_format",
+        "json_schema",
+        "json mode",
+        "structured output",
+        "unsupported parameter",
+        "unsupported",
+        "not supported",
+        "does not support",
+        "invalid response format",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
 }
 
 fn relax_vllm_decoder_schema(value: &mut Value) {
@@ -871,6 +1142,61 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_qwen_hard_failure_labels_and_missing_claim_ids() {
+        let raw = serde_json::json!({
+            "schema_version": "scogo.taskgen.prompt-review.v3",
+            "outcome": "reject",
+            "checks": {
+                "coordinate_realization": {"status":"pass","rationale":"Coordinates are material.","evidence_paths":[]},
+                "internal_consistency": {"status":"fail","rationale":"The supplied timeline contradicts itself.","evidence_paths":["$.candidate.prompt"]},
+                "operational_quality": {"status":"pass","rationale":"The task is operational.","evidence_paths":[]},
+                "safety": {"status":"pass","rationale":"The task is read-only first.","evidence_paths":[]},
+                "technical_authenticity": {"status":"pass","rationale":"The concepts are plausible.","evidence_paths":[]}
+            },
+            "hard_failures": ["technical inaccuracy"],
+            "claims_requiring_verification": [],
+            "summary": "The prompt contains a proven technical defect.",
+            "retry_guidance": "Correct the contradictory technical statement."
+        })
+        .to_string();
+
+        let (decision, _normalization) =
+            ReviewDecision::parse_and_validate_with_metadata(&raw).unwrap();
+        assert_eq!(
+            decision.hard_failures,
+            vec![HardFailure::TechnicalInaccuracy]
+        );
+
+        let raw = serde_json::json!({
+            "schema_version": "scogo.taskgen.prompt-review.v3",
+            "outcome": "needs_verification",
+            "checks": {
+                "coordinate_realization": {"status":"pass","rationale":"Coordinates are material.","evidence_paths":[]},
+                "internal_consistency": {"status":"pass","rationale":"The supplied facts are consistent.","evidence_paths":[]},
+                "operational_quality": {"status":"pass","rationale":"The task is operational.","evidence_paths":[]},
+                "safety": {"status":"pass","rationale":"The task is read-only first.","evidence_paths":[]},
+                "technical_authenticity": {"status":"unknown","rationale":"The vendor behavior needs a reference check.","evidence_paths":["$.candidate.prompt"]}
+            },
+            "hard_failures": [],
+            "claims_requiring_verification": [{
+                "claim": "The selected release supports the supplied feature.",
+                "candidate_evidence_paths": ["$.candidate.prompt"],
+                "reference_query": "selected release feature support"
+            }],
+            "summary": "One vendor claim needs verification.",
+            "retry_guidance": ""
+        })
+        .to_string();
+
+        let (decision, _normalization) =
+            ReviewDecision::parse_and_validate_with_metadata(&raw).unwrap();
+        assert_eq!(
+            decision.claims_requiring_verification[0].claim_id,
+            "claim-1"
+        );
+    }
+
+    #[test]
     fn needs_verification_requires_unknown_check_and_claim() {
         let mut value: Value = serde_json::from_str(include_str!(
             "../tests/fixtures/canonical/valid-review-v3.json"
@@ -954,10 +1280,25 @@ mod tests {
     }
 
     #[test]
-    fn other_review_models_do_not_force_vllm_response_format() {
+    fn qwen_review_uses_json_object_response_format() {
+        let mut body = json!({});
+        apply_model_response_schema("qwen/qwen3.8-max-free", &mut body, "review").unwrap();
+        assert_eq!(body["response_format"]["type"], "json_object");
+    }
+
+    #[test]
+    fn generic_review_uses_strict_json_schema_response_format() {
+        let mut body = json!({});
+        apply_model_response_schema("openrouter/reviewer-model", &mut body, "review").unwrap();
+        assert_eq!(body["response_format"]["type"], "json_schema");
+        assert_eq!(body["response_format"]["json_schema"]["strict"], true);
+    }
+
+    #[test]
+    fn other_review_models_use_provider_neutral_schema_negotiation() {
         let mut body = json!({});
         apply_model_response_schema("gpt-4o-mini", &mut body, "review").unwrap();
-        assert!(body.get("response_format").is_none());
+        assert_eq!(body["response_format"]["type"], "json_schema");
     }
 
     #[tokio::test]
@@ -1006,8 +1347,14 @@ mod tests {
             ])
             .unwrap(),
         };
-        let reviewer =
-            ReviewClient::new(provider, reqwest::Client::new(), 512, telemetry.clone()).unwrap();
+        let reviewer = ReviewClient::new(
+            provider,
+            reqwest::Client::new(),
+            512,
+            telemetry.clone(),
+            None,
+        )
+        .unwrap();
 
         let result = reviewer
             .review(ReviewRequest {
@@ -1025,5 +1372,89 @@ mod tests {
         assert_eq!(snapshot.requests, 2);
         assert_eq!(snapshot.rate_limits, 1);
         assert_eq!(snapshot.retries, 1);
+    }
+
+    #[tokio::test]
+    async fn review_rate_limiter_spaces_requests() {
+        let limiter = ReviewRateLimiter::from_requests_per_minute(Some(120))
+            .unwrap()
+            .unwrap();
+        limiter.acquire().await;
+        let started = Instant::now();
+        limiter.acquire().await;
+        assert!(started.elapsed() >= Duration::from_millis(450));
+    }
+
+    #[tokio::test]
+    async fn reviewer_falls_back_when_provider_rejects_strict_schema() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+        #[derive(Clone)]
+        struct SchemaFallback {
+            calls: Arc<AtomicUsize>,
+        }
+
+        impl Respond for SchemaFallback {
+            fn respond(&self, request: &Request) -> ResponseTemplate {
+                let call = self.calls.fetch_add(1, Ordering::SeqCst);
+                let body: Value = serde_json::from_slice(&request.body).unwrap();
+                if call == 0 {
+                    assert_eq!(body["response_format"]["type"], "json_schema");
+                    return ResponseTemplate::new(400).set_body_json(json!({
+                        "error": {"message": "response_format json_schema is unsupported"}
+                    }));
+                }
+                assert_eq!(body["response_format"]["type"], "json_object");
+                ResponseTemplate::new(200).set_body_json(json!({
+                    "choices": [{"message": {"content": include_str!(
+                        "../tests/fixtures/canonical/valid-review-v3.json"
+                    )}}],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 5}
+                }))
+            }
+        }
+
+        let server = MockServer::start().await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(SchemaFallback {
+                calls: calls.clone(),
+            })
+            .mount(&server)
+            .await;
+        let provider = ProviderConfig {
+            api_base: crate::provider::normalize_api_base(&format!("{}/v1", server.uri())).unwrap(),
+            model: "openrouter/reviewer-model".into(),
+            credentials: crate::provider::CredentialPool::new(vec![
+                crate::provider::SecretString::new("test-key"),
+            ])
+            .unwrap(),
+        };
+        let reviewer = ReviewClient::new(
+            provider,
+            reqwest::Client::new(),
+            512,
+            Arc::new(crate::telemetry::RequestTelemetry::default()),
+            None,
+        )
+        .unwrap();
+
+        let result = reviewer
+            .review(ReviewRequest {
+                candidate: json!({"prompt":"Investigate read-only evidence."}),
+                taxonomy_id: "test-taxonomy".into(),
+                taxonomy_kind: "compositional".into(),
+                system_prompt: "Return exactly one JSON object.".into(),
+                deterministic_checks: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result.decision.outcome, ReviewOutcome::Accept);
+        assert_eq!(result.normalization.response_format, "json_object");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 }
