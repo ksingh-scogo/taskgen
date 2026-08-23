@@ -1,0 +1,18 @@
+{
+  "concurrency": {
+    "generation_workers": 6,
+    "logical_cpus": 20,
+    "review_workers": 6,
+    "runtime": "tokio-multi-thread",
+    "runtime_worker_threads": 20
+  },
+  "coordinate_seed": 20260824,
+  "requested_new_records": 1000,
+  "review_enabled": true,
+  "run_id": "8772e4bc",
+  "schema_version": "scogo.taskgen.run.v3",
+  "started_at": "2026-08-21T08:05:35.520267883+00:00",
+  "status": "running",
+  "taxonomy_id": "scogo-enterprise-netops-v2",
+  "taxonomy_kind": "compositional"
+}

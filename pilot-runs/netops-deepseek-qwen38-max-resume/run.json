@@ -1,0 +1,392 @@
+{
+  "accepted_distribution": {
+    "action_risks": {
+      "advisory_plan_only": 16,
+      "approval_gated_change": 16,
+      "emergency_change_decision": 3,
+      "read_only_investigation": 47,
+      "staging_or_simulation": 8
+    },
+    "categories": {
+      "enterprise_netops": 90
+    },
+    "difficulties": {
+      "10": 3,
+      "2": 1,
+      "3": 8,
+      "4": 14,
+      "5": 17,
+      "6": 17,
+      "7": 13,
+      "8": 10,
+      "9": 7
+    },
+    "domains": {
+      "application_delivery": 7,
+      "cloud_hybrid_networking": 8,
+      "container_kubernetes_networking": 5,
+      "datacenter_fabric": 2,
+      "enterprise_realtime_networking": 1,
+      "firewall_network_security": 5,
+      "layer3_routing": 12,
+      "nac_zero_trust": 2,
+      "network_automation": 7,
+      "network_lifecycle_governance": 2,
+      "network_observability": 7,
+      "network_performance_qos": 4,
+      "network_resilience": 3,
+      "network_services": 4,
+      "ot_iot_networking": 2,
+      "packet_protocol_foundations": 1,
+      "sdn_network_virtualization": 3,
+      "sdwan": 3,
+      "storage_hpc_ai_networking": 2,
+      "vpn_remote_access": 2,
+      "wan_internet_edge": 2,
+      "wireless_lan": 6
+    },
+    "environments": {
+      "branch": 7,
+      "campus": 14,
+      "cloud": 14,
+      "data_center": 9,
+      "edge": 1,
+      "enterprise_wireless": 2,
+      "hybrid": 19,
+      "kubernetes": 5,
+      "lab_staging": 6,
+      "multicloud": 5,
+      "ot": 4,
+      "remote_access": 4
+    },
+    "evidence_bundles": {
+      "config_only": 11,
+      "config_oper_state": 13,
+      "iac_diff_plan": 4,
+      "intentionally_missing": 1,
+      "logs_events": 6,
+      "multi_source": 18,
+      "packet_capture": 5,
+      "routing_tables": 7,
+      "telemetry_timeseries": 8,
+      "ticket_runbook": 5,
+      "topology_state": 12
+    },
+    "evidence_conditions": {
+      "contradictory": 16,
+      "missing_live_state": 7,
+      "partial": 34,
+      "stale": 5,
+      "sufficient": 28
+    },
+    "incident_mechanisms": {
+      "asymmetric_path": 1,
+      "capacity_oversubscription": 3,
+      "certificate_identity_failure": 1,
+      "configuration_drift": 12,
+      "control_plane_failure": 6,
+      "convergence_failure": 1,
+      "data_plane_failure": 6,
+      "dependency_failure": 6,
+      "external_provider_failure": 2,
+      "misconfiguration": 21,
+      "multi_fault": 4,
+      "observability_gap": 2,
+      "policy_conflict": 4,
+      "protocol_state_failure": 15,
+      "resource_exhaustion": 2,
+      "software_defect": 4
+    },
+    "platform_scopes": {
+      "multi_platform": 16,
+      "platform_neutral": 44,
+      "single_platform": 30
+    },
+    "platforms": {
+      "antrea": 2,
+      "arista_eos": 1,
+      "audiocodes": 1,
+      "aws": 1,
+      "azure": 4,
+      "azure_cni": 1,
+      "bluecat": 1,
+      "broadcom_tomahawk": 1,
+      "checkpoint_gaia": 1,
+      "cisco_catalyst_wireless": 1,
+      "cisco_cucm_webex": 1,
+      "cisco_nx_os": 2,
+      "cisco_secure_firewall": 2,
+      "datadog": 1,
+      "extreme_exos": 1,
+      "f5_bigip": 3,
+      "fortinac": 2,
+      "fortinet_fortios": 4,
+      "frrouting": 2,
+      "gke_dataplane_v2": 1,
+      "google_cloud": 3,
+      "hpe_aruba_cx": 1,
+      "huawei_vrp": 1,
+      "juniper_junos": 2,
+      "nautobot": 1,
+      "nokia_srlinux": 6,
+      "opnsense": 2,
+      "oracle_cloud": 1,
+      "ovn_kubernetes": 1,
+      "palo_alto_panos": 2,
+      "pfsense": 1,
+      "portnox": 2,
+      "ruckus": 1,
+      "sonic": 1,
+      "splunk": 1,
+      "terraform": 1,
+      "vyos": 1,
+      "zabbix": 1
+    },
+    "presentations": {
+      "api_automation_brief": 4,
+      "architecture_review": 7,
+      "audit_review": 6,
+      "change_request": 9,
+      "cli_ssh_session": 7,
+      "config_review": 11,
+      "incident_ticket": 14,
+      "oncall_chat": 22,
+      "war_room": 10
+    },
+    "records": 90,
+    "subdomains": {
+      "enterprise_netops/application_delivery/adc_high_availability": 1,
+      "enterprise_netops/application_delivery/anycast_delivery": 1,
+      "enterprise_netops/application_delivery/grpc": 1,
+      "enterprise_netops/application_delivery/gslb": 1,
+      "enterprise_netops/application_delivery/ingress_api_gateway": 1,
+      "enterprise_netops/application_delivery/l4_l7_load_balancing": 1,
+      "enterprise_netops/application_delivery/waf_integration": 1,
+      "enterprise_netops/cloud_hybrid_networking/cloud_ipv6": 1,
+      "enterprise_netops/cloud_hybrid_networking/cloud_subnets_route_tables": 2,
+      "enterprise_netops/cloud_hybrid_networking/landing_zone_network_policy": 1,
+      "enterprise_netops/cloud_hybrid_networking/multi_account_subscription_project": 1,
+      "enterprise_netops/cloud_hybrid_networking/multi_region_network_ha": 1,
+      "enterprise_netops/cloud_hybrid_networking/network_appliance_insertion": 1,
+      "enterprise_netops/cloud_hybrid_networking/security_groups_nsg_nacl": 1,
+      "enterprise_netops/container_kubernetes_networking/cni_lifecycle": 1,
+      "enterprise_netops/container_kubernetes_networking/gateway_api": 2,
+      "enterprise_netops/container_kubernetes_networking/networkpolicy": 1,
+      "enterprise_netops/container_kubernetes_networking/service_mesh": 1,
+      "enterprise_netops/datacenter_fabric/endpoint_mobility": 1,
+      "enterprise_netops/datacenter_fabric/fabric_convergence": 1,
+      "enterprise_netops/enterprise_realtime_networking/sip_signaling": 1,
+      "enterprise_netops/firewall_network_security/address_service_objects": 1,
+      "enterprise_netops/firewall_network_security/cloud_firewall_policy": 1,
+      "enterprise_netops/firewall_network_security/tls_inspection": 1,
+      "enterprise_netops/firewall_network_security/url_filtering": 1,
+      "enterprise_netops/firewall_network_security/zone_based_policy": 1,
+      "enterprise_netops/layer3_routing/bgp_route_leak": 2,
+      "enterprise_netops/layer3_routing/default_route_blackhole": 2,
+      "enterprise_netops/layer3_routing/multicast_routing_pim_igmp": 1,
+      "enterprise_netops/layer3_routing/ospf_lsa_area": 3,
+      "enterprise_netops/layer3_routing/route_filtering_prefix_lists": 1,
+      "enterprise_netops/layer3_routing/route_maps_policy_statements": 1,
+      "enterprise_netops/layer3_routing/route_recursion": 1,
+      "enterprise_netops/layer3_routing/route_redistribution": 1,
+      "enterprise_netops/nac_zero_trust/fail_open_fail_closed": 1,
+      "enterprise_netops/nac_zero_trust/nac_certificates": 1,
+      "enterprise_netops/network_automation/batfish_containerlab_pyats": 1,
+      "enterprise_netops/network_automation/compliance_automation": 1,
+      "enterprise_netops/network_automation/dry_run_diff": 1,
+      "enterprise_netops/network_automation/machine_readable_evidence": 1,
+      "enterprise_netops/network_automation/netbox_nautobot_source_of_truth": 1,
+      "enterprise_netops/network_automation/transactional_change": 1,
+      "enterprise_netops/network_automation/workflow_orchestration": 1,
+      "enterprise_netops/network_lifecycle_governance/certificate_lifecycle": 1,
+      "enterprise_netops/network_lifecycle_governance/compliance_audit": 1,
+      "enterprise_netops/network_observability/cloud_flow_logs": 1,
+      "enterprise_netops/network_observability/digital_experience": 1,
+      "enterprise_netops/network_observability/ebpf_network_observability": 1,
+      "enterprise_netops/network_observability/network_slo": 1,
+      "enterprise_netops/network_observability/packet_capture": 1,
+      "enterprise_netops/network_observability/traceroute_path_analysis": 2,
+      "enterprise_netops/network_performance_qos/elephant_mice_flows": 1,
+      "enterprise_netops/network_performance_qos/oversubscription": 1,
+      "enterprise_netops/network_performance_qos/policing": 1,
+      "enterprise_netops/network_performance_qos/shaping": 1,
+      "enterprise_netops/network_resilience/bfd_failover": 1,
+      "enterprise_netops/network_resilience/control_plane_quorum": 1,
+      "enterprise_netops/network_resilience/disaster_recovery_connectivity": 1,
+      "enterprise_netops/network_services/dns_recursive": 1,
+      "enterprise_netops/network_services/doh_dot": 1,
+      "enterprise_netops/network_services/pki_certificate_lifecycle": 1,
+      "enterprise_netops/network_services/radius_tacacs": 1,
+      "enterprise_netops/ot_iot_networking/data_diode_air_gap": 1,
+      "enterprise_netops/ot_iot_networking/legacy_ot_devices": 1,
+      "enterprise_netops/packet_protocol_foundations/mtu_fragmentation_pmtud": 1,
+      "enterprise_netops/sdn_network_virtualization/controller_telemetry": 1,
+      "enterprise_netops/sdn_network_virtualization/gnmi": 1,
+      "enterprise_netops/sdn_network_virtualization/overlay_gateways": 1,
+      "enterprise_netops/sdwan/direct_internet_local_breakout": 1,
+      "enterprise_netops/sdwan/policy_conflicts": 1,
+      "enterprise_netops/sdwan/qos": 1,
+      "enterprise_netops/storage_hpc_ai_networking/adaptive_routing": 1,
+      "enterprise_netops/storage_hpc_ai_networking/pfc_ets_dcqcn_ecn": 1,
+      "enterprise_netops/vpn_remote_access/overlapping_networks": 1,
+      "enterprise_netops/vpn_remote_access/site_to_site_vpn": 1,
+      "enterprise_netops/wan_internet_edge/isp_peering_transit": 1,
+      "enterprise_netops/wan_internet_edge/nat_pat": 1,
+      "enterprise_netops/wireless_lan/association_authentication": 1,
+      "enterprise_netops/wireless_lan/capwap": 1,
+      "enterprise_netops/wireless_lan/cochannel_adjacent_interference": 1,
+      "enterprise_netops/wireless_lan/controller_ap_join": 1,
+      "enterprise_netops/wireless_lan/coverage_capacity": 1,
+      "enterprise_netops/wireless_lan/multicast_broadcast_optimization": 1
+    },
+    "task_families": {
+      "abstention_uncertainty_escalation": 10,
+      "architecture_capacity_migration_optimization": 2,
+      "change_approval_verification_rollback": 10,
+      "config_iac_review_repair": 13,
+      "telemetry_config_log_interpretation": 19,
+      "tool_selection_next_best_action": 11,
+      "troubleshooting_rca": 25
+    }
+  },
+  "accepted_new_records": 0,
+  "adjudication": {
+    "endpoint_origin": "https://api.tokenrouter.com",
+    "input_tokens": 0,
+    "model": "qwen/qwen3.8-max",
+    "output_tokens": 0
+  },
+  "artifacts": {
+    "candidates": {
+      "bytes": 0,
+      "file": "candidates.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "rejected": {
+      "bytes": 678898,
+      "file": "rejected.jsonl",
+      "sha256": "ce7b322c7adb3830a785b2dceee27e0eb88e59075bc8c98af1407141e3d66c7f"
+    },
+    "reviews": {
+      "bytes": 0,
+      "file": "reviews.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "run": {
+      "file": "run.json"
+    },
+    "tasks": {
+      "bytes": 288426,
+      "file": "accepted.partial.jsonl",
+      "sha256": "2ddc0a52d1a5655b40ac9b2dfda473b111fec1f7617dd9a60251020b007066dc"
+    }
+  },
+  "candidate_attempts": 910,
+  "command_version": "0.5.1",
+  "completed_at": "2026-08-21T18:04:36.321732316+00:00",
+  "concurrency": {
+    "generation_workers": 6,
+    "logical_cpus": 20,
+    "review_workers": 1,
+    "runtime": "tokio-multi-thread",
+    "runtime_worker_threads": 20
+  },
+  "coordinate_replacements": 0,
+  "coordinate_seed": 20260825,
+  "dedup": {
+    "jaccard_threshold": 0.800000011920929,
+    "mode": "semantic",
+    "ngram": 5,
+    "semantic_model": "sentence-transformers/all-MiniLM-L6-v2",
+    "semantic_threshold": 0.8999999761581421
+  },
+  "duration_minutes": 0.09112789926666666,
+  "duration_seconds": 5.467673956,
+  "efficiency": {
+    "attempts_per_accepted": null,
+    "candidate_acceptance_rate": 0.0,
+    "coordinate_replacement_rate": 0.0,
+    "top_up_waves": 0
+  },
+  "existing_records": 90,
+  "final_records": 90,
+  "generation": {
+    "effective_models": [
+      "deepseek-v4-flash-0731"
+    ],
+    "endpoint_origin": "http://172.16.8.12:8000",
+    "input_tokens": 0,
+    "model": "deepseek-v4-flash-0731",
+    "output_tokens": 0,
+    "priced_cost": 0.0
+  },
+  "rejected_candidates": 910,
+  "rejections": {
+    "by_reason": {},
+    "by_stage": {
+      "generation": 910
+    }
+  },
+  "requested_new_records": 910,
+  "requests": {
+    "adjudication": {
+      "errors": 0,
+      "rate_limits": 0,
+      "requests": 0,
+      "retries": 0,
+      "timeouts": 0,
+      "total_ms": 0
+    },
+    "generation": {
+      "errors": 6,
+      "rate_limits": 0,
+      "requests": 6,
+      "retries": 4,
+      "timeouts": 0,
+      "total_ms": 12
+    },
+    "review": {
+      "errors": 0,
+      "rate_limits": 0,
+      "requests": 0,
+      "retries": 0,
+      "timeouts": 0,
+      "total_ms": 0
+    }
+  },
+  "review": {
+    "effective_models": [
+      "qwen/qwen3.8-max"
+    ],
+    "enabled": true,
+    "endpoint_origin": "https://api.tokenrouter.com",
+    "input_tokens": 0,
+    "model": "qwen/qwen3.8-max",
+    "outcomes": {
+      "accept": 0,
+      "needs_verification": 0,
+      "reject": 0,
+      "revise": 0
+    },
+    "output_tokens": 0,
+    "priced_cost": 0.0,
+    "status": "enabled"
+  },
+  "run_directory": "pilot-runs/netops-deepseek-qwen38-max-resume",
+  "run_id": "3e29e87e",
+  "schema_version": "scogo.taskgen.run.v3",
+  "started_at": "2026-08-21T18:04:30.854057656+00:00",
+  "status": "failed",
+  "taxonomy_id": "scogo-enterprise-netops-v2",
+  "taxonomy_kind": "compositional",
+  "terminal_error": "generation cancelled before exact acceptance",
+  "throughput": {
+    "candidates_per_minute": 9985.964861727758,
+    "tasks_per_minute": 0.0
+  },
+  "timing": {
+    "adjudication_total_ms": 0,
+    "generation_total_ms": 12,
+    "review_total_ms": 0
+  }
+}
