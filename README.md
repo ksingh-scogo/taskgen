@@ -45,10 +45,14 @@ Taskgen supports two bundled taxonomies:
 
 | Use case | Taxonomy ID | How to select it |
 |---|---|---|
-| IT Operations | `scogo-itops-v4` | Default; omit `--taxonomy` |
+| IT Operations | `scogo-itops-v4` | Embedded generation default; omit `--taxonomy` |
 | Enterprise NetOps | `scogo-enterprise-netops-v2` | Pass `--taxonomy <FILE>` |
 
-For IT Ops generation, no taxonomy file is needed because it is embedded in the binary.
+The taxonomy rules are:
+
+- `taskgen generate` without `--taxonomy` uses the complete IT Ops taxonomy embedded in the binary. The command does not run without a taxonomy; it uses the embedded copy.
+- `taskgen generate --taxonomy <FILE>` uses that YAML instead. NetOps generation always follows this path.
+- Standalone `taskgen review` always requires `--taxonomy <FILE>` so existing records can be validated against the exact taxonomy used to create them.
 
 For NetOps, use the file in this repository and validate it before generating:
 
@@ -73,7 +77,9 @@ valid taxonomy: scogo-enterprise-netops-v2 (Compositional, 25 domains, 531 subdo
 
 ### 3. Configure an OpenAI-compatible provider
 
-The default endpoint is `https://api.openai.com/v1`, the default model is `gpt-4o-mini`, and the generation key can come from `OPENAI_API_KEY`.
+The default endpoint is `https://api.openai.com/v1`. This guide recommends `gpt-5.6-luna-max` and passes it explicitly with `--model`; the generation key can come from `OPENAI_API_KEY`. The configured provider must expose that exact model ID—replace it with the provider's actual model name when necessary.
+
+Provider selection and taxonomy selection are independent. The provider examples below omit `--taxonomy`, so they use embedded IT Ops. Add `--taxonomy docs/netops-taxonomy.yaml` (or the downloaded `config/netops-taxonomy.yaml`) to run the same examples for NetOps.
 
 ```bash
 export OPENAI_API_KEY="your-api-key"
@@ -103,11 +109,13 @@ taskgen generate \
 
 The provider-specific examples above are alternatives to the default-provider smoke test in step 4.
 
-### 4. Run a small IT Ops smoke test
+### 4. Run a small IT Ops smoke test with the embedded taxonomy
+
+This command intentionally omits `--taxonomy`: Taskgen loads `scogo-itops-v4` from the binary. Nothing else needs to be downloaded for IT Ops generation.
 
 ```bash
 taskgen generate \
-  --model gpt-4o-mini \
+  --model gpt-5.6-luna-max \
   --count 10 \
   --run-dir data/runs/itops-smoke
 ```
@@ -145,12 +153,14 @@ Omit `--run-dir` to create `taskgen-runs/<UTC timestamp>-<taxonomy ID>-<run ID>/
 
 ### 6. Scale up with an independent reviewer
 
-For a release-quality dataset, use a stronger reviewer. If generation and review use the same endpoint, only the review model needs to change:
+Both examples in this step also omit `--taxonomy`, so they generate IT Ops records with the embedded taxonomy. For NetOps, add `--taxonomy docs/netops-taxonomy.yaml` to either command.
+
+For a release-quality dataset, use an independent reviewer. If generation and review use the same endpoint, only the review model needs to change:
 
 ```bash
 taskgen generate \
   --api-key "$OPENAI_API_KEY" \
-  --model fast/generator \
+  --model gpt-5.6-luna-max \
   --review-model strong/reviewer \
   --count 1000 \
   --workers 10 \
@@ -245,7 +255,35 @@ taskgen generate \
   --run-dir data/runs/netops-001
 ```
 
-`--seed` makes taxonomy-coordinate and language sampling reproducible. It cannot make a remote model completion deterministic.
+### What practical value does `--seed` provide?
+
+The seed controls Taskgen's local random sampling, not the model's text generation. With the same taxonomy version, seed, count, distribution, difficulty settings, and language mode, Taskgen starts from the same ordered workload: the same categories, domains, subdomains, difficulty levels, task families, platforms, evidence conditions, risks, presentations, and sampled languages.
+
+This is useful for:
+
+- **A/B model or prompt comparisons:** give two models the same task mix so quality differences are not caused by one model receiving easier coordinates.
+- **Regression testing:** rerun a known coordinate schedule after changing prompts, review policy, or provider code.
+- **Auditability:** `run.json` records the seed, allowing an operator to reconstruct how the taxonomy workload was sampled.
+
+For example, these runs start from the same NetOps coordinate schedule:
+
+```bash
+taskgen generate \
+  --taxonomy docs/netops-taxonomy.yaml \
+  --model model-a \
+  --seed 20260820 \
+  --count 100 \
+  --run-dir data/runs/netops-model-a
+
+taskgen generate \
+  --taxonomy docs/netops-taxonomy.yaml \
+  --model model-b \
+  --seed 20260820 \
+  --count 100 \
+  --run-dir data/runs/netops-model-b
+```
+
+The seed does **not** make remote completions, review decisions, retries, or the final accepted text identical. Those can still vary because model APIs are nondeterministic and different candidates may be rejected or require top-up sampling. Omit `--seed` when you want Taskgen to choose a fresh random seed automatically.
 
 #### Use local references for factual adjudication
 
@@ -264,6 +302,15 @@ taskgen generate \
 ```
 
 References are retrieved only for claims marked `needs_verification`. A different adjudication endpoint follows the same rule as a different review endpoint: pass `--adjudication-api-base` and explicit `--adjudication-api-key` or `--adjudication-keyfile`.
+
+The adjudication model is a **conditional second-stage fact checker**, not a second reviewer over every candidate:
+
+1. The review model evaluates every candidate and returns `accept`, `revise`, `reject`, or `needs_verification`.
+2. `accept`, `revise`, and `reject` do not invoke adjudication.
+3. For `needs_verification`, Taskgen retrieves relevant excerpts from `--review-reference-dir` using the reviewer's verification queries.
+4. The adjudication model sees the candidate, disputed claims, and retrieved evidence, then decides whether the evidence is sufficient for acceptance. Only an adjudication acceptance can publish that candidate.
+
+If `--adjudication-model` is omitted, adjudication inherits the review model, endpoint, and credentials. Set it when a different model is better at evidence-grounded verification, or when adjudication must run through a separately audited provider. It does not replace human review for high-risk platform syntax, capacity, pricing, safety, or causal claims.
 
 #### Extend an existing dataset
 
@@ -290,17 +337,46 @@ taskgen generate \
 
 Languages are `en`, `de`, `fr`, `es`, `nl`, `zh`, `ar`, and `ru`. Semantic mode automatically selects `intfloat/multilingual-e5-small`.
 
-#### Run without an embedding-model download
+#### Choose the right `--dedup-mode`
+
+There are exactly two modes: `lexical` and `semantic`. Deduplication cannot be disabled, and both modes always perform global normalized exact matching first.
+
+| Mode | Checks performed | Best fit | Trade-off |
+|---|---|---|---|
+| `lexical` | Global exact match, then word n-gram Jaccard within the same `(language, domain, subdomain)` bucket | Offline/air-gapped runs, fast smoke tests, or very large corpora where word overlap is sufficient | Cannot reliably catch paraphrases that use different wording |
+| `semantic` | Everything in `lexical`, plus local embedding cosine similarity in the same bucket | Production dataset generation and paraphrase detection | Downloads/loads a local FastEmbed model and uses additional CPU, memory, and disk |
+
+What each check is designed to catch:
+
+- **Exact:** `"Restart  BGP after the change"` and `"restart bgp after the change"` normalize to the same lowercase, whitespace-collapsed text. Exact matching is global, even if record buckets differ.
+- **Jaccard:** two longer prompts share most of the same word sequences, such as `"Investigate the BGP route leak after the scheduled maintenance window using the supplied routing table now"` and the same sentence ending in `today`.
+- **Semantic:** two prompts express the same task with different words, such as `"Diagnose why BGP prefixes disappeared after maintenance"` and `"Find the cause of routes missing since the network change"`.
+
+Use lexical mode when no embedding download is allowed:
 
 ```bash
 taskgen generate \
   --api-key "$OPENAI_API_KEY" \
+  --model gpt-5.6-luna-max \
   --dedup-mode lexical \
   --count 250 \
   --run-dir data/runs/itops-lexical-001
 ```
 
-Normalized exact match and word n-gram Jaccard still run. Deduplication cannot be disabled.
+Use semantic mode for the strongest local duplicate filtering. It is the default, but specifying it can make production scripts self-documenting:
+
+```bash
+taskgen generate \
+  --api-key "$OPENAI_API_KEY" \
+  --model gpt-5.6-luna-max \
+  --dedup-mode semantic \
+  --semantic-threshold 0.90 \
+  --semantic-model-cache data/model-cache \
+  --count 1000 \
+  --run-dir data/runs/itops-semantic-001
+```
+
+Thresholds are inclusive similarity cutoffs. Lowering `--jaccard-threshold` or `--semantic-threshold` drops more records as duplicates; raising one keeps more borderline records. For example, cosine `0.85` is more aggressive than `0.95`. Review samples from `rejected.jsonl` before changing thresholds for a production run.
 
 #### Rotate keys and proxies, and stop at a priced budget
 
@@ -350,15 +426,15 @@ Schema, coordinate, safety, and dedup checks still run, but `reviews.jsonl` is e
 
 | Area | Options | Meaning |
 |---|---|---|
-| Generation provider | `--api-base`, `--api-key`, `--keyfile`, `-m/--model` | Endpoint, credentials, and model; defaults are OpenAI `/v1` and `gpt-4o-mini` |
+| Generation provider | `--api-base`, `--api-key`, `--keyfile`, `-m/--model` | Endpoint, credentials, and model; this guide recommends passing `--model gpt-5.6-luna-max` explicitly |
 | Volume | `-c/--count`, `--max-candidates` | Required new accepted rows; candidate ceiling defaults to `max(100, 20 × count)` |
-| Concurrency | `-w/--workers`, `--review-workers`, `--review-requests-per-minute` | Independent generation/review concurrency and optional review/adjudication rate limit |
+| Concurrency | `-w/--workers`, `--review-workers`, `--review-requests-per-minute` | Enabled by default: independent generation/review worker pools plus an optional review/adjudication rate limit |
 | Reliability | `--request-timeout-seconds`, `--max-repairs-per-coordinate` | HTTP timeout (default `120`) and revise repairs (`0` or `1`, default `1`) |
-| Taxonomy sampling | `--taxonomy`, `--seed`, `--distribution`, `--difficulty`, `--multilingual` | Taxonomy source and sampling controls |
+| Taxonomy sampling | `--taxonomy`, `--seed`, `--distribution`, `--difficulty`, `--multilingual` | Omit `--taxonomy` for embedded IT Ops; pass a YAML for NetOps or another taxonomy; other flags control reproducible sampling |
 | Generation prompt | `--system-prompt`, `--system-prompt-file`, `-t/--temperature`, `--max-output-tokens` | Prompt and completion controls |
 | Review | `--review-model`, `--review-api-base`, `--review-api-key`, `--review-keyfile`, `--review-system-prompt`, `--review-system-prompt-file`, `--review-max-output-tokens`, `--skip-review` | Reviewer provider and policy controls |
-| Adjudication | `--review-reference-dir`, `--adjudication-model`, `--adjudication-api-base`, `--adjudication-api-key`, `--adjudication-keyfile` | Verification references and optional adjudicator overrides |
-| Dedup | `--dedup-mode`, `--jaccard-threshold`, `--semantic-threshold`, `--dedup-ngram`, `--semantic-model`, `--semantic-model-cache` | Local uniqueness checks |
+| Adjudication | `--review-reference-dir`, `--adjudication-model`, `--adjudication-api-base`, `--adjudication-api-key`, `--adjudication-keyfile` | Conditional evidence checking for `needs_verification`, with optional model/provider overrides |
+| Dedup | `--dedup-mode`, `--jaccard-threshold`, `--semantic-threshold`, `--dedup-ngram`, `--semantic-model`, `--semantic-model-cache` | `lexical` or `semantic` local uniqueness checks; semantic is the default |
 | Run management | `--run-dir`, `--append-from` | Artifact destination and source dataset extension |
 | Network | `--proxies`, `--rotating-proxy`, `--free-models` | Proxy and OpenRouter discovery controls |
 | Cost | `--input-price`, `--output-price`, `--review-input-price`, `--review-output-price`, `--budget` | Per-million-token prices and a total run cap |
@@ -377,6 +453,30 @@ Defaults worth knowing:
 | Repairs per coordinate | `1` (maximum allowed is `1`) |
 | Dedup | Semantic; Jaccard `0.80`, cosine `0.90`, word n-gram `5` |
 | Run directory | Generated under `taskgen-runs/` |
+
+#### How concurrency works
+
+Concurrency is **on by default**; there is no enable switch.
+
+- `--workers` is the maximum number of generation coordinate slots processed concurrently. Its default is `5`.
+- `--review-workers` is the maximum number of candidate review pipelines processed concurrently. A `needs_verification` adjudication stays within that candidate's review pipeline. Its default is `5`.
+- Generation and review overlap. As soon as a generated candidate is persisted to `candidates.jsonl`, it can enter review while later generation requests continue. With both defaults, Taskgen can have up to 5 generation items and 5 review pipelines in flight at the same time.
+- `--review-requests-per-minute` is optional and is **not** a worker count. It limits the combined rate of review and adjudication HTTP requests, including retries and structured-output fallback requests. It does not limit generation requests.
+
+For one local GPU serving both generation and review, start conservatively:
+
+```bash
+taskgen generate \
+  --api-base http://localhost:8000/v1 \
+  --api-key none \
+  --model your-served-model \
+  --workers 2 \
+  --review-workers 2 \
+  --count 100 \
+  --run-dir data/runs/local-concurrency-001
+```
+
+If generation and review use separate providers, each pool can be tuned for its endpoint. For example, `--workers 20 --review-workers 5 --review-requests-per-minute 60` allows high generation parallelism while capping the reviewer/adjudicator to five concurrent pipelines and 60 total review-stage requests per minute. Higher values are not automatically faster: watch provider 429s, timeouts, GPU saturation, latency, and acceptance yield in `run.json`.
 
 Prompt precedence is:
 
@@ -452,6 +552,8 @@ Key `review` options are `--input`, `--taxonomy`, provider/model/key flags, `--s
 
 Use `dedup` for an existing JSONL dataset. It does not require a taxonomy or an API key.
 
+It supports the same two modes used during generation: `lexical` runs exact plus Jaccard checks, while the default `semantic` mode adds local embedding cosine checks. In both modes, malformed records and records missing the configured prompt field are written to the dropped file with `_dedup.reason: "invalid_record"`.
+
 ```bash
 taskgen dedup \
   --input data/raw.jsonl \
@@ -469,6 +571,16 @@ taskgen dedup \
   --input data/external.jsonl \
   --prompt-field instruction \
   --dedup-mode lexical
+```
+
+Run full semantic deduplication explicitly like this:
+
+```bash
+taskgen dedup \
+  --input data/raw.jsonl \
+  --dedup-mode semantic \
+  --semantic-threshold 0.90 \
+  --semantic-model-cache data/model-cache
 ```
 
 Deduplication applies:
