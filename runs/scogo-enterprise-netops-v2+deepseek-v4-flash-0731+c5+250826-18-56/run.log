@@ -1,0 +1,110 @@
+2026-08-25T13:26:16.962Z INFO   run_start                    command="taskgen generate" version="0.5.8" pid=3972397
+2026-08-25T13:26:16.962Z CONFIG config                       adjudication_api_base="http://172.16.8.11:8078/v1"
+2026-08-25T13:26:16.962Z CONFIG config                       adjudication_api_base_requested=null
+2026-08-25T13:26:16.962Z CONFIG config                       adjudication_api_key="[REDACTED: inherited from previous provider]"
+2026-08-25T13:26:16.962Z CONFIG config                       adjudication_keyfile=null
+2026-08-25T13:26:16.962Z CONFIG config                       adjudication_model=null
+2026-08-25T13:26:16.962Z CONFIG config                       api_base="http://172.16.8.12:8000/v1"
+2026-08-25T13:26:16.962Z CONFIG config                       api_base_requested="http://172.16.8.12:8000/v1"
+2026-08-25T13:26:16.962Z CONFIG config                       api_key="[REDACTED: single key configured]"
+2026-08-25T13:26:16.962Z CONFIG config                       append_from=null
+2026-08-25T13:26:16.962Z CONFIG config                       budget=null
+2026-08-25T13:26:16.962Z CONFIG config                       command="taskgen generate"
+2026-08-25T13:26:16.962Z CONFIG config                       count=5
+2026-08-25T13:26:16.962Z CONFIG config                       dedup_mode="semantic"
+2026-08-25T13:26:16.962Z CONFIG config                       dedup_ngram=5
+2026-08-25T13:26:16.962Z CONFIG config                       difficulty=null
+2026-08-25T13:26:16.962Z CONFIG config                       distribution=null
+2026-08-25T13:26:16.962Z CONFIG config                       effective_adjudication_model="qwen38-nvfp4"
+2026-08-25T13:26:16.962Z CONFIG config                       effective_generation_models=["deepseek-v4-flash-0731"]
+2026-08-25T13:26:16.962Z CONFIG config                       effective_max_candidates=100
+2026-08-25T13:26:16.962Z CONFIG config                       effective_request_timeout_seconds=120
+2026-08-25T13:26:16.962Z CONFIG config                       effective_review_max_output_tokens=1024
+2026-08-25T13:26:16.962Z CONFIG config                       effective_review_model="qwen38-nvfp4"
+2026-08-25T13:26:16.962Z CONFIG config                       effective_review_models=["qwen38-nvfp4"]
+2026-08-25T13:26:16.962Z CONFIG config                       effective_seed=20260820
+2026-08-25T13:26:16.962Z CONFIG config                       effective_semantic_model="sentence-transformers/all-MiniLM-L6-v2"
+2026-08-25T13:26:16.962Z CONFIG config                       free_models=false
+2026-08-25T13:26:16.962Z CONFIG config                       generation_credential_count=1
+2026-08-25T13:26:16.962Z CONFIG config                       input_price=null
+2026-08-25T13:26:16.962Z CONFIG config                       jaccard_threshold=0.800000011920929
+2026-08-25T13:26:16.962Z CONFIG config                       keyfile=null
+2026-08-25T13:26:16.962Z CONFIG config                       max_candidates=null
+2026-08-25T13:26:16.962Z CONFIG config                       max_output_tokens=null
+2026-08-25T13:26:16.962Z CONFIG config                       max_repairs_per_coordinate=1
+2026-08-25T13:26:16.962Z CONFIG config                       model="deepseek-v4-flash-0731"
+2026-08-25T13:26:16.962Z CONFIG config                       multilingual=false
+2026-08-25T13:26:16.962Z CONFIG config                       output_price=null
+2026-08-25T13:26:16.962Z CONFIG config                       proxies=null
+2026-08-25T13:26:16.962Z CONFIG config                       request_timeout_seconds=null
+2026-08-25T13:26:16.962Z CONFIG config                       review_api_base="http://172.16.8.11:8078/v1"
+2026-08-25T13:26:16.962Z CONFIG config                       review_api_base_requested="http://172.16.8.11:8078/v1"
+2026-08-25T13:26:16.962Z CONFIG config                       review_api_key="[REDACTED: single key configured]"
+2026-08-25T13:26:16.962Z CONFIG config                       review_input_price=null
+2026-08-25T13:26:16.962Z CONFIG config                       review_keyfile=null
+2026-08-25T13:26:16.962Z CONFIG config                       review_max_output_tokens=null
+2026-08-25T13:26:16.962Z CONFIG config                       review_model="qwen38-nvfp4"
+2026-08-25T13:26:16.962Z CONFIG config                       review_output_price=null
+2026-08-25T13:26:16.962Z CONFIG config                       review_reference_dir=null
+2026-08-25T13:26:16.962Z CONFIG config                       review_requests_per_minute=null
+2026-08-25T13:26:16.962Z CONFIG config                       review_system_prompt={"characters":5067,"sha256":"0092551e781b2d0168ccad1fcbfd87d544dad6bdce52e7e30e1898e43afa71bf","source":"taxonomy default or embedded review prompt"}
+2026-08-25T13:26:16.962Z CONFIG config                       review_system_prompt_file=null
+2026-08-25T13:26:16.962Z CONFIG config                       review_workers=5
+2026-08-25T13:26:16.962Z CONFIG config                       rotating_proxy=false
+2026-08-25T13:26:16.962Z CONFIG config                       run_dir="/home/scogo/work/taskgen/runs/scogo-enterprise-netops-v2+deepseek-v4-flash-0731+c5+250826-18-56"
+2026-08-25T13:26:16.962Z CONFIG config                       seed=20260820
+2026-08-25T13:26:16.962Z CONFIG config                       semantic_model=null
+2026-08-25T13:26:16.962Z CONFIG config                       semantic_model_cache=null
+2026-08-25T13:26:16.962Z CONFIG config                       semantic_threshold=0.8999999761581421
+2026-08-25T13:26:16.962Z CONFIG config                       skip_review=false
+2026-08-25T13:26:16.962Z CONFIG config                       system_prompt={"characters":6533,"sha256":"8a02e8bf6b2598c031e2d0cde0574510723bee3536a2a50a791741153149f3b2","source":"taxonomy default or embedded generator prompt"}
+2026-08-25T13:26:16.962Z CONFIG config                       system_prompt_file=null
+2026-08-25T13:26:16.962Z CONFIG config                       taxonomy="docs/netops-taxonomy.yaml"
+2026-08-25T13:26:16.962Z CONFIG config                       taxonomy_id="scogo-enterprise-netops-v2"
+2026-08-25T13:26:16.962Z CONFIG config                       taxonomy_kind="compositional"
+2026-08-25T13:26:16.962Z CONFIG config                       taxonomy_source="docs/netops-taxonomy.yaml"
+2026-08-25T13:26:16.962Z CONFIG config                       temperature=0.9
+2026-08-25T13:26:16.962Z CONFIG config                       workers=5
+2026-08-25T13:26:16.962Z INFO   config_complete              entries=66
+2026-08-25T13:26:16.963Z INFO   artifacts_ready              run_dir="/home/scogo/work/taskgen/runs/scogo-enterprise-netops-v2+deepseek-v4-flash-0731+c5+250826-18-56" log="/home/scogo/work/taskgen/runs/scogo-enterprise-netops-v2+deepseek-v4-flash-0731+c5+250826-18-56/run.log" candidates="/home/scogo/work/taskgen/runs/scogo-enterprise-netops-v2+deepseek-v4-flash-0731+c5+250826-18-56/candidates.jsonl" reviews="/home/scogo/work/taskgen/runs/scogo-enterprise-netops-v2+deepseek-v4-flash-0731+c5+250826-18-56/reviews.jsonl" rejected="/home/scogo/work/taskgen/runs/scogo-enterprise-netops-v2+deepseek-v4-flash-0731+c5+250826-18-56/rejected.jsonl" report="/home/scogo/work/taskgen/runs/scogo-enterprise-netops-v2+deepseek-v4-flash-0731+c5+250826-18-56/run.json"
+2026-08-25T13:26:16.963Z INFO   pipeline_ready               generation_workers=5 review_workers=5 overlap=true max_candidates=100
+2026-08-25T13:26:16.963Z INFO   wave_start                   wave=1 queued=5 accepted=0 attempts=0 remaining_capacity=100
+2026-08-25T13:26:16.963Z DEBUG  generation_start             sequence=1 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="sdwan" subdomain="segmentation_vrf" difficulty=5 repair_count=0 language="en"
+2026-08-25T13:26:16.963Z DEBUG  generation_start             sequence=2 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="firewall_network_security" subdomain="cloud_firewall_policy" difficulty=9 repair_count=0 language="en"
+2026-08-25T13:26:16.963Z DEBUG  generation_start             sequence=3 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="network_lifecycle_governance" subdomain="maintenance_windows" difficulty=5 repair_count=0 language="en"
+2026-08-25T13:26:16.963Z DEBUG  generation_start             sequence=4 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="layer3_routing" subdomain="bfd" difficulty=7 repair_count=0 language="en"
+2026-08-25T13:26:16.963Z DEBUG  generation_start             sequence=5 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="firewall_network_security" subdomain="config_change_rollback" difficulty=6 repair_count=0 language="en"
+2026-08-25T13:26:46.964Z DEBUG  heartbeat                    status=running; the last non-heartbeat event is the current pipeline step
+2026-08-25T13:26:52.519Z INFO   generation_complete          sequence=1 wave=1 candidate_id=d25165c37ae44372986650f14e1469c5ef0a5b9cb41d3d70c4659746ee7a097d model="deepseek-v4-flash-0731" prompt_characters=2103
+2026-08-25T13:26:52.519Z DEBUG  review_start                 candidate_id=d25165c37ae44372986650f14e1469c5ef0a5b9cb41d3d70c4659746ee7a097d sequence=1 wave=1 model="qwen38-nvfp4"
+2026-08-25T13:26:52.519Z DEBUG  review_request_start         candidate_id=d25165c37ae44372986650f14e1469c5ef0a5b9cb41d3d70c4659746ee7a097d sequence=1 wave=1 model=qwen38-nvfp4
+2026-08-25T13:27:01.115Z INFO   generation_complete          sequence=5 wave=1 candidate_id=c5bdc0534209c0a3cbaedab7f12b45a7ceb9a64f6e8eebfd95e2008c06205540 model="deepseek-v4-flash-0731" prompt_characters=2928
+2026-08-25T13:27:01.115Z DEBUG  review_start                 candidate_id=c5bdc0534209c0a3cbaedab7f12b45a7ceb9a64f6e8eebfd95e2008c06205540 sequence=5 wave=1 model="qwen38-nvfp4"
+2026-08-25T13:27:01.115Z DEBUG  review_request_start         candidate_id=c5bdc0534209c0a3cbaedab7f12b45a7ceb9a64f6e8eebfd95e2008c06205540 sequence=5 wave=1 model=qwen38-nvfp4
+2026-08-25T13:27:01.659Z INFO   generation_complete          sequence=4 wave=1 candidate_id=2c242cb72d152112d0a235648f01bf7ae72f2d372204f1e75f8201edaf3736e6 model="deepseek-v4-flash-0731" prompt_characters=2432
+2026-08-25T13:27:01.660Z DEBUG  review_start                 candidate_id=2c242cb72d152112d0a235648f01bf7ae72f2d372204f1e75f8201edaf3736e6 sequence=4 wave=1 model="qwen38-nvfp4"
+2026-08-25T13:27:01.660Z DEBUG  review_request_start         candidate_id=2c242cb72d152112d0a235648f01bf7ae72f2d372204f1e75f8201edaf3736e6 sequence=4 wave=1 model=qwen38-nvfp4
+2026-08-25T13:27:05.028Z INFO   generation_complete          sequence=3 wave=1 candidate_id=c569bdce152ef10d929b8e0b1b6af959e7a3a2b261cdaa20f6a6750d6b9dc810 model="deepseek-v4-flash-0731" prompt_characters=3123
+2026-08-25T13:27:05.028Z DEBUG  review_start                 candidate_id=c569bdce152ef10d929b8e0b1b6af959e7a3a2b261cdaa20f6a6750d6b9dc810 sequence=3 wave=1 model="qwen38-nvfp4"
+2026-08-25T13:27:05.028Z DEBUG  review_request_start         candidate_id=c569bdce152ef10d929b8e0b1b6af959e7a3a2b261cdaa20f6a6750d6b9dc810 sequence=3 wave=1 model=qwen38-nvfp4
+2026-08-25T13:27:10.122Z INFO   generation_complete          sequence=2 wave=1 candidate_id=bc26e35484c069496a4e0e70d695dc26d12c813b8e17bc456774254fb85d1c61 model="deepseek-v4-flash-0731" prompt_characters=3493
+2026-08-25T13:27:10.123Z DEBUG  review_start                 candidate_id=bc26e35484c069496a4e0e70d695dc26d12c813b8e17bc456774254fb85d1c61 sequence=2 wave=1 model="qwen38-nvfp4"
+2026-08-25T13:27:10.123Z DEBUG  review_request_start         candidate_id=bc26e35484c069496a4e0e70d695dc26d12c813b8e17bc456774254fb85d1c61 sequence=2 wave=1 model=qwen38-nvfp4
+2026-08-25T13:27:16.965Z DEBUG  heartbeat                    status=running; the last non-heartbeat event is the current pipeline step
+2026-08-25T13:27:28.782Z INFO   review_decision              candidate_id=2c242cb72d152112d0a235648f01bf7ae72f2d372204f1e75f8201edaf3736e6 sequence=4 wave=1 outcome=NeedsVerification claims_to_verify=2
+2026-08-25T13:27:28.782Z INFO   adjudication_start           candidate_id=2c242cb72d152112d0a235648f01bf7ae72f2d372204f1e75f8201edaf3736e6 sequence=4 wave=1 claims=2 references=0 model=qwen38-nvfp4
+2026-08-25T13:27:31.367Z INFO   review_decision              candidate_id=d25165c37ae44372986650f14e1469c5ef0a5b9cb41d3d70c4659746ee7a097d sequence=1 wave=1 outcome=NeedsVerification claims_to_verify=1
+2026-08-25T13:27:31.367Z INFO   adjudication_start           candidate_id=d25165c37ae44372986650f14e1469c5ef0a5b9cb41d3d70c4659746ee7a097d sequence=1 wave=1 claims=1 references=0 model=qwen38-nvfp4
+2026-08-25T13:27:35.546Z INFO   review_decision              candidate_id=bc26e35484c069496a4e0e70d695dc26d12c813b8e17bc456774254fb85d1c61 sequence=2 wave=1 outcome=Accept claims_to_verify=0
+2026-08-25T13:27:35.546Z INFO   review_complete              candidate_id=bc26e35484c069496a4e0e70d695dc26d12c813b8e17bc456774254fb85d1c61 sequence=2 wave=1 outcome=Accept adjudicated=false
+2026-08-25T13:27:35.546Z INFO   candidate_accepted           candidate_id=bc26e35484c069496a4e0e70d695dc26d12c813b8e17bc456774254fb85d1c61 sequence=2 wave=1 accepted=1/5
+2026-08-25T13:27:36.646Z INFO   review_decision              candidate_id=c569bdce152ef10d929b8e0b1b6af959e7a3a2b261cdaa20f6a6750d6b9dc810 sequence=3 wave=1 outcome=NeedsVerification claims_to_verify=1
+2026-08-25T13:27:36.646Z INFO   adjudication_start           candidate_id=c569bdce152ef10d929b8e0b1b6af959e7a3a2b261cdaa20f6a6750d6b9dc810 sequence=3 wave=1 claims=1 references=0 model=qwen38-nvfp4
+2026-08-25T13:27:40.652Z INFO   adjudication_complete        candidate_id=2c242cb72d152112d0a235648f01bf7ae72f2d372204f1e75f8201edaf3736e6 sequence=4 wave=1 outcome=Reject
+2026-08-25T13:27:40.652Z INFO   review_complete              candidate_id=2c242cb72d152112d0a235648f01bf7ae72f2d372204f1e75f8201edaf3736e6 sequence=4 wave=1 outcome=NeedsVerification adjudicated=true
+2026-08-25T13:27:40.652Z WARN   candidate_rejected           candidate_id=2c242cb72d152112d0a235648f01bf7ae72f2d372204f1e75f8201edaf3736e6 sequence=4 wave=1 stage=model_review disposition=verification_rejected
+2026-08-25T13:27:41.170Z INFO   review_decision              candidate_id=c5bdc0534209c0a3cbaedab7f12b45a7ceb9a64f6e8eebfd95e2008c06205540 sequence=5 wave=1 outcome=NeedsVerification claims_to_verify=2
+2026-08-25T13:27:41.171Z INFO   adjudication_start           candidate_id=c5bdc0534209c0a3cbaedab7f12b45a7ceb9a64f6e8eebfd95e2008c06205540 sequence=5 wave=1 claims=2 references=0 model=qwen38-nvfp4
+2026-08-25T13:27:43.187Z INFO   adjudication_complete        candidate_id=d25165c37ae44372986650f14e1469c5ef0a5b9cb41d3d70c4659746ee7a097d sequence=1 wave=1 outcome=Reject
+2026-08-25T13:27:43.187Z INFO   review_complete              candidate_id=d25165c37ae44372986650f14e1469c5ef0a5b9cb41d3d70c4659746ee7a097d sequence=1 wave=1 outcome=NeedsVerification adjudicated=true
+2026-08-25T13:27:43.188Z WARN   candidate_rejected           candidate_id=d25165c37ae44372986650f14e1469c5ef0a5b9cb41d3d70c4659746ee7a097d sequence=1 wave=1 stage=model_review disposition=verification_rejected

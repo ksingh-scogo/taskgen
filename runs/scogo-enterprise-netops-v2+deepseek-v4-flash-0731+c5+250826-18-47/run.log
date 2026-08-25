@@ -1,0 +1,190 @@
+2026-08-25T13:17:00.472Z INFO   run_start                    command="taskgen generate" version="0.5.8" pid=3967084
+2026-08-25T13:17:00.472Z CONFIG config                       adjudication_api_base="http://172.16.8.11:8078/v1"
+2026-08-25T13:17:00.472Z CONFIG config                       adjudication_api_base_requested=null
+2026-08-25T13:17:00.472Z CONFIG config                       adjudication_api_key="[REDACTED: inherited from previous provider]"
+2026-08-25T13:17:00.472Z CONFIG config                       adjudication_keyfile=null
+2026-08-25T13:17:00.472Z CONFIG config                       adjudication_model=null
+2026-08-25T13:17:00.472Z CONFIG config                       api_base="http://172.16.8.12:8000/v1"
+2026-08-25T13:17:00.472Z CONFIG config                       api_base_requested="http://172.16.8.12:8000/v1"
+2026-08-25T13:17:00.472Z CONFIG config                       api_key="[REDACTED: single key configured]"
+2026-08-25T13:17:00.472Z CONFIG config                       append_from=null
+2026-08-25T13:17:00.472Z CONFIG config                       budget=null
+2026-08-25T13:17:00.472Z CONFIG config                       command="taskgen generate"
+2026-08-25T13:17:00.472Z CONFIG config                       count=5
+2026-08-25T13:17:00.472Z CONFIG config                       dedup_mode="semantic"
+2026-08-25T13:17:00.472Z CONFIG config                       dedup_ngram=5
+2026-08-25T13:17:00.472Z CONFIG config                       difficulty=null
+2026-08-25T13:17:00.472Z CONFIG config                       distribution=null
+2026-08-25T13:17:00.472Z CONFIG config                       effective_adjudication_model="deepseek-v4-flash-0731"
+2026-08-25T13:17:00.472Z CONFIG config                       effective_generation_models=["deepseek-v4-flash-0731"]
+2026-08-25T13:17:00.472Z CONFIG config                       effective_max_candidates=100
+2026-08-25T13:17:00.472Z CONFIG config                       effective_request_timeout_seconds=120
+2026-08-25T13:17:00.472Z CONFIG config                       effective_review_max_output_tokens=1024
+2026-08-25T13:17:00.472Z CONFIG config                       effective_review_model="deepseek-v4-flash-0731"
+2026-08-25T13:17:00.472Z CONFIG config                       effective_review_models=["deepseek-v4-flash-0731"]
+2026-08-25T13:17:00.472Z CONFIG config                       effective_seed=20260820
+2026-08-25T13:17:00.472Z CONFIG config                       effective_semantic_model="sentence-transformers/all-MiniLM-L6-v2"
+2026-08-25T13:17:00.472Z CONFIG config                       free_models=false
+2026-08-25T13:17:00.472Z CONFIG config                       generation_credential_count=1
+2026-08-25T13:17:00.472Z CONFIG config                       input_price=null
+2026-08-25T13:17:00.472Z CONFIG config                       jaccard_threshold=0.800000011920929
+2026-08-25T13:17:00.472Z CONFIG config                       keyfile=null
+2026-08-25T13:17:00.472Z CONFIG config                       max_candidates=null
+2026-08-25T13:17:00.472Z CONFIG config                       max_output_tokens=null
+2026-08-25T13:17:00.472Z CONFIG config                       max_repairs_per_coordinate=1
+2026-08-25T13:17:00.472Z CONFIG config                       model="deepseek-v4-flash-0731"
+2026-08-25T13:17:00.472Z CONFIG config                       multilingual=false
+2026-08-25T13:17:00.472Z CONFIG config                       output_price=null
+2026-08-25T13:17:00.472Z CONFIG config                       proxies=null
+2026-08-25T13:17:00.472Z CONFIG config                       request_timeout_seconds=null
+2026-08-25T13:17:00.472Z CONFIG config                       review_api_base="http://172.16.8.11:8078/v1"
+2026-08-25T13:17:00.472Z CONFIG config                       review_api_base_requested="http://172.16.8.11:8078/v1"
+2026-08-25T13:17:00.472Z CONFIG config                       review_api_key="[REDACTED: single key configured]"
+2026-08-25T13:17:00.472Z CONFIG config                       review_input_price=null
+2026-08-25T13:17:00.472Z CONFIG config                       review_keyfile=null
+2026-08-25T13:17:00.472Z CONFIG config                       review_max_output_tokens=null
+2026-08-25T13:17:00.472Z CONFIG config                       review_model=null
+2026-08-25T13:17:00.472Z CONFIG config                       review_output_price=null
+2026-08-25T13:17:00.472Z CONFIG config                       review_reference_dir=null
+2026-08-25T13:17:00.472Z CONFIG config                       review_requests_per_minute=null
+2026-08-25T13:17:00.472Z CONFIG config                       review_system_prompt={"characters":5067,"sha256":"0092551e781b2d0168ccad1fcbfd87d544dad6bdce52e7e30e1898e43afa71bf","source":"taxonomy default or embedded review prompt"}
+2026-08-25T13:17:00.472Z CONFIG config                       review_system_prompt_file=null
+2026-08-25T13:17:00.472Z CONFIG config                       review_workers=5
+2026-08-25T13:17:00.472Z CONFIG config                       rotating_proxy=false
+2026-08-25T13:17:00.472Z CONFIG config                       run_dir="/home/scogo/work/taskgen/runs/scogo-enterprise-netops-v2+deepseek-v4-flash-0731+c5+250826-18-47"
+2026-08-25T13:17:00.472Z CONFIG config                       seed=20260820
+2026-08-25T13:17:00.472Z CONFIG config                       semantic_model=null
+2026-08-25T13:17:00.472Z CONFIG config                       semantic_model_cache=null
+2026-08-25T13:17:00.472Z CONFIG config                       semantic_threshold=0.8999999761581421
+2026-08-25T13:17:00.472Z CONFIG config                       skip_review=false
+2026-08-25T13:17:00.472Z CONFIG config                       system_prompt={"characters":6533,"sha256":"8a02e8bf6b2598c031e2d0cde0574510723bee3536a2a50a791741153149f3b2","source":"taxonomy default or embedded generator prompt"}
+2026-08-25T13:17:00.472Z CONFIG config                       system_prompt_file=null
+2026-08-25T13:17:00.472Z CONFIG config                       taxonomy="docs/netops-taxonomy.yaml"
+2026-08-25T13:17:00.472Z CONFIG config                       taxonomy_id="scogo-enterprise-netops-v2"
+2026-08-25T13:17:00.472Z CONFIG config                       taxonomy_kind="compositional"
+2026-08-25T13:17:00.472Z CONFIG config                       taxonomy_source="docs/netops-taxonomy.yaml"
+2026-08-25T13:17:00.472Z CONFIG config                       temperature=0.9
+2026-08-25T13:17:00.472Z CONFIG config                       workers=5
+2026-08-25T13:17:00.472Z INFO   config_complete              entries=66
+2026-08-25T13:17:00.472Z INFO   artifacts_ready              run_dir="/home/scogo/work/taskgen/runs/scogo-enterprise-netops-v2+deepseek-v4-flash-0731+c5+250826-18-47" log="/home/scogo/work/taskgen/runs/scogo-enterprise-netops-v2+deepseek-v4-flash-0731+c5+250826-18-47/run.log" candidates="/home/scogo/work/taskgen/runs/scogo-enterprise-netops-v2+deepseek-v4-flash-0731+c5+250826-18-47/candidates.jsonl" reviews="/home/scogo/work/taskgen/runs/scogo-enterprise-netops-v2+deepseek-v4-flash-0731+c5+250826-18-47/reviews.jsonl" rejected="/home/scogo/work/taskgen/runs/scogo-enterprise-netops-v2+deepseek-v4-flash-0731+c5+250826-18-47/rejected.jsonl" report="/home/scogo/work/taskgen/runs/scogo-enterprise-netops-v2+deepseek-v4-flash-0731+c5+250826-18-47/run.json"
+2026-08-25T13:17:00.472Z INFO   pipeline_ready               generation_workers=5 review_workers=5 overlap=true max_candidates=100
+2026-08-25T13:17:00.472Z INFO   wave_start                   wave=1 queued=5 accepted=0 attempts=0 remaining_capacity=100
+2026-08-25T13:17:00.472Z DEBUG  generation_start             sequence=1 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="sdwan" subdomain="segmentation_vrf" difficulty=5 repair_count=0 language="en"
+2026-08-25T13:17:00.473Z DEBUG  generation_start             sequence=2 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="firewall_network_security" subdomain="cloud_firewall_policy" difficulty=9 repair_count=0 language="en"
+2026-08-25T13:17:00.473Z DEBUG  generation_start             sequence=3 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="network_lifecycle_governance" subdomain="maintenance_windows" difficulty=5 repair_count=0 language="en"
+2026-08-25T13:17:00.473Z DEBUG  generation_start             sequence=4 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="layer3_routing" subdomain="bfd" difficulty=7 repair_count=0 language="en"
+2026-08-25T13:17:00.473Z DEBUG  generation_start             sequence=5 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="firewall_network_security" subdomain="config_change_rollback" difficulty=6 repair_count=0 language="en"
+2026-08-25T13:17:30.473Z DEBUG  heartbeat                    status=running; the last non-heartbeat event is the current pipeline step
+2026-08-25T13:17:42.463Z INFO   generation_complete          sequence=5 wave=1 candidate_id=6c26f415d3e622ede7984d8c6294bdcd7d771810df03518ddfb80e132313c857 model="deepseek-v4-flash-0731" prompt_characters=2537
+2026-08-25T13:17:42.463Z DEBUG  review_start                 candidate_id=6c26f415d3e622ede7984d8c6294bdcd7d771810df03518ddfb80e132313c857 sequence=5 wave=1 model="deepseek-v4-flash-0731"
+2026-08-25T13:17:42.463Z DEBUG  review_request_start         candidate_id=6c26f415d3e622ede7984d8c6294bdcd7d771810df03518ddfb80e132313c857 sequence=5 wave=1 model=deepseek-v4-flash-0731
+2026-08-25T13:17:42.493Z ERROR  review_error                 candidate_id=6c26f415d3e622ede7984d8c6294bdcd7d771810df03518ddfb80e132313c857 sequence=5 wave=1 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:17:43.220Z INFO   generation_complete          sequence=3 wave=1 candidate_id=1c75b3983ba183341a6676534e0b43ac42a70bca7c9e7e8c1d969db2b8557664 model="deepseek-v4-flash-0731" prompt_characters=2526
+2026-08-25T13:17:43.220Z DEBUG  review_start                 candidate_id=1c75b3983ba183341a6676534e0b43ac42a70bca7c9e7e8c1d969db2b8557664 sequence=3 wave=1 model="deepseek-v4-flash-0731"
+2026-08-25T13:17:43.220Z DEBUG  review_request_start         candidate_id=1c75b3983ba183341a6676534e0b43ac42a70bca7c9e7e8c1d969db2b8557664 sequence=3 wave=1 model=deepseek-v4-flash-0731
+2026-08-25T13:17:43.232Z ERROR  review_error                 candidate_id=1c75b3983ba183341a6676534e0b43ac42a70bca7c9e7e8c1d969db2b8557664 sequence=3 wave=1 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:17:43.902Z INFO   generation_complete          sequence=4 wave=1 candidate_id=10babaae468767ace22d0bf27d1a6aa232223415daca3444b3810ad0027916b1 model="deepseek-v4-flash-0731" prompt_characters=2274
+2026-08-25T13:17:43.902Z DEBUG  review_start                 candidate_id=10babaae468767ace22d0bf27d1a6aa232223415daca3444b3810ad0027916b1 sequence=4 wave=1 model="deepseek-v4-flash-0731"
+2026-08-25T13:17:43.902Z DEBUG  review_request_start         candidate_id=10babaae468767ace22d0bf27d1a6aa232223415daca3444b3810ad0027916b1 sequence=4 wave=1 model=deepseek-v4-flash-0731
+2026-08-25T13:17:43.914Z ERROR  review_error                 candidate_id=10babaae468767ace22d0bf27d1a6aa232223415daca3444b3810ad0027916b1 sequence=4 wave=1 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:17:46.581Z INFO   generation_complete          sequence=1 wave=1 candidate_id=40cccadc0891f06cfd44916d4e7e43b3ef82d4716d7c185ca4d7d973c986170f model="deepseek-v4-flash-0731" prompt_characters=2555
+2026-08-25T13:17:46.581Z DEBUG  review_start                 candidate_id=40cccadc0891f06cfd44916d4e7e43b3ef82d4716d7c185ca4d7d973c986170f sequence=1 wave=1 model="deepseek-v4-flash-0731"
+2026-08-25T13:17:46.581Z DEBUG  review_request_start         candidate_id=40cccadc0891f06cfd44916d4e7e43b3ef82d4716d7c185ca4d7d973c986170f sequence=1 wave=1 model=deepseek-v4-flash-0731
+2026-08-25T13:17:46.583Z ERROR  review_error                 candidate_id=40cccadc0891f06cfd44916d4e7e43b3ef82d4716d7c185ca4d7d973c986170f sequence=1 wave=1 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:17:47.716Z INFO   generation_complete          sequence=2 wave=1 candidate_id=499f8b455515b9b98caab43591856b9a5a92499a7fc3547637406a96c879ba7f model="deepseek-v4-flash-0731" prompt_characters=2711
+2026-08-25T13:17:47.716Z DEBUG  review_start                 candidate_id=499f8b455515b9b98caab43591856b9a5a92499a7fc3547637406a96c879ba7f sequence=2 wave=1 model="deepseek-v4-flash-0731"
+2026-08-25T13:17:47.716Z DEBUG  review_request_start         candidate_id=499f8b455515b9b98caab43591856b9a5a92499a7fc3547637406a96c879ba7f sequence=2 wave=1 model=deepseek-v4-flash-0731
+2026-08-25T13:17:47.731Z ERROR  review_error                 candidate_id=499f8b455515b9b98caab43591856b9a5a92499a7fc3547637406a96c879ba7f sequence=2 wave=1 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:17:47.731Z INFO   wave_complete                wave=1 attempts=5 generated=5 reviewed=5 accepted=0 rejected=5 repairs_queued=0
+2026-08-25T13:17:47.731Z INFO   wave_start                   wave=2 queued=5 accepted=0 attempts=5 remaining_capacity=95
+2026-08-25T13:17:47.731Z DEBUG  generation_start             sequence=6 wave=2 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="layer3_routing" subdomain="routing_convergence_graceful_restart" difficulty=7 repair_count=0 language="en"
+2026-08-25T13:17:47.732Z DEBUG  generation_start             sequence=7 wave=2 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="application_delivery" subdomain="pools_members" difficulty=6 repair_count=0 language="en"
+2026-08-25T13:17:47.732Z DEBUG  generation_start             sequence=8 wave=2 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="vpn_remote_access" subdomain="ssl_vpn" difficulty=9 repair_count=0 language="en"
+2026-08-25T13:17:47.732Z DEBUG  generation_start             sequence=9 wave=2 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="network_automation" subdomain="ansible" difficulty=4 repair_count=0 language="en"
+2026-08-25T13:17:47.732Z DEBUG  generation_start             sequence=10 wave=2 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="vpn_remote_access" subdomain="ztna_private_access" difficulty=5 repair_count=0 language="en"
+2026-08-25T13:18:00.473Z DEBUG  heartbeat                    status=running; the last non-heartbeat event is the current pipeline step
+2026-08-25T13:18:22.683Z INFO   generation_complete          sequence=9 wave=2 candidate_id=bf5fd9d791668e8a0cdbd8fdf647a8006db3c34576df8ee2121e5db5b2eb572a model="deepseek-v4-flash-0731" prompt_characters=2226
+2026-08-25T13:18:22.683Z DEBUG  review_start                 candidate_id=bf5fd9d791668e8a0cdbd8fdf647a8006db3c34576df8ee2121e5db5b2eb572a sequence=9 wave=2 model="deepseek-v4-flash-0731"
+2026-08-25T13:18:22.683Z DEBUG  review_request_start         candidate_id=bf5fd9d791668e8a0cdbd8fdf647a8006db3c34576df8ee2121e5db5b2eb572a sequence=9 wave=2 model=deepseek-v4-flash-0731
+2026-08-25T13:18:22.698Z ERROR  review_error                 candidate_id=bf5fd9d791668e8a0cdbd8fdf647a8006db3c34576df8ee2121e5db5b2eb572a sequence=9 wave=2 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:18:26.923Z INFO   generation_complete          sequence=7 wave=2 candidate_id=a623bdf7c42be9cd52358e6fe8e76224fa81c492c454c252bd2ddc458e49ce75 model="deepseek-v4-flash-0731" prompt_characters=2497
+2026-08-25T13:18:26.923Z DEBUG  review_start                 candidate_id=a623bdf7c42be9cd52358e6fe8e76224fa81c492c454c252bd2ddc458e49ce75 sequence=7 wave=2 model="deepseek-v4-flash-0731"
+2026-08-25T13:18:26.923Z DEBUG  review_request_start         candidate_id=a623bdf7c42be9cd52358e6fe8e76224fa81c492c454c252bd2ddc458e49ce75 sequence=7 wave=2 model=deepseek-v4-flash-0731
+2026-08-25T13:18:26.937Z ERROR  review_error                 candidate_id=a623bdf7c42be9cd52358e6fe8e76224fa81c492c454c252bd2ddc458e49ce75 sequence=7 wave=2 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:18:28.422Z INFO   generation_complete          sequence=6 wave=2 candidate_id=bdbc56008faa3714be34fbc2c2245e6fa59297c47f7b1c09185d83fd2f41e336 model="deepseek-v4-flash-0731" prompt_characters=2570
+2026-08-25T13:18:28.422Z DEBUG  review_start                 candidate_id=bdbc56008faa3714be34fbc2c2245e6fa59297c47f7b1c09185d83fd2f41e336 sequence=6 wave=2 model="deepseek-v4-flash-0731"
+2026-08-25T13:18:28.422Z DEBUG  review_request_start         candidate_id=bdbc56008faa3714be34fbc2c2245e6fa59297c47f7b1c09185d83fd2f41e336 sequence=6 wave=2 model=deepseek-v4-flash-0731
+2026-08-25T13:18:28.427Z ERROR  review_error                 candidate_id=bdbc56008faa3714be34fbc2c2245e6fa59297c47f7b1c09185d83fd2f41e336 sequence=6 wave=2 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:18:28.769Z INFO   generation_complete          sequence=10 wave=2 candidate_id=ff79b4784ba91ad6557bcc5b6c5bef57c4bfcedfaae1abcf00c86a9df60727ee model="deepseek-v4-flash-0731" prompt_characters=2115
+2026-08-25T13:18:28.769Z DEBUG  review_start                 candidate_id=ff79b4784ba91ad6557bcc5b6c5bef57c4bfcedfaae1abcf00c86a9df60727ee sequence=10 wave=2 model="deepseek-v4-flash-0731"
+2026-08-25T13:18:28.769Z DEBUG  review_request_start         candidate_id=ff79b4784ba91ad6557bcc5b6c5bef57c4bfcedfaae1abcf00c86a9df60727ee sequence=10 wave=2 model=deepseek-v4-flash-0731
+2026-08-25T13:18:28.773Z ERROR  review_error                 candidate_id=ff79b4784ba91ad6557bcc5b6c5bef57c4bfcedfaae1abcf00c86a9df60727ee sequence=10 wave=2 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:18:30.473Z DEBUG  heartbeat                    status=running; the last non-heartbeat event is the current pipeline step
+2026-08-25T13:18:31.348Z INFO   generation_complete          sequence=8 wave=2 candidate_id=42268b44e4e4a3b873d1defd8353bc4c7d3f560f01cc59323f7cb6b4b5b0ef5d model="deepseek-v4-flash-0731" prompt_characters=2422
+2026-08-25T13:18:31.348Z DEBUG  review_start                 candidate_id=42268b44e4e4a3b873d1defd8353bc4c7d3f560f01cc59323f7cb6b4b5b0ef5d sequence=8 wave=2 model="deepseek-v4-flash-0731"
+2026-08-25T13:18:31.348Z DEBUG  review_request_start         candidate_id=42268b44e4e4a3b873d1defd8353bc4c7d3f560f01cc59323f7cb6b4b5b0ef5d sequence=8 wave=2 model=deepseek-v4-flash-0731
+2026-08-25T13:18:31.352Z ERROR  review_error                 candidate_id=42268b44e4e4a3b873d1defd8353bc4c7d3f560f01cc59323f7cb6b4b5b0ef5d sequence=8 wave=2 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:18:31.352Z INFO   wave_complete                wave=2 attempts=10 generated=10 reviewed=10 accepted=0 rejected=10 repairs_queued=0
+2026-08-25T13:18:31.352Z INFO   wave_start                   wave=3 queued=5 accepted=0 attempts=10 remaining_capacity=90
+2026-08-25T13:18:31.352Z DEBUG  generation_start             sequence=11 wave=3 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="physical_link_hardware" subdomain="crc_fcs_errors" difficulty=5 repair_count=0 language="en"
+2026-08-25T13:18:31.352Z DEBUG  generation_start             sequence=12 wave=3 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="wireless_lan" subdomain="rf_planning" difficulty=6 repair_count=0 language="en"
+2026-08-25T13:18:31.352Z DEBUG  generation_start             sequence=13 wave=3 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="layer3_routing" subdomain="isis_adjacency_database" difficulty=5 repair_count=0 language="en"
+2026-08-25T13:18:31.352Z DEBUG  generation_start             sequence=14 wave=3 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="container_kubernetes_networking" subdomain="bgp_service_advertisement" difficulty=8 repair_count=0 language="en"
+2026-08-25T13:18:31.352Z DEBUG  generation_start             sequence=15 wave=3 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="network_performance_qos" subdomain="queue_drops" difficulty=4 repair_count=0 language="en"
+2026-08-25T13:19:00.473Z DEBUG  heartbeat                    status=running; the last non-heartbeat event is the current pipeline step
+2026-08-25T13:19:11.077Z INFO   generation_complete          sequence=13 wave=3 candidate_id=cb398ba3317fb0332058bdccaec7c816b30f53cd68743915def7ba0d91e7fcdc model="deepseek-v4-flash-0731" prompt_characters=2133
+2026-08-25T13:19:11.077Z DEBUG  review_start                 candidate_id=cb398ba3317fb0332058bdccaec7c816b30f53cd68743915def7ba0d91e7fcdc sequence=13 wave=3 model="deepseek-v4-flash-0731"
+2026-08-25T13:19:11.077Z DEBUG  review_request_start         candidate_id=cb398ba3317fb0332058bdccaec7c816b30f53cd68743915def7ba0d91e7fcdc sequence=13 wave=3 model=deepseek-v4-flash-0731
+2026-08-25T13:19:11.091Z ERROR  review_error                 candidate_id=cb398ba3317fb0332058bdccaec7c816b30f53cd68743915def7ba0d91e7fcdc sequence=13 wave=3 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:19:12.394Z INFO   generation_complete          sequence=14 wave=3 candidate_id=8e500fc678da248337339cee8bc5fa3783c18d48a67ab916355296f1e06a292a model="deepseek-v4-flash-0731" prompt_characters=2695
+2026-08-25T13:19:12.394Z DEBUG  review_start                 candidate_id=8e500fc678da248337339cee8bc5fa3783c18d48a67ab916355296f1e06a292a sequence=14 wave=3 model="deepseek-v4-flash-0731"
+2026-08-25T13:19:12.394Z DEBUG  review_request_start         candidate_id=8e500fc678da248337339cee8bc5fa3783c18d48a67ab916355296f1e06a292a sequence=14 wave=3 model=deepseek-v4-flash-0731
+2026-08-25T13:19:12.408Z ERROR  review_error                 candidate_id=8e500fc678da248337339cee8bc5fa3783c18d48a67ab916355296f1e06a292a sequence=14 wave=3 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:19:13.856Z INFO   generation_complete          sequence=15 wave=3 candidate_id=d2822ef2f8f0f383f79a9c4852577394981dec6b4dbd6eb45937390995179fcb model="deepseek-v4-flash-0731" prompt_characters=2670
+2026-08-25T13:19:13.856Z DEBUG  review_start                 candidate_id=d2822ef2f8f0f383f79a9c4852577394981dec6b4dbd6eb45937390995179fcb sequence=15 wave=3 model="deepseek-v4-flash-0731"
+2026-08-25T13:19:13.856Z DEBUG  review_request_start         candidate_id=d2822ef2f8f0f383f79a9c4852577394981dec6b4dbd6eb45937390995179fcb sequence=15 wave=3 model=deepseek-v4-flash-0731
+2026-08-25T13:19:13.869Z ERROR  review_error                 candidate_id=d2822ef2f8f0f383f79a9c4852577394981dec6b4dbd6eb45937390995179fcb sequence=15 wave=3 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:19:14.190Z INFO   generation_complete          sequence=11 wave=3 candidate_id=3d41687af7bafaafcc9f91e528d3747c5044f1c678703710efc6d13d174ea5d1 model="deepseek-v4-flash-0731" prompt_characters=2422
+2026-08-25T13:19:14.190Z DEBUG  review_start                 candidate_id=3d41687af7bafaafcc9f91e528d3747c5044f1c678703710efc6d13d174ea5d1 sequence=11 wave=3 model="deepseek-v4-flash-0731"
+2026-08-25T13:19:14.190Z DEBUG  review_request_start         candidate_id=3d41687af7bafaafcc9f91e528d3747c5044f1c678703710efc6d13d174ea5d1 sequence=11 wave=3 model=deepseek-v4-flash-0731
+2026-08-25T13:19:14.206Z ERROR  review_error                 candidate_id=3d41687af7bafaafcc9f91e528d3747c5044f1c678703710efc6d13d174ea5d1 sequence=11 wave=3 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:19:15.698Z INFO   generation_complete          sequence=12 wave=3 candidate_id=2377ba9080bfe4600500e3a3a8319ea12401042044193b54b7382d3146547f1a model="deepseek-v4-flash-0731" prompt_characters=2761
+2026-08-25T13:19:15.699Z DEBUG  review_start                 candidate_id=2377ba9080bfe4600500e3a3a8319ea12401042044193b54b7382d3146547f1a sequence=12 wave=3 model="deepseek-v4-flash-0731"
+2026-08-25T13:19:15.699Z DEBUG  review_request_start         candidate_id=2377ba9080bfe4600500e3a3a8319ea12401042044193b54b7382d3146547f1a sequence=12 wave=3 model=deepseek-v4-flash-0731
+2026-08-25T13:19:15.712Z ERROR  review_error                 candidate_id=2377ba9080bfe4600500e3a3a8319ea12401042044193b54b7382d3146547f1a sequence=12 wave=3 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:19:15.713Z INFO   wave_complete                wave=3 attempts=15 generated=15 reviewed=15 accepted=0 rejected=15 repairs_queued=0
+2026-08-25T13:19:15.713Z INFO   wave_start                   wave=4 queued=5 accepted=0 attempts=15 remaining_capacity=85
+2026-08-25T13:19:15.713Z DEBUG  generation_start             sequence=16 wave=4 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="firewall_network_security" subdomain="rule_shadowing" difficulty=9 repair_count=0 language="en"
+2026-08-25T13:19:15.713Z DEBUG  generation_start             sequence=17 wave=4 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="cloud_hybrid_networking" subdomain="internet_nat_gateway" difficulty=5 repair_count=0 language="en"
+2026-08-25T13:19:15.713Z DEBUG  generation_start             sequence=18 wave=4 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="ip_addressing_ipam" subdomain="rfc1918_overlap" difficulty=8 repair_count=0 language="en"
+2026-08-25T13:19:15.713Z DEBUG  generation_start             sequence=19 wave=4 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="wan_internet_edge" subdomain="circuit_failover" difficulty=4 repair_count=0 language="en"
+2026-08-25T13:19:15.713Z DEBUG  generation_start             sequence=20 wave=4 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="layer3_routing" subdomain="static_routes" difficulty=10 repair_count=0 language="en"
+2026-08-25T13:19:30.474Z DEBUG  heartbeat                    status=running; the last non-heartbeat event is the current pipeline step
+2026-08-25T13:19:50.590Z INFO   generation_complete          sequence=19 wave=4 candidate_id=80c6c7ffa6cddc2dfbf719c4b8cb1583cdff2f926ddb9e71edb7d2f6af63bece model="deepseek-v4-flash-0731" prompt_characters=2034
+2026-08-25T13:19:50.590Z DEBUG  review_start                 candidate_id=80c6c7ffa6cddc2dfbf719c4b8cb1583cdff2f926ddb9e71edb7d2f6af63bece sequence=19 wave=4 model="deepseek-v4-flash-0731"
+2026-08-25T13:19:50.590Z DEBUG  review_request_start         candidate_id=80c6c7ffa6cddc2dfbf719c4b8cb1583cdff2f926ddb9e71edb7d2f6af63bece sequence=19 wave=4 model=deepseek-v4-flash-0731
+2026-08-25T13:19:50.592Z ERROR  review_error                 candidate_id=80c6c7ffa6cddc2dfbf719c4b8cb1583cdff2f926ddb9e71edb7d2f6af63bece sequence=19 wave=4 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:19:51.328Z INFO   generation_complete          sequence=20 wave=4 candidate_id=3744dd581dbc3a51d4d9db77992e90639c57f7f6c0fe5435aeba45940ecee747 model="deepseek-v4-flash-0731" prompt_characters=2028
+2026-08-25T13:19:51.328Z DEBUG  review_start                 candidate_id=3744dd581dbc3a51d4d9db77992e90639c57f7f6c0fe5435aeba45940ecee747 sequence=20 wave=4 model="deepseek-v4-flash-0731"
+2026-08-25T13:19:51.328Z DEBUG  review_request_start         candidate_id=3744dd581dbc3a51d4d9db77992e90639c57f7f6c0fe5435aeba45940ecee747 sequence=20 wave=4 model=deepseek-v4-flash-0731
+2026-08-25T13:19:51.340Z ERROR  review_error                 candidate_id=3744dd581dbc3a51d4d9db77992e90639c57f7f6c0fe5435aeba45940ecee747 sequence=20 wave=4 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:19:51.477Z INFO   generation_complete          sequence=17 wave=4 candidate_id=3bc18dd94056e9386184df47c8ebd789d6458af9cd8352d5a25fd1d3cf8f949b model="deepseek-v4-flash-0731" prompt_characters=1945
+2026-08-25T13:19:51.477Z DEBUG  review_start                 candidate_id=3bc18dd94056e9386184df47c8ebd789d6458af9cd8352d5a25fd1d3cf8f949b sequence=17 wave=4 model="deepseek-v4-flash-0731"
+2026-08-25T13:19:51.477Z DEBUG  review_request_start         candidate_id=3bc18dd94056e9386184df47c8ebd789d6458af9cd8352d5a25fd1d3cf8f949b sequence=17 wave=4 model=deepseek-v4-flash-0731
+2026-08-25T13:19:51.490Z ERROR  review_error                 candidate_id=3bc18dd94056e9386184df47c8ebd789d6458af9cd8352d5a25fd1d3cf8f949b sequence=17 wave=4 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:19:53.159Z INFO   generation_complete          sequence=16 wave=4 candidate_id=f4bb4cc8d59702af4f39ac26c0906b08df538cbdc448dec52b0c0f9da5018c16 model="deepseek-v4-flash-0731" prompt_characters=2279
+2026-08-25T13:19:53.159Z DEBUG  review_start                 candidate_id=f4bb4cc8d59702af4f39ac26c0906b08df538cbdc448dec52b0c0f9da5018c16 sequence=16 wave=4 model="deepseek-v4-flash-0731"
+2026-08-25T13:19:53.159Z DEBUG  review_request_start         candidate_id=f4bb4cc8d59702af4f39ac26c0906b08df538cbdc448dec52b0c0f9da5018c16 sequence=16 wave=4 model=deepseek-v4-flash-0731
+2026-08-25T13:19:53.162Z ERROR  review_error                 candidate_id=f4bb4cc8d59702af4f39ac26c0906b08df538cbdc448dec52b0c0f9da5018c16 sequence=16 wave=4 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:19:57.678Z INFO   generation_complete          sequence=18 wave=4 candidate_id=753507a69aedc77b4cf555f2eeb77a918f4ad63845cec527163990c1601f12af model="deepseek-v4-flash-0731" prompt_characters=2672
+2026-08-25T13:19:57.678Z DEBUG  review_start                 candidate_id=753507a69aedc77b4cf555f2eeb77a918f4ad63845cec527163990c1601f12af sequence=18 wave=4 model="deepseek-v4-flash-0731"
+2026-08-25T13:19:57.678Z DEBUG  review_request_start         candidate_id=753507a69aedc77b4cf555f2eeb77a918f4ad63845cec527163990c1601f12af sequence=18 wave=4 model=deepseek-v4-flash-0731
+2026-08-25T13:19:57.681Z ERROR  review_error                 candidate_id=753507a69aedc77b4cf555f2eeb77a918f4ad63845cec527163990c1601f12af sequence=18 wave=4 error="review API returned HTTP 404 Not Found: {\"error\":{\"message\":\"The model `deepseek-v4-flash-0731` does not exist.\",\"type\":\"NotFoundError\",\"param\":\"model\",\"code\":404}}"
+2026-08-25T13:19:57.681Z INFO   wave_complete                wave=4 attempts=20 generated=20 reviewed=20 accepted=0 rejected=20 repairs_queued=0
+2026-08-25T13:19:57.681Z INFO   wave_start                   wave=5 queued=5 accepted=0 attempts=20 remaining_capacity=80
+2026-08-25T13:19:57.681Z DEBUG  generation_start             sequence=21 wave=5 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="network_lifecycle_governance" subdomain="maintenance_windows" difficulty=7 repair_count=0 language="en"
+2026-08-25T13:19:57.681Z DEBUG  generation_start             sequence=22 wave=5 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="network_performance_qos" subdomain="shaping" difficulty=5 repair_count=0 language="en"
+2026-08-25T13:19:57.681Z DEBUG  generation_start             sequence=23 wave=5 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="cloud_hybrid_networking" subdomain="vpc_vnet_architecture" difficulty=8 repair_count=0 language="en"
+2026-08-25T13:19:57.681Z DEBUG  generation_start             sequence=24 wave=5 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="network_resilience" subdomain="dependency_mapping" difficulty=8 repair_count=0 language="en"
+2026-08-25T13:19:57.681Z DEBUG  generation_start             sequence=25 wave=5 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="container_kubernetes_networking" subdomain="overlay_underlay" difficulty=6 repair_count=0 language="en"
+2026-08-25T13:20:00.474Z DEBUG  heartbeat                    status=running; the last non-heartbeat event is the current pipeline step
