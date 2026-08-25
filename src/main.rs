@@ -443,8 +443,9 @@ struct GenerateArgs {
     #[arg(long, value_parser = parse_positive_usize)]
     max_candidates: Option<usize>,
 
-    #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..))]
-    request_timeout_seconds: u64,
+    /// Whole-request timeout. Defaults to 600 seconds for GPT-5/o-series/Luna and 120 otherwise.
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    request_timeout_seconds: Option<u64>,
 
     /// Directory containing every artifact for this run. Generated automatically when omitted.
     #[arg(long)]
@@ -1035,8 +1036,19 @@ fn generation_max_output_tokens(model: &str, requested: Option<u64>) -> u64 {
 }
 
 fn review_max_output_tokens(model: &str, requested: Option<u64>) -> u64 {
-    let _ = model;
-    requested.unwrap_or(1024)
+    requested.unwrap_or_else(|| {
+        if restricted_sampling(model) {
+            // GPT-5/o-series/Luna usage may include reasoning tokens in the
+            // completion budget. Leave enough room for the final JSON object.
+            4096
+        } else {
+            1024
+        }
+    })
+}
+
+fn effective_request_timeout_seconds(model: &str, requested: Option<u64>) -> u64 {
+    requested.unwrap_or_else(|| if restricted_sampling(model) { 600 } else { 120 })
 }
 
 fn parse_chat_payload(raw: &str) -> Result<(String, u64, u64)> {
@@ -1503,6 +1515,7 @@ enum ApiError {
     InvalidCompletion(String),
     Billing(String),
     Timeout,
+    Cancelled,
     Other(anyhow::Error),
 }
 
@@ -1522,6 +1535,7 @@ impl std::fmt::Display for ApiError {
             }
             ApiError::Billing(msg) => write!(f, "billing error: {}", msg),
             ApiError::Timeout => write!(f, "request timed out"),
+            ApiError::Cancelled => write!(f, "cancelled"),
             ApiError::Other(e) => write!(f, "{}", e),
         }
     }
@@ -1703,7 +1717,7 @@ async fn generate_task(
     let mut retries = 0u32;
     loop {
         if cancel.load(Ordering::Relaxed) {
-            return Err(ApiError::Other(anyhow::anyhow!("cancelled")));
+            return Err(ApiError::Cancelled);
         }
 
         let request_started = std::time::Instant::now();
@@ -2780,6 +2794,7 @@ struct GenerationReportContext<'a> {
     semantic_model_id: &'a str,
     existing_records: usize,
     coordinate_seed: u64,
+    request_timeout_seconds: u64,
     paths: &'a artifacts::PublishedPaths,
 }
 
@@ -2920,6 +2935,7 @@ fn generation_run_report(
             "generation_workers": context.args.workers,
             "review_workers": context.args.review_workers,
             "review_requests_per_minute": context.args.review_requests_per_minute,
+            "request_timeout_seconds": context.request_timeout_seconds,
             "runtime": "tokio-multi-thread",
             "runtime_worker_threads": runtime_worker_threads(),
             "logical_cpus": logical_cpus,
@@ -3115,6 +3131,10 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         model: args.model.clone(),
         credentials: generation_credentials,
     };
+    let request_timeout_seconds = effective_request_timeout_seconds(
+        &generation_provider.model,
+        args.request_timeout_seconds,
+    );
     let review_credentials = if args.review_keyfile.is_some() || args.review_api_key.is_some() {
         Some(provider::load_credential_pool(
             args.review_keyfile.as_deref(),
@@ -3192,7 +3212,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     let clients: Arc<Vec<reqwest::Client>> = Arc::new(match &args.proxies {
         Some(proxy_path) => {
             let proxies = load_proxies(proxy_path)?;
-            let timeout = std::time::Duration::from_secs(args.request_timeout_seconds);
+            let timeout = std::time::Duration::from_secs(request_timeout_seconds);
             if args.rotating_proxy {
                 let index = thread_rng().gen_range(0..proxies.len());
                 vec![
@@ -3207,7 +3227,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         }
         None => vec![
             reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(args.request_timeout_seconds))
+                .timeout(std::time::Duration::from_secs(request_timeout_seconds))
                 .build()?,
         ],
     });
@@ -3266,6 +3286,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             "generation_workers": args.workers,
             "review_workers": args.review_workers,
             "review_requests_per_minute": args.review_requests_per_minute,
+            "request_timeout_seconds": request_timeout_seconds,
             "runtime": "tokio-multi-thread",
             "runtime_worker_threads": runtime_worker_threads(),
             "logical_cpus": std::thread::available_parallelism().map(|value| value.get()).unwrap_or(1),
@@ -3366,7 +3387,6 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             };
             work.sequence = sequence;
             work.wave = wave;
-            stats.attempts.fetch_add(1, Ordering::Relaxed);
             work_items.push(work);
         }
 
@@ -3416,6 +3436,13 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                 let review_token_override = args.review_max_output_tokens;
                 let max_repairs_per_coordinate = args.max_repairs_per_coordinate;
                 async move {
+                    // Work for a large wave is sampled up front but dispatched
+                    // lazily through buffer_unordered. Do not count or emit one
+                    // rejection per queued item after a fatal cancellation.
+                    if cancel.load(Ordering::Relaxed) {
+                        return Ok(None);
+                    }
+                    stats.attempts.fetch_add(1, Ordering::Relaxed);
                     let use_model = match &free_models {
                         Some(models) => {
                             let index =
@@ -3455,6 +3482,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                     };
                     let generated = match generated {
                         Ok(generated) => generated,
+                        Err(ApiError::Cancelled) => return Ok(None),
                         Err(error) => {
                             stats.errors.fetch_add(1, Ordering::Relaxed);
                             let reason = error.to_string();
@@ -3908,6 +3936,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         semantic_model_id: effective_semantic_model.model_id(),
         existing_records: existing,
         coordinate_seed: effective_seed,
+        request_timeout_seconds,
         paths: &run_paths,
     };
     if let Some(terminal_error) = terminal_error {
@@ -4181,6 +4210,10 @@ mod tests {
     #[test]
     fn structured_review_has_a_bounded_default_budget() {
         assert_eq!(
+            review_max_output_tokens("scogoai/gpt-5.6-luna-max", None),
+            4096
+        );
+        assert_eq!(
             review_max_output_tokens("deepseek-v4-flash-0731", None),
             1024
         );
@@ -4192,6 +4225,22 @@ mod tests {
         assert_eq!(
             review_max_output_tokens("deepseek-v4-flash-0731", Some(1536)),
             1536
+        );
+    }
+
+    #[test]
+    fn reasoning_models_receive_a_longer_default_request_timeout() {
+        assert_eq!(
+            effective_request_timeout_seconds("scogoai/gpt-5.6-luna-max", None),
+            600
+        );
+        assert_eq!(
+            effective_request_timeout_seconds("gpt-4o-mini", None),
+            120
+        );
+        assert_eq!(
+            effective_request_timeout_seconds("scogoai/gpt-5.6-luna-max", Some(45)),
+            45
         );
     }
 

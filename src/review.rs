@@ -519,6 +519,10 @@ async fn request_structured_with_format(
     };
     let mut body = json!({
         "model": provider.model,
+        // Some OpenAI-compatible gateways (including Omniroute for GPT-5
+        // families) default to SSE unless non-streaming is explicit. The
+        // structured parser below consumes one complete JSON response.
+        "stream": false,
         "messages": [
             {"role": "system", "content": system_content},
             {"role": "user", "content": user_content}
@@ -1400,6 +1404,7 @@ mod tests {
             fn respond(&self, request: &Request) -> ResponseTemplate {
                 let call = self.calls.fetch_add(1, Ordering::SeqCst);
                 let body: Value = serde_json::from_slice(&request.body).unwrap();
+                assert_eq!(body["stream"], false);
                 if call == 0 {
                     assert_eq!(body["response_format"]["type"], "json_schema");
                     return ResponseTemplate::new(400).set_body_json(json!({

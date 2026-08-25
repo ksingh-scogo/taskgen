@@ -209,8 +209,8 @@ taskgen
 | 2 | `taskgen review` | Replays the review/adjudication gate over existing candidates | Yes |
 | 3 | `taskgen dedup` | Deduplicates any JSONL prompt dataset | No |
 | 4 | `taskgen taxonomy validate` | Validates taxonomy structure, weights, references, and reachability | No |
-| 5 | `taskgen atif export` | Converts canonical completed audit records to ATIF v1.7 | No |
-| 6 | `taskgen atif import` | Converts ATIF v1.7 to canonical unverified audit records | No |
+| 5 | `taskgen atif export` | Converts canonical completed audit records to ATIF-v1.7 | No |
+| 6 | `taskgen atif import` | Converts ATIF-v1.7 to canonical unverified audit records | No |
 
 Run these at any time to see the authoritative flags for your installed version:
 
@@ -446,7 +446,7 @@ Defaults worth knowing:
 | Accepted count | `250` |
 | Generation workers | `5` |
 | Review workers | `5` |
-| Request timeout | `120` seconds |
+| Request timeout | `600` seconds for GPT-5/o-series/Luna; `120` seconds otherwise; `--request-timeout-seconds` overrides it |
 | Candidate ceiling | `max(100, 20 × count)` |
 | Temperature | `0.9` |
 | Reviewer endpoint/model/key | Inherit generation settings when the endpoint is unchanged |
@@ -617,7 +617,7 @@ Every task composes category, domain, subdomain, task family, environment, platf
 
 ATIF conversion is for **completed teacher trajectories later in the pipeline**, not the prompt seeds produced directly by `generate`.
 
-Export one canonical audit JSON record to ATIF v1.7:
+Export one canonical audit JSON record to ATIF-v1.7:
 
 ```bash
 taskgen atif export \
@@ -635,7 +635,7 @@ taskgen atif export \
 
 ## 6. `taskgen atif import`
 
-Import external ATIF v1.7 trajectories into canonical audit records:
+Import external ATIF-v1.7 trajectories into canonical audit records:
 
 ```bash
 taskgen atif import \
