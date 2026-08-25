@@ -9,7 +9,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use anyhow::{Context, Result, bail};
-#[cfg(test)]
 use chrono::Local;
 use clap::{Args as ClapArgs, Parser, Subcommand, ValueEnum};
 use futures::stream::{self, StreamExt};
@@ -451,7 +450,7 @@ struct GenerateArgs {
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     request_timeout_seconds: Option<u64>,
 
-    /// Directory containing every artifact for this run. Generated automatically when omitted.
+    /// Directory containing every artifact for this run. Defaults under ./taskgen/runs using taxonomy, model, count, and local start time.
     #[arg(long)]
     run_dir: Option<PathBuf>,
 
@@ -3742,15 +3741,30 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         .progress_chars("##-");
 
     let run_id = format!("{:08x}", rand::random::<u32>());
-    let timestamp = started_at.format("%Y%m%dT%H%M%SZ").to_string();
-    let run_dir = args.run_dir.clone().unwrap_or_else(|| {
-        artifacts::automatic_run_dir(
-            std::path::Path::new("taskgen-runs"),
-            &timestamp,
-            taxonomy.id(),
-            &run_id,
-        )
-    });
+    let run_dir = match &args.run_dir {
+        Some(path) => path.clone(),
+        None => {
+            let directory_model = if args.free_models {
+                "openrouter-free"
+            } else {
+                &args.model
+            };
+            let local_start_time = started_at
+                .with_timezone(&Local)
+                .format("%d%m%y-%H-%M")
+                .to_string();
+            let current_directory = std::env::current_dir()
+                .context("failed to resolve current working directory for automatic run output")?;
+            let runs_root = artifacts::default_generation_runs_root(&current_directory);
+            artifacts::automatic_generation_run_dir(
+                &runs_root,
+                taxonomy.id(),
+                directory_model,
+                args.count,
+                &local_start_time,
+            )?
+        }
+    };
     let initial_report = serde_json::json!({
         "schema_version": "scogo.taskgen.run.v3",
         "run_id": run_id,
@@ -6211,8 +6225,8 @@ mod tests {
             std::fs::read_to_string(&candidate_path).unwrap()
         );
         assert!(
-            generations.load(Ordering::SeqCst) < 4,
-            "all generation requests completed before the first candidate was published"
+            generation_responses_completed.load(Ordering::SeqCst) < 4,
+            "all generation responses completed before the first candidate was published"
         );
 
         tokio::time::timeout(Duration::from_secs(5), run)
