@@ -3,7 +3,7 @@
 .venv/
 __pycache__/
 *.pyc
-/data/
+/data/*
 graphify-out/
 docs/superpowers/
 *.jsonl
@@ -11,3 +11,21 @@ docs/superpowers/
 !README.md
 runs/*/run.log
 taskgen
+
+# Publish the selected taskgen outputs below while keeping other generated
+# data and run artifacts ignored.
+!/data/runs/
+data/runs/*/
+!/data/runs/netops-luna-smoke-pr7/
+data/runs/*/run.json
+data/runs/*/run.log
+!/data/runs/netops-luna-smoke-pr7/tasks.jsonl
+!/data/runs/netops-gpt-5.6-luna-max-c10/
+!/data/runs/netops-gpt-5.6-luna-max-c10/tasks.jsonl
+!pilot-runs/netops-deepseek-qwen38-max-resume2/tasks.jsonl
+!pilot-runs/netops-deepseek-500-20260821-retry/tasks.jsonl
+!pilot-runs/netops-deepseek-qwen38-max-2000-resume/tasks.jsonl
+!runs/scogo-enterprise-netops-v2+cx-gpt-5.6-luna-max+c1000+250826-16-43/
+!runs/scogo-enterprise-netops-v2+cx-gpt-5.6-luna-max+c1000+250826-16-43/tasks.jsonl
+!runs/scogo-enterprise-netops-v2+cx-gpt-5.6-luna-max+c10+250826-15-19/
+!runs/scogo-enterprise-netops-v2+cx-gpt-5.6-luna-max+c10+250826-15-19/tasks.jsonl
