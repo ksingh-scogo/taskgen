@@ -3833,3 +3833,15 @@
 2026-08-25T21:19:16.856Z INFO   generation_complete          sequence=482 wave=1 candidate_id=daa7c4af3a829436f440c204fadc1fe3fdb6581b3cdf13d557932335af8e413b model="cx/gpt-5.6-luna-max" prompt_characters=2436
 2026-08-25T21:19:16.856Z DEBUG  review_start                 candidate_id=daa7c4af3a829436f440c204fadc1fe3fdb6581b3cdf13d557932335af8e413b sequence=482 wave=1 model="cx/gpt-5.6-sol-xhigh"
 2026-08-25T21:19:16.856Z DEBUG  review_request_start         candidate_id=daa7c4af3a829436f440c204fadc1fe3fdb6581b3cdf13d557932335af8e413b sequence=482 wave=1 model=cx/gpt-5.6-sol-xhigh
+2026-08-25T21:19:26.518Z DEBUG  heartbeat                    status=running; the last non-heartbeat event is the current pipeline step
+2026-08-25T21:19:30.678Z INFO   generation_complete          sequence=477 wave=1 candidate_id=b6c072215b1e4297c023ba2876f9e0cf0c8fba446c410dfe58d1dd94ddbd3147 model="cx/gpt-5.6-luna-max" prompt_characters=3094
+2026-08-25T21:19:30.679Z DEBUG  review_start                 candidate_id=b6c072215b1e4297c023ba2876f9e0cf0c8fba446c410dfe58d1dd94ddbd3147 sequence=477 wave=1 model="cx/gpt-5.6-sol-xhigh"
+2026-08-25T21:19:30.679Z DEBUG  review_request_start         candidate_id=b6c072215b1e4297c023ba2876f9e0cf0c8fba446c410dfe58d1dd94ddbd3147 sequence=477 wave=1 model=cx/gpt-5.6-sol-xhigh
+2026-08-25T21:19:38.385Z INFO   review_decision              candidate_id=daa7c4af3a829436f440c204fadc1fe3fdb6581b3cdf13d557932335af8e413b sequence=482 wave=1 outcome=Accept claims_to_verify=0
+2026-08-25T21:19:38.385Z INFO   review_complete              candidate_id=daa7c4af3a829436f440c204fadc1fe3fdb6581b3cdf13d557932335af8e413b sequence=482 wave=1 outcome=Accept adjudicated=false
+2026-08-25T21:19:38.386Z INFO   candidate_accepted           candidate_id=daa7c4af3a829436f440c204fadc1fe3fdb6581b3cdf13d557932335af8e413b sequence=482 wave=1 accepted=430/3000
+2026-08-25T21:19:38.386Z DEBUG  generation_start             sequence=489 wave=1 model="cx/gpt-5.6-luna-max" category="enterprise_netops" domain="network_lifecycle_governance" subdomain="compliance_audit" difficulty=5 repair_count=0 language="en"
+2026-08-25T21:19:45.909Z INFO   review_decision              candidate_id=953bb795e89642259dec8a9c2dd4afec05a6d71986f0e0defc4d6bf79f5daab8 sequence=480 wave=1 outcome=Accept claims_to_verify=0
+2026-08-25T21:19:45.910Z INFO   review_complete              candidate_id=953bb795e89642259dec8a9c2dd4afec05a6d71986f0e0defc4d6bf79f5daab8 sequence=480 wave=1 outcome=Accept adjudicated=false
+2026-08-25T21:19:45.910Z INFO   candidate_accepted           candidate_id=953bb795e89642259dec8a9c2dd4afec05a6d71986f0e0defc4d6bf79f5daab8 sequence=480 wave=1 accepted=431/3000
+2026-08-25T21:19:45.910Z DEBUG  generation_start             sequence=490 wave=1 model="cx/gpt-5.6-luna-max" category="enterprise_netops" domain="vpn_remote_access" subdomain="gre_tunnels" difficulty=5 repair_count=0 language="en"
