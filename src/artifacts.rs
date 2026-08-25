@@ -35,25 +35,73 @@ impl PublishedPaths {
 }
 
 pub fn automatic_run_dir(root: &Path, timestamp: &str, taxonomy_id: &str, run_id: &str) -> PathBuf {
-    fn slug(value: &str) -> String {
-        value
-            .chars()
-            .map(|character| {
-                if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
-                    character
-                } else {
-                    '-'
-                }
-            })
-            .collect()
-    }
-
     root.join(format!(
         "{}-{}-{}",
-        slug(timestamp),
-        slug(taxonomy_id),
-        slug(run_id)
+        run_directory_slug(timestamp),
+        run_directory_slug(taxonomy_id),
+        run_directory_slug(run_id)
     ))
+}
+
+pub fn automatic_generation_run_dir(
+    root: &Path,
+    taxonomy_id: &str,
+    generation_model: &str,
+    count: usize,
+    local_start_time: &str,
+) -> Result<PathBuf> {
+    let base_name = format!(
+        "{}+{}+c{}+{}",
+        run_directory_slug(taxonomy_id),
+        run_directory_slug(generation_model),
+        count,
+        run_directory_slug(local_start_time)
+    );
+    let base = root.join(&base_name);
+    if !base.exists() {
+        return Ok(base);
+    }
+    for collision in 2..=9999 {
+        let candidate = root.join(format!("{base_name}+{collision:02}"));
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+    bail!(
+        "could not allocate an automatic run directory under {}",
+        root.display()
+    )
+}
+
+pub fn default_generation_runs_root(current_directory: &Path) -> PathBuf {
+    let taskgen_path = current_directory.join("taskgen");
+    if taskgen_path.is_file() {
+        current_directory.join("runs")
+    } else {
+        taskgen_path.join("runs")
+    }
+}
+
+fn run_directory_slug(value: &str) -> String {
+    let mut slug = String::new();
+    let mut previous_was_separator = false;
+    for character in value.chars() {
+        if character.is_ascii_alphanumeric() || matches!(character, '.' | '_') {
+            slug.push(character);
+            previous_was_separator = false;
+        } else if !previous_was_separator && !slug.is_empty() {
+            slug.push('-');
+            previous_was_separator = true;
+        }
+    }
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    if slug.is_empty() {
+        "unknown".to_string()
+    } else {
+        slug
+    }
 }
 
 #[derive(Debug)]
@@ -374,6 +422,55 @@ mod tests {
         assert_eq!(
             path,
             PathBuf::from("taskgen-runs/20260820T143501Z-scogo-enterprise-netops-v2-a81f9c2d")
+        );
+    }
+
+    #[test]
+    fn generation_run_directory_contains_taxonomy_model_count_and_local_start_time() {
+        let path = automatic_generation_run_dir(
+            Path::new("taskgen/runs"),
+            "scogo-enterprise-netops-v2",
+            "cx/gpt-5.6-luna-xhigh",
+            100,
+            "250826-14-35",
+        )
+        .unwrap();
+        assert_eq!(
+            path,
+            PathBuf::from(
+                "taskgen/runs/scogo-enterprise-netops-v2+cx-gpt-5.6-luna-xhigh+c100+250826-14-35"
+            )
+        );
+    }
+
+    #[test]
+    fn generation_run_directory_adds_a_suffix_on_same_minute_collision() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("taskgen/runs");
+        let first =
+            automatic_generation_run_dir(&root, "scogo-itops-v4", "model/name", 2, "250826-14-35")
+                .unwrap();
+        fs::create_dir_all(&first).unwrap();
+        let second =
+            automatic_generation_run_dir(&root, "scogo-itops-v4", "model/name", 2, "250826-14-35")
+                .unwrap();
+        assert_eq!(
+            second.file_name().unwrap(),
+            "scogo-itops-v4+model-name+c2+250826-14-35+02"
+        );
+    }
+
+    #[test]
+    fn generation_runs_root_avoids_the_repository_binary_name_collision() {
+        let temporary = tempfile::tempdir().unwrap();
+        assert_eq!(
+            default_generation_runs_root(temporary.path()),
+            temporary.path().join("taskgen/runs")
+        );
+        fs::write(temporary.path().join("taskgen"), b"local binary").unwrap();
+        assert_eq!(
+            default_generation_runs_root(temporary.path()),
+            temporary.path().join("runs")
         );
     }
 

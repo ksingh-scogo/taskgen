@@ -100,8 +100,7 @@ export OPENAI_API_KEY="your-provider-key"
 taskgen generate \
   --api-base https://api.example.com/v1 \
   --model provider/model-name \
-  --count 10 \
-  --run-dir data/runs/provider-smoke
+  --count 10
 ```
 
 For a local vLLM server that ignores credentials, pass any non-empty placeholder key:
@@ -111,8 +110,7 @@ taskgen generate \
   --api-base http://localhost:8000/v1 \
   --api-key none \
   --model your-served-model \
-  --count 10 \
-  --run-dir data/runs/local-smoke
+  --count 10
 ```
 
 The provider-specific examples above are alternatives to the default-provider smoke test in step 4.
@@ -124,8 +122,7 @@ This command intentionally omits `--taxonomy`: Taskgen loads `scogo-itops-v4` fr
 ```bash
 taskgen generate \
   --model gpt-5.6-luna-max \
-  --count 10 \
-  --run-dir data/runs/itops-smoke
+  --count 10
 ```
 
 `--count 10` means **10 newly accepted records**, not 10 API requests. Taskgen continues generation, validation, review, repair, and top-up until it has exactly 10 accepted unique prompts or reaches the candidate/budget limit.
@@ -139,7 +136,7 @@ Keep review enabled for real datasets. `--skip-review` is only a diagnostic mode
 On success, the run directory looks like this:
 
 ```text
-data/runs/itops-smoke/
+taskgen/runs/scogo-itops-v4+gpt-5.6-luna-max+c10+250826-14-35/
 ├── tasks.jsonl       # final accepted dataset; exists only after a successful run
 ├── candidates.jsonl  # every generated candidate, persisted before review
 ├── reviews.jsonl     # reviewer/adjudicator decisions and token usage
@@ -151,7 +148,7 @@ data/runs/itops-smoke/
 Follow a live run from another terminal:
 
 ```bash
-tail -f data/runs/itops-smoke/run.log
+tail -f taskgen/runs/scogo-itops-v4+gpt-5.6-luna-max+c10+250826-14-35/run.log
 ```
 
 Every line is flushed immediately and uses a simple UTC text format:
@@ -169,14 +166,16 @@ The beginning of `run.log` records every command option plus effective defaults,
 Check the accepted count and terminal status:
 
 ```bash
-wc -l data/runs/itops-smoke/tasks.jsonl
+wc -l taskgen/runs/scogo-itops-v4+gpt-5.6-luna-max+c10+250826-14-35/tasks.jsonl
 jq '{status, requested_new_records, accepted_new_records, candidate_attempts}' \
-  data/runs/itops-smoke/run.json
+  taskgen/runs/scogo-itops-v4+gpt-5.6-luna-max+c10+250826-14-35/run.json
 ```
 
 If a run is interrupted or cannot reach the exact count, it keeps `accepted.partial.jsonl` and all audit sidecars, but it does not publish `tasks.jsonl`. A user-supplied `--run-dir` must be new or empty.
 
-Omit `--run-dir` to create `taskgen-runs/<UTC timestamp>-<taxonomy ID>-<run ID>/` automatically. `run.json` includes models, sanitized endpoints, concurrency, review outcomes, request timing/retries, token counts, priced cost, accepted-coordinate distributions, and artifact SHA-256 hashes.
+By default, generation creates `taskgen/runs/<taxonomy>+<generation-model>+c<count>+<ddmmyy-hh-mm>/` under the current working directory. Model separators such as `/` are converted to `-`; a same-minute collision receives `+02`, `+03`, and so on. The CLI prints the exact path at startup. `run.json` includes models, sanitized endpoints, concurrency, review outcomes, request timing/retries, token counts, priced cost, accepted-coordinate distributions, and artifact SHA-256 hashes.
+
+If the current directory already contains a file named `taskgen`—as the source repository does—the base automatically becomes `./runs/` because `./taskgen` cannot simultaneously be a binary and a directory. Always use the exact `Run directory:` path printed by the command when tailing or inspecting artifacts.
 
 ### 6. Scale up with an independent reviewer
 
@@ -192,8 +191,7 @@ taskgen generate \
   --count 1000 \
   --workers 10 \
   --review-workers 10 \
-  --seed 20260820 \
-  --run-dir data/runs/itops-001
+  --seed 20260820
 ```
 
 If the reviewer uses a different endpoint, its credentials must be supplied explicitly:
@@ -206,8 +204,7 @@ taskgen generate \
   --review-api-base https://reviewer.example.com/v1 \
   --review-api-key "$REVIEW_API_KEY" \
   --review-model strong/reviewer \
-  --count 1000 \
-  --run-dir data/runs/split-provider-001
+  --count 1000
 ```
 
 Tune `--workers` and `--review-workers` independently. When one server handles both phases, their combined load matters.
@@ -281,8 +278,7 @@ taskgen generate \
   --model teacher/model \
   --count 1000 \
   --workers 5 \
-  --seed 20260820 \
-  --run-dir data/runs/netops-001
+  --seed 20260820
 ```
 
 ### What practical value does `--seed` provide?
@@ -302,15 +298,13 @@ taskgen generate \
   --taxonomy docs/netops-taxonomy.yaml \
   --model model-a \
   --seed 20260820 \
-  --count 100 \
-  --run-dir data/runs/netops-model-a
+  --count 100
 
 taskgen generate \
   --taxonomy docs/netops-taxonomy.yaml \
   --model model-b \
   --seed 20260820 \
-  --count 100 \
-  --run-dir data/runs/netops-model-b
+  --count 100
 ```
 
 The seed does **not** make remote completions, review decisions, retries, or the final accepted text identical. Those can still vary because model APIs are nondeterministic and different candidates may be rejected or require top-up sampling. Omit `--seed` when you want Taskgen to choose a fresh random seed automatically.
@@ -327,8 +321,7 @@ taskgen generate \
   --review-model strong/reviewer \
   --review-reference-dir references/vendor-docs \
   --adjudication-model strong/adjudicator \
-  --count 500 \
-  --run-dir data/runs/netops-referenced-001
+  --count 500
 ```
 
 References are retrieved only for claims marked `needs_verification`. A different adjudication endpoint follows the same rule as a different review endpoint: pass `--adjudication-api-base` and explicit `--adjudication-api-key` or `--adjudication-keyfile`.
@@ -347,9 +340,8 @@ If `--adjudication-model` is omitted, adjudication inherits the review model, en
 ```bash
 taskgen generate \
   --api-key "$OPENAI_API_KEY" \
-  --append-from data/runs/itops-001/tasks.jsonl \
-  --count 500 \
-  --run-dir data/runs/itops-002
+  --append-from taskgen/runs/scogo-itops-v4+gpt-5.6-luna-max+c1000+240826-10-30/tasks.jsonl \
+  --count 500
 ```
 
 The source file is not changed. It is copied into the new run and loaded into the dedup index; success produces the existing records plus exactly 500 new accepted records.
@@ -361,8 +353,7 @@ taskgen generate \
   --api-key "$OPENAI_API_KEY" \
   --multilingual \
   --count 2000 \
-  --workers 10 \
-  --run-dir data/runs/itops-i18n-001
+  --workers 10
 ```
 
 Languages are `en`, `de`, `fr`, `es`, `nl`, `zh`, `ar`, and `ru`. Semantic mode automatically selects `intfloat/multilingual-e5-small`.
@@ -389,8 +380,7 @@ taskgen generate \
   --api-key "$OPENAI_API_KEY" \
   --model gpt-5.6-luna-max \
   --dedup-mode lexical \
-  --count 250 \
-  --run-dir data/runs/itops-lexical-001
+  --count 250
 ```
 
 Use semantic mode for the strongest local duplicate filtering. It is the default, but specifying it can make production scripts self-documenting:
@@ -402,8 +392,7 @@ taskgen generate \
   --dedup-mode semantic \
   --semantic-threshold 0.90 \
   --semantic-model-cache data/model-cache \
-  --count 1000 \
-  --run-dir data/runs/itops-semantic-001
+  --count 1000
 ```
 
 Thresholds are inclusive similarity cutoffs. Lowering `--jaccard-threshold` or `--semantic-threshold` drops more records as duplicates; raising one keeps more borderline records. For example, cosine `0.85` is more aggressive than `0.95`. Review samples from `rejected.jsonl` before changing thresholds for a production run.
@@ -423,8 +412,7 @@ taskgen generate \
   --review-output-price 2.00 \
   --budget 10.00 \
   --count 5000 \
-  --workers 20 \
-  --run-dir data/runs/rotated-001
+  --workers 20
 ```
 
 Prices are currency units per one million tokens. `--budget` is useful only when price flags are supplied; Taskgen checks priced spend before scheduling each new top-up wave. Proxy lines must use `host:port` or `host:port:user:pass`; blank lines and `#` comments are ignored. By default, proxies are used round-robin, while `--rotating-proxy` chooses one random sticky proxy for the run. Keyfiles take precedence over single-key flags or their environment variables.
@@ -434,8 +422,7 @@ Prices are currency units per one million tokens. `--budget` is useful only when
 ```bash
 OPENAI_API_KEY="$OPENROUTER_API_KEY" taskgen generate \
   --free-models \
-  --count 100 \
-  --run-dir data/runs/openrouter-free-001
+  --count 100
 ```
 
 `--free-models` switches the generation endpoint to OpenRouter, discovers eligible free text models, and rotates through them. Pass an explicit `--review-model` if you do not want the reviewer to follow the selected free generation models.
@@ -446,8 +433,7 @@ OPENAI_API_KEY="$OPENROUTER_API_KEY" taskgen generate \
 taskgen generate \
   --api-key "$OPENAI_API_KEY" \
   --skip-review \
-  --count 25 \
-  --run-dir data/runs/generation-smoke-only
+  --count 25
 ```
 
 Schema, coordinate, safety, and dedup checks still run, but `reviews.jsonl` is empty. Do not use this mode to publish a training dataset.
@@ -465,7 +451,7 @@ Schema, coordinate, safety, and dedup checks still run, but `reviews.jsonl` is e
 | Review | `--review-model`, `--review-api-base`, `--review-api-key`, `--review-keyfile`, `--review-system-prompt`, `--review-system-prompt-file`, `--review-max-output-tokens`, `--skip-review` | Reviewer provider and policy controls |
 | Adjudication | `--review-reference-dir`, `--adjudication-model`, `--adjudication-api-base`, `--adjudication-api-key`, `--adjudication-keyfile` | Conditional evidence checking for `needs_verification`, with optional model/provider overrides |
 | Dedup | `--dedup-mode`, `--jaccard-threshold`, `--semantic-threshold`, `--dedup-ngram`, `--semantic-model`, `--semantic-model-cache` | `lexical` or `semantic` local uniqueness checks; semantic is the default |
-| Run management | `--run-dir`, `--append-from` | Artifact destination and source dataset extension |
+| Run management | `--run-dir`, `--append-from` | Optional artifact-directory override and source dataset extension |
 | Network | `--proxies`, `--rotating-proxy`, `--free-models` | Proxy and OpenRouter discovery controls |
 | Cost | `--input-price`, `--output-price`, `--review-input-price`, `--review-output-price`, `--budget` | Per-million-token prices and a total run cap |
 
@@ -482,7 +468,19 @@ Defaults worth knowing:
 | Reviewer endpoint/model/key | Inherit generation settings when the endpoint is unchanged |
 | Repairs per coordinate | `1` (maximum allowed is `1`) |
 | Dedup | Semantic; Jaccard `0.80`, cosine `0.90`, word n-gram `5` |
-| Run directory | Generated under `taskgen-runs/` |
+| Run directory | `taskgen/runs/<taxonomy>+<model>+c<count>+<ddmmyy-hh-mm>/`; falls back to `runs/...` when `./taskgen` is an existing file |
+
+#### Override the automatic run directory
+
+Most runs should omit `--run-dir`. Supply it only when an external workflow requires a specific destination; the directory must be new or empty:
+
+```bash
+taskgen generate \
+  --taxonomy docs/netops-taxonomy.yaml \
+  --model gpt-5.6-luna-max \
+  --count 100 \
+  --run-dir /data/taskgen-runs/netops-release-001
+```
 
 #### How concurrency works
 
@@ -502,8 +500,7 @@ taskgen generate \
   --model your-served-model \
   --workers 2 \
   --review-workers 2 \
-  --count 100 \
-  --run-dir data/runs/local-concurrency-001
+  --count 100
 ```
 
 If generation and review use separate providers, each pool can be tuned for its endpoint. For example, `--workers 20 --review-workers 5 --review-requests-per-minute 60` allows high generation parallelism while capping the reviewer/adjudicator to five concurrent pipelines and 60 total review-stage requests per minute. Higher values are not automatically faster: watch provider 429s, timeouts, GPU saturation, latency, and acceptance yield in `run.json`.
@@ -554,7 +551,7 @@ Unlike `generate`, standalone `review` always requires `--taxonomy`, including f
 
 ```bash
 taskgen review \
-  --input data/runs/netops-001/candidates.jsonl \
+  --input taskgen/runs/scogo-enterprise-netops-v2+teacher-model+c1000+240826-10-30/candidates.jsonl \
   --taxonomy docs/netops-taxonomy.yaml \
   --api-base https://reviewer.example.com/v1 \
   --api-key "$REVIEW_API_KEY" \
@@ -570,7 +567,7 @@ curl -fsSL -o config/it-ops-taxonomy.yaml \
   https://raw.githubusercontent.com/ksingh-scogo/taskgen/master/docs/it-ops-taxonomy.yaml
 
 taskgen review \
-  --input data/runs/itops-001/candidates.jsonl \
+  --input taskgen/runs/scogo-itops-v4+gpt-5.6-luna-max+c1000+240826-10-30/candidates.jsonl \
   --taxonomy config/it-ops-taxonomy.yaml \
   --api-key "$REVIEW_API_KEY" \
   --model strong/reviewer \
@@ -591,7 +588,7 @@ Valid rubric outcomes are `accept`, `revise`, `reject`, and `needs_verification`
 
 ```bash
 taskgen review \
-  --input data/runs/netops-001/candidates.jsonl \
+  --input taskgen/runs/scogo-enterprise-netops-v2+teacher-model+c1000+240826-10-30/candidates.jsonl \
   --taxonomy docs/netops-taxonomy.yaml \
   --api-key "$REVIEW_API_KEY" \
   --model strong/reviewer \
