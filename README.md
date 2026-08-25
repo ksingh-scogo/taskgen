@@ -708,6 +708,7 @@ Example accepted task-v2 record:
 |---|---|
 | `generation API key is required` | Set `OPENAI_API_KEY`, pass `--api-key`, or use `--keyfile`; local servers still need a non-empty placeholder such as `none` |
 | Reviewer endpoint differs from generation endpoint | Add `--review-api-key` or `--review-keyfile` |
+| A `[TIMEOUT]` line appears but the run continues | This is a retryable request failure, not a terminal run failure. Taskgen reports whether it reached its own deadline or ended earlier upstream, then retries with backoff. The run fails only after active candidates exhaust their retry budgets. |
 | `run directory is not empty` | Choose a new `--run-dir`; Taskgen never merges into a non-empty run directory |
 | Semantic model cannot download | Pre-populate `--semantic-model-cache` or use `--dedup-mode lexical` |
 | Candidate limit exhausted | Inspect `rejected.jsonl` and `run.json`, improve the generator/reviewer setup, or raise `--max-candidates` deliberately |

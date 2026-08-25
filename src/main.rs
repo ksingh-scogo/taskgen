@@ -1148,6 +1148,8 @@ struct AtomicStats {
     attempts: AtomicUsize,
     generated_candidates: AtomicUsize,
     reviewed_candidates: AtomicUsize,
+    generation_in_flight: AtomicUsize,
+    review_in_flight: AtomicUsize,
     tasks: AtomicUsize,
     errors: AtomicUsize,
 }
@@ -1170,19 +1172,39 @@ impl AtomicStats {
             attempts: AtomicUsize::new(0),
             generated_candidates: AtomicUsize::new(0),
             reviewed_candidates: AtomicUsize::new(0),
+            generation_in_flight: AtomicUsize::new(0),
+            review_in_flight: AtomicUsize::new(0),
             tasks: AtomicUsize::new(0),
             errors: AtomicUsize::new(0),
         }
     }
 }
 
+struct InFlightGuard<'a> {
+    counter: &'a AtomicUsize,
+}
+
+impl<'a> InFlightGuard<'a> {
+    fn enter(counter: &'a AtomicUsize) -> Self {
+        counter.fetch_add(1, Ordering::Relaxed);
+        Self { counter }
+    }
+}
+
+impl Drop for InFlightGuard<'_> {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 fn update_live_progress(progress: &ProgressBar, stats: &AtomicStats, stage: &str) {
     let generated = stats.generated_candidates.load(Ordering::Relaxed);
     let reviewed = stats.reviewed_candidates.load(Ordering::Relaxed);
-    let accepted = stats.tasks.load(Ordering::Relaxed);
     let rejected = stats.errors.load(Ordering::Relaxed);
+    let generating = stats.generation_in_flight.load(Ordering::Relaxed);
+    let reviewing = stats.review_in_flight.load(Ordering::Relaxed);
     progress.set_message(format!(
-        "{stage} | generated {generated} | reviewed {reviewed} | accepted {accepted} | rejected {rejected}"
+        "{stage} | in flight: generation {generating}, review {reviewing} | generated {generated} | reviewed {reviewed} | rejected {rejected}"
     ));
 }
 
@@ -1514,7 +1536,7 @@ enum ApiError {
     CompletionTruncated(String),
     InvalidCompletion(String),
     Billing(String),
-    Timeout,
+    Timeout(String),
     Cancelled,
     Other(anyhow::Error),
 }
@@ -1534,7 +1556,7 @@ impl std::fmt::Display for ApiError {
                 write!(f, "invalid model completion: {message}")
             }
             ApiError::Billing(msg) => write!(f, "billing error: {}", msg),
-            ApiError::Timeout => write!(f, "request timed out"),
+            ApiError::Timeout(message) => write!(f, "request timed out: {message}"),
             ApiError::Cancelled => write!(f, "cancelled"),
             ApiError::Other(e) => write!(f, "{}", e),
         }
@@ -1586,6 +1608,14 @@ fn transport_error_diagnostic(error: &reqwest::Error) -> String {
     diagnostic
 }
 
+fn timeout_source_hint(elapsed: std::time::Duration, configured_seconds: u64) -> &'static str {
+    if elapsed.as_secs_f64() + 5.0 < configured_seconds as f64 {
+        "ended before Taskgen's deadline; likely an upstream or network timeout"
+    } else {
+        "reached Taskgen's whole-request deadline"
+    }
+}
+
 async fn api_request(
     client: &reqwest::Client,
     url: &str,
@@ -1605,7 +1635,7 @@ async fn api_request(
         Ok(r) => r,
         Err(e) => {
             if e.is_timeout() {
-                return Err(ApiError::Timeout);
+                return Err(ApiError::Timeout(transport_error_diagnostic(&e)));
             }
             return Err(ApiError::Transport(transport_error_diagnostic(&e)));
         }
@@ -1660,7 +1690,9 @@ struct GenerateTaskRequest<'a> {
     language: Option<&'a str>,
     feedback: Option<&'a GenerationFeedback>,
     cancel: &'a AtomicBool,
-    consecutive_availability_failures: &'a AtomicUsize,
+    consecutive_exhausted_candidates: &'a AtomicUsize,
+    availability_failure_threshold: usize,
+    request_timeout_seconds: u64,
     progress: &'a ProgressBar,
     telemetry: &'a telemetry::RequestTelemetry,
 }
@@ -1680,7 +1712,9 @@ async fn generate_task(
         language,
         feedback,
         cancel,
-        consecutive_availability_failures,
+        consecutive_exhausted_candidates,
+        availability_failure_threshold,
+        request_timeout_seconds,
         progress,
         telemetry,
     } = request;
@@ -1723,7 +1757,7 @@ async fn generate_task(
         let request_started = std::time::Instant::now();
         match api_request(client, &url, api_key, &body).await {
             Ok(result) => {
-                consecutive_availability_failures.store(0, Ordering::Relaxed);
+                consecutive_exhausted_candidates.store(0, Ordering::Relaxed);
                 let prompt = result.0.trim().to_string();
                 if let Err(error) = validate_generated_prompt(&prompt) {
                     telemetry.record_error(
@@ -1764,31 +1798,36 @@ async fn generate_task(
                 });
                 tokio::time::sleep(tokio::time::Duration::from_secs(wait)).await;
             }
-            Err(ApiError::Timeout) => {
-                telemetry.record_timeout(
-                    request_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
-                );
-                let count = consecutive_availability_failures.fetch_add(1, Ordering::Relaxed) + 1;
-                if count >= 5 {
-                    progress.suspend(|| {
-                        eprintln!(
-                            "[FATAL] {} consecutive timeouts, shutting down gracefully...",
-                            count
-                        );
-                    });
-                    cancel.store(true, Ordering::Relaxed);
-                    return Err(ApiError::Timeout);
-                }
+            Err(ApiError::Timeout(message)) => {
+                let elapsed = request_started.elapsed();
+                telemetry.record_timeout(elapsed.as_millis().min(u64::MAX as u128) as u64);
                 retries += 1;
                 if retries > MAX_RETRIES {
-                    return Err(ApiError::Timeout);
+                    let count =
+                        consecutive_exhausted_candidates.fetch_add(1, Ordering::Relaxed) + 1;
+                    progress.suspend(|| {
+                        eprintln!(
+                            "[TIMEOUT] candidate exhausted {MAX_RETRIES} retries ({count}/{availability_failure_threshold} consecutive exhausted candidates)"
+                        );
+                    });
+                    if count >= availability_failure_threshold {
+                        progress.suspend(|| {
+                            eprintln!(
+                                "[FATAL] {count} consecutive candidates exhausted their timeout retry budgets; shutting down gracefully..."
+                            );
+                        });
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                    return Err(ApiError::Timeout(message));
                 }
                 telemetry.record_retry();
                 let wait = 2u64.pow(retries).min(30);
+                let source = timeout_source_hint(elapsed, request_timeout_seconds);
                 progress.suspend(|| {
                     eprintln!(
-                        "[TIMEOUT] request timed out, waiting {}s (retry {}/{}, {} consecutive)",
-                        wait, retries, MAX_RETRIES, count
+                        "[TIMEOUT] generation request ended after {:.1}s ({source}; Taskgen limit {request_timeout_seconds}s): {}. Waiting {wait}s (retry {retries}/{MAX_RETRIES})",
+                        elapsed.as_secs_f64(),
+                        truncate_body(&message, 300),
                     );
                 });
                 tokio::time::sleep(tokio::time::Duration::from_secs(wait)).await;
@@ -1797,25 +1836,30 @@ async fn generate_task(
                 telemetry.record_error(
                     request_started.elapsed().as_millis().min(u64::MAX as u128) as u64
                 );
-                let count = consecutive_availability_failures.fetch_add(1, Ordering::Relaxed) + 1;
-                if count >= 5 {
-                    progress.suspend(|| {
-                        eprintln!(
-                            "[FATAL] {count} consecutive transport failures, shutting down gracefully: {message}"
-                        );
-                    });
-                    cancel.store(true, Ordering::Relaxed);
-                    return Err(ApiError::Transport(message));
-                }
                 retries += 1;
                 if retries > MAX_RETRIES {
+                    let count =
+                        consecutive_exhausted_candidates.fetch_add(1, Ordering::Relaxed) + 1;
+                    progress.suspend(|| {
+                        eprintln!(
+                            "[TRANSPORT] candidate exhausted {MAX_RETRIES} retries ({count}/{availability_failure_threshold} consecutive exhausted candidates): {message}"
+                        );
+                    });
+                    if count >= availability_failure_threshold {
+                        progress.suspend(|| {
+                            eprintln!(
+                                "[FATAL] {count} consecutive candidates exhausted their transport retry budgets; shutting down gracefully..."
+                            );
+                        });
+                        cancel.store(true, Ordering::Relaxed);
+                    }
                     return Err(ApiError::Transport(message));
                 }
                 telemetry.record_retry();
                 let wait = 2u64.pow(retries).min(30);
                 progress.suspend(|| {
                     eprintln!(
-                        "[TRANSPORT] request failed, waiting {wait}s (retry {retries}/{MAX_RETRIES}, {count} consecutive): {message}"
+                        "[TRANSPORT] request failed, waiting {wait}s (retry {retries}/{MAX_RETRIES}): {message}"
                     );
                 });
                 tokio::time::sleep(tokio::time::Duration::from_secs(wait)).await;
@@ -3131,10 +3175,8 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         model: args.model.clone(),
         credentials: generation_credentials,
     };
-    let request_timeout_seconds = effective_request_timeout_seconds(
-        &generation_provider.model,
-        args.request_timeout_seconds,
-    );
+    let request_timeout_seconds =
+        effective_request_timeout_seconds(&generation_provider.model, args.request_timeout_seconds);
     let review_credentials = if args.review_keyfile.is_some() || args.review_api_key.is_some() {
         Some(provider::load_credential_pool(
             args.review_keyfile.as_deref(),
@@ -3259,7 +3301,9 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     let dist = Arc::new(dist);
     let diff_dist = Arc::new(diff_dist);
     let progress_style = ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} | {msg}")?
+        .template(
+            "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] accepted {pos}/{len} | {msg}",
+        )?
         .progress_chars("##-");
 
     let run_id = format!("{:08x}", rand::random::<u32>());
@@ -3312,9 +3356,10 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     let cancel = Arc::new(AtomicBool::new(false));
     let signal_reason = Arc::new(std::sync::Mutex::new(None));
     let shutdown_listener = spawn_shutdown_listener(cancel.clone(), signal_reason.clone());
-    let consecutive_availability_failures = Arc::new(AtomicUsize::new(0));
+    let consecutive_exhausted_candidates = Arc::new(AtomicUsize::new(0));
     let pb = ProgressBar::new(args.count as u64);
     pb.set_style(progress_style);
+    pb.enable_steady_tick(std::time::Duration::from_millis(100));
     pb.set_message("waiting for accepted prompts");
     let max_candidates = args
         .max_candidates
@@ -3421,7 +3466,8 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                 let adjudication_telemetry = adjudication_telemetry.clone();
                 let review_rate_limiter = review_rate_limiter.clone();
                 let cancel = cancel.clone();
-                let consecutive_availability_failures = consecutive_availability_failures.clone();
+                let consecutive_exhausted_candidates =
+                    consecutive_exhausted_candidates.clone();
                 let generation_permits = generation_permits.clone();
                 let review_permits = review_permits.clone();
                 let pb = pb.clone();
@@ -3435,6 +3481,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                 let max_output_tokens = args.max_output_tokens;
                 let review_token_override = args.review_max_output_tokens;
                 let max_repairs_per_coordinate = args.max_repairs_per_coordinate;
+                let availability_failure_threshold = args.workers.max(1);
                 async move {
                     // Work for a large wave is sampled up front but dispatched
                     // lazily through buffer_unordered. Do not count or emit one
@@ -3460,6 +3507,8 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                             .acquire()
                             .await
                             .map_err(|_| anyhow::anyhow!("generation pipeline cancelled"))?;
+                        let in_flight = InFlightGuard::enter(&stats.generation_in_flight);
+                        update_live_progress(&pb, &stats, "generation request running");
                         let result = generate_task(GenerateTaskRequest {
                             client,
                             api_base: generation_provider.api_base.as_str(),
@@ -3472,11 +3521,14 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                             language: work.language.as_deref(),
                             feedback: work.feedback.as_ref(),
                             cancel: &cancel,
-                            consecutive_availability_failures: &consecutive_availability_failures,
+                            consecutive_exhausted_candidates: &consecutive_exhausted_candidates,
+                            availability_failure_threshold,
+                            request_timeout_seconds,
                             progress: &pb,
                             telemetry: &generation_telemetry,
                         })
                         .await;
+                        drop(in_flight);
                         drop(_permit);
                         result
                     };
@@ -3670,15 +3722,9 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                         write_live_artifact(&artifacts, |run| {
                             run.write_accepted_line(&candidate.serialized)
                         })?;
-                        let accepted = stats.tasks.fetch_add(1, Ordering::Relaxed) + 1;
+                        stats.tasks.fetch_add(1, Ordering::Relaxed);
                         pb.inc(1);
                         update_live_progress(&pb, &stats, "accepted (review skipped)");
-                        pb.set_message(format!(
-                            "accepted {accepted} | generated {} | reviewed {} | rejected {}",
-                            stats.generated_candidates.load(Ordering::Relaxed),
-                            stats.reviewed_candidates.load(Ordering::Relaxed),
-                            stats.errors.load(Ordering::Relaxed)
-                        ));
                         return Ok(None);
                     }
 
@@ -3714,12 +3760,15 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                             .acquire()
                             .await
                             .map_err(|_| anyhow::anyhow!("review pipeline cancelled"))?;
+                        let in_flight = InFlightGuard::enter(&stats.review_in_flight);
+                        update_live_progress(&pb, &stats, "review request running");
                         let result = evaluate_candidate(
                             &candidate.entry,
                             candidate.deterministic_checks.clone(),
                             context,
                         )
                         .await;
+                        drop(in_flight);
                         drop(_permit);
                         result
                     };
@@ -3858,14 +3907,9 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                         Ok(())
                     })?;
                     if accepted {
-                        let accepted_count = stats.tasks.fetch_add(1, Ordering::Relaxed) + 1;
+                        stats.tasks.fetch_add(1, Ordering::Relaxed);
                         pb.inc(1);
-                        pb.set_message(format!(
-                            "accepted {accepted_count} | generated {} | reviewed {} | rejected {}",
-                            stats.generated_candidates.load(Ordering::Relaxed),
-                            stats.reviewed_candidates.load(Ordering::Relaxed),
-                            stats.errors.load(Ordering::Relaxed)
-                        ));
+                        update_live_progress(&pb, &stats, "accepted");
                     } else {
                         stats.errors.fetch_add(1, Ordering::Relaxed);
                         update_live_progress(&pb, &stats, "review rejected");
@@ -4092,6 +4136,22 @@ mod tests {
         assert!(!is_transient_http_status(reqwest::StatusCode::UNAUTHORIZED));
     }
 
+    #[test]
+    fn timeout_diagnostic_distinguishes_client_and_upstream_deadlines() {
+        assert!(timeout_source_hint(std::time::Duration::from_secs(120), 600).contains("upstream"));
+        assert!(timeout_source_hint(std::time::Duration::from_secs(600), 600).contains("Taskgen"));
+    }
+
+    #[test]
+    fn in_flight_guard_tracks_and_releases_active_work() {
+        let counter = AtomicUsize::new(0);
+        {
+            let _guard = InFlightGuard::enter(&counter);
+            assert_eq!(counter.load(Ordering::Relaxed), 1);
+        }
+        assert_eq!(counter.load(Ordering::Relaxed), 0);
+    }
+
     #[tokio::test]
     async fn connection_failures_are_retryable_transport_errors() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -4234,10 +4294,7 @@ mod tests {
             effective_request_timeout_seconds("scogoai/gpt-5.6-luna-max", None),
             600
         );
-        assert_eq!(
-            effective_request_timeout_seconds("gpt-4o-mini", None),
-            120
-        );
+        assert_eq!(effective_request_timeout_seconds("gpt-4o-mini", None), 120);
         assert_eq!(
             effective_request_timeout_seconds("scogoai/gpt-5.6-luna-max", Some(45)),
             45
