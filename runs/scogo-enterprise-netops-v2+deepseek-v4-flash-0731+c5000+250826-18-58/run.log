@@ -24510,3 +24510,132 @@
 2026-08-25T21:20:22.863Z INFO   review_complete              candidate_id=27bbe564157df3990f5d0c49cd1edc9c86cc50bf8365fba184db867ee863e2e5 sequence=2988 wave=1 outcome=Accept adjudicated=false
 2026-08-25T21:20:22.863Z INFO   candidate_accepted           candidate_id=27bbe564157df3990f5d0c49cd1edc9c86cc50bf8365fba184db867ee863e2e5 sequence=2988 wave=1 accepted=1541/5000
 2026-08-25T21:20:22.863Z DEBUG  generation_start             sequence=2998 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="firewall_network_security" subdomain="snat_dnat" difficulty=5 repair_count=0 language="en"
+2026-08-25T21:20:24.187Z INFO   generation_complete          sequence=2991 wave=1 candidate_id=868ed2ce395fad2e4310b8de1882ca874b455bda50e374f0255665b405c3ccf2 model="deepseek-v4-flash-0731" prompt_characters=3084
+2026-08-25T21:20:24.188Z DEBUG  review_start                 candidate_id=868ed2ce395fad2e4310b8de1882ca874b455bda50e374f0255665b405c3ccf2 sequence=2991 wave=1 model="qwen38-nvfp4"
+2026-08-25T21:20:24.188Z DEBUG  review_request_start         candidate_id=868ed2ce395fad2e4310b8de1882ca874b455bda50e374f0255665b405c3ccf2 sequence=2991 wave=1 model=qwen38-nvfp4
+2026-08-25T21:20:25.053Z DEBUG  heartbeat                    status=running; the last non-heartbeat event is the current pipeline step
+2026-08-25T21:20:25.483Z INFO   generation_complete          sequence=2992 wave=1 candidate_id=05bafc328602ee1ec46f480915758c8c5a38a8aa4602b10740afb49fc390284f model="deepseek-v4-flash-0731" prompt_characters=2818
+2026-08-25T21:20:25.484Z DEBUG  review_start                 candidate_id=05bafc328602ee1ec46f480915758c8c5a38a8aa4602b10740afb49fc390284f sequence=2992 wave=1 model="qwen38-nvfp4"
+2026-08-25T21:20:25.484Z DEBUG  review_request_start         candidate_id=05bafc328602ee1ec46f480915758c8c5a38a8aa4602b10740afb49fc390284f sequence=2992 wave=1 model=qwen38-nvfp4
+2026-08-25T21:20:28.259Z INFO   review_decision              candidate_id=1709eb962f7cad15a390b9c8fba1ab6b07f5d1a03257eb8762c54473e90b7232 sequence=2989 wave=1 outcome=NeedsVerification claims_to_verify=1
+2026-08-25T21:20:28.259Z INFO   adjudication_start           candidate_id=1709eb962f7cad15a390b9c8fba1ab6b07f5d1a03257eb8762c54473e90b7232 sequence=2989 wave=1 claims=1 references=0 model=qwen38-nvfp4
+2026-08-25T21:20:36.631Z INFO   adjudication_complete        candidate_id=1709eb962f7cad15a390b9c8fba1ab6b07f5d1a03257eb8762c54473e90b7232 sequence=2989 wave=1 outcome=Reject
+2026-08-25T21:20:36.631Z INFO   review_complete              candidate_id=1709eb962f7cad15a390b9c8fba1ab6b07f5d1a03257eb8762c54473e90b7232 sequence=2989 wave=1 outcome=NeedsVerification adjudicated=true
+2026-08-25T21:20:36.631Z WARN   candidate_rejected           candidate_id=1709eb962f7cad15a390b9c8fba1ab6b07f5d1a03257eb8762c54473e90b7232 sequence=2989 wave=1 stage=model_review disposition=verification_rejected
+2026-08-25T21:20:36.631Z DEBUG  generation_start             sequence=2999 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="sdn_network_virtualization" subdomain="controller_state_reconciliation" difficulty=10 repair_count=0 language="en"
+2026-08-25T21:20:37.685Z INFO   review_decision              candidate_id=0c894ec5e54fa28d90c7733202c0ac7de43f3a1f7974cf9c74d155afc379fafe sequence=2990 wave=1 outcome=Accept claims_to_verify=0
+2026-08-25T21:20:37.685Z INFO   review_complete              candidate_id=0c894ec5e54fa28d90c7733202c0ac7de43f3a1f7974cf9c74d155afc379fafe sequence=2990 wave=1 outcome=Accept adjudicated=false
+2026-08-25T21:20:37.685Z INFO   candidate_accepted           candidate_id=0c894ec5e54fa28d90c7733202c0ac7de43f3a1f7974cf9c74d155afc379fafe sequence=2990 wave=1 accepted=1542/5000
+2026-08-25T21:20:37.685Z DEBUG  generation_start             sequence=3000 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="network_services" subdomain="radius_tacacs" difficulty=5 repair_count=0 language="en"
+2026-08-25T21:20:37.726Z INFO   generation_complete          sequence=2993 wave=1 candidate_id=0f3f977b39b7bd618d3006c10cb62f624777a841740ceeac80652cac6bce0ec5 model="deepseek-v4-flash-0731" prompt_characters=2318
+2026-08-25T21:20:37.727Z DEBUG  review_start                 candidate_id=0f3f977b39b7bd618d3006c10cb62f624777a841740ceeac80652cac6bce0ec5 sequence=2993 wave=1 model="qwen38-nvfp4"
+2026-08-25T21:20:37.727Z DEBUG  review_request_start         candidate_id=0f3f977b39b7bd618d3006c10cb62f624777a841740ceeac80652cac6bce0ec5 sequence=2993 wave=1 model=qwen38-nvfp4
+2026-08-25T21:20:42.104Z INFO   generation_complete          sequence=2994 wave=1 candidate_id=c6b78545cc63aa3f0b38892e7dd43c5f61db541bdf95b08026f203411a61d1b5 model="deepseek-v4-flash-0731" prompt_characters=2433
+2026-08-25T21:20:42.105Z DEBUG  review_start                 candidate_id=c6b78545cc63aa3f0b38892e7dd43c5f61db541bdf95b08026f203411a61d1b5 sequence=2994 wave=1 model="qwen38-nvfp4"
+2026-08-25T21:20:42.105Z DEBUG  review_request_start         candidate_id=c6b78545cc63aa3f0b38892e7dd43c5f61db541bdf95b08026f203411a61d1b5 sequence=2994 wave=1 model=qwen38-nvfp4
+2026-08-25T21:20:48.329Z INFO   generation_complete          sequence=2995 wave=1 candidate_id=a124a7fc6c9cb52fbe1aec03fa70ed0d459a5200cf6eac2ba001aa2966ab39d2 model="deepseek-v4-flash-0731" prompt_characters=2144
+2026-08-25T21:20:48.330Z DEBUG  review_start                 candidate_id=a124a7fc6c9cb52fbe1aec03fa70ed0d459a5200cf6eac2ba001aa2966ab39d2 sequence=2995 wave=1 model="qwen38-nvfp4"
+2026-08-25T21:20:48.330Z DEBUG  review_request_start         candidate_id=a124a7fc6c9cb52fbe1aec03fa70ed0d459a5200cf6eac2ba001aa2966ab39d2 sequence=2995 wave=1 model=qwen38-nvfp4
+2026-08-25T21:20:52.903Z INFO   review_decision              candidate_id=05bafc328602ee1ec46f480915758c8c5a38a8aa4602b10740afb49fc390284f sequence=2992 wave=1 outcome=Accept claims_to_verify=0
+2026-08-25T21:20:52.903Z INFO   review_complete              candidate_id=05bafc328602ee1ec46f480915758c8c5a38a8aa4602b10740afb49fc390284f sequence=2992 wave=1 outcome=Accept adjudicated=false
+2026-08-25T21:20:52.904Z INFO   candidate_accepted           candidate_id=05bafc328602ee1ec46f480915758c8c5a38a8aa4602b10740afb49fc390284f sequence=2992 wave=1 accepted=1543/5000
+2026-08-25T21:20:52.904Z DEBUG  generation_start             sequence=3001 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="network_services" subdomain="proxy_pac" difficulty=6 repair_count=0 language="en"
+2026-08-25T21:20:55.053Z DEBUG  heartbeat                    status=running; the last non-heartbeat event is the current pipeline step
+2026-08-25T21:21:00.339Z INFO   review_decision              candidate_id=868ed2ce395fad2e4310b8de1882ca874b455bda50e374f0255665b405c3ccf2 sequence=2991 wave=1 outcome=Accept claims_to_verify=0
+2026-08-25T21:21:00.339Z INFO   review_complete              candidate_id=868ed2ce395fad2e4310b8de1882ca874b455bda50e374f0255665b405c3ccf2 sequence=2991 wave=1 outcome=Accept adjudicated=false
+2026-08-25T21:21:00.339Z INFO   candidate_accepted           candidate_id=868ed2ce395fad2e4310b8de1882ca874b455bda50e374f0255665b405c3ccf2 sequence=2991 wave=1 accepted=1544/5000
+2026-08-25T21:21:00.339Z DEBUG  generation_start             sequence=3002 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="firewall_network_security" subdomain="policy_hit_counts" difficulty=6 repair_count=0 language="en"
+2026-08-25T21:21:04.802Z INFO   generation_complete          sequence=2997 wave=1 candidate_id=a579e2a20307a16e65e6985f77c713adba3c7fdfa98c34e445fd95278c1857de model="deepseek-v4-flash-0731" prompt_characters=2115
+2026-08-25T21:21:04.803Z DEBUG  review_start                 candidate_id=a579e2a20307a16e65e6985f77c713adba3c7fdfa98c34e445fd95278c1857de sequence=2997 wave=1 model="qwen38-nvfp4"
+2026-08-25T21:21:04.803Z DEBUG  review_request_start         candidate_id=a579e2a20307a16e65e6985f77c713adba3c7fdfa98c34e445fd95278c1857de sequence=2997 wave=1 model=qwen38-nvfp4
+2026-08-25T21:21:06.911Z INFO   review_decision              candidate_id=0f3f977b39b7bd618d3006c10cb62f624777a841740ceeac80652cac6bce0ec5 sequence=2993 wave=1 outcome=NeedsVerification claims_to_verify=1
+2026-08-25T21:21:06.911Z INFO   adjudication_start           candidate_id=0f3f977b39b7bd618d3006c10cb62f624777a841740ceeac80652cac6bce0ec5 sequence=2993 wave=1 claims=1 references=0 model=qwen38-nvfp4
+2026-08-25T21:21:08.153Z INFO   generation_complete          sequence=2998 wave=1 candidate_id=cc4cb85d3d78931164f3479ebe7311693bf0dcc4648e0912d94f069ccb12b378 model="deepseek-v4-flash-0731" prompt_characters=1970
+2026-08-25T21:21:08.153Z DEBUG  review_start                 candidate_id=cc4cb85d3d78931164f3479ebe7311693bf0dcc4648e0912d94f069ccb12b378 sequence=2998 wave=1 model="qwen38-nvfp4"
+2026-08-25T21:21:08.153Z DEBUG  review_request_start         candidate_id=cc4cb85d3d78931164f3479ebe7311693bf0dcc4648e0912d94f069ccb12b378 sequence=2998 wave=1 model=qwen38-nvfp4
+2026-08-25T21:21:13.885Z INFO   review_decision              candidate_id=c6b78545cc63aa3f0b38892e7dd43c5f61db541bdf95b08026f203411a61d1b5 sequence=2994 wave=1 outcome=Accept claims_to_verify=0
+2026-08-25T21:21:13.885Z INFO   review_complete              candidate_id=c6b78545cc63aa3f0b38892e7dd43c5f61db541bdf95b08026f203411a61d1b5 sequence=2994 wave=1 outcome=Accept adjudicated=false
+2026-08-25T21:21:13.886Z INFO   candidate_accepted           candidate_id=c6b78545cc63aa3f0b38892e7dd43c5f61db541bdf95b08026f203411a61d1b5 sequence=2994 wave=1 accepted=1545/5000
+2026-08-25T21:21:13.886Z DEBUG  generation_start             sequence=3003 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="nac_zero_trust" subdomain="eap_methods" difficulty=5 repair_count=0 language="en"
+2026-08-25T21:21:14.838Z INFO   adjudication_complete        candidate_id=0f3f977b39b7bd618d3006c10cb62f624777a841740ceeac80652cac6bce0ec5 sequence=2993 wave=1 outcome=Reject
+2026-08-25T21:21:14.838Z INFO   review_complete              candidate_id=0f3f977b39b7bd618d3006c10cb62f624777a841740ceeac80652cac6bce0ec5 sequence=2993 wave=1 outcome=NeedsVerification adjudicated=true
+2026-08-25T21:21:14.838Z WARN   candidate_rejected           candidate_id=0f3f977b39b7bd618d3006c10cb62f624777a841740ceeac80652cac6bce0ec5 sequence=2993 wave=1 stage=model_review disposition=verification_rejected
+2026-08-25T21:21:14.838Z DEBUG  generation_start             sequence=3004 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="sdwan" subdomain="segmentation_vrf" difficulty=7 repair_count=0 language="en"
+2026-08-25T21:21:17.337Z INFO   review_decision              candidate_id=a124a7fc6c9cb52fbe1aec03fa70ed0d459a5200cf6eac2ba001aa2966ab39d2 sequence=2995 wave=1 outcome=Accept claims_to_verify=0
+2026-08-25T21:21:17.337Z INFO   review_complete              candidate_id=a124a7fc6c9cb52fbe1aec03fa70ed0d459a5200cf6eac2ba001aa2966ab39d2 sequence=2995 wave=1 outcome=Accept adjudicated=false
+2026-08-25T21:21:17.338Z INFO   candidate_accepted           candidate_id=a124a7fc6c9cb52fbe1aec03fa70ed0d459a5200cf6eac2ba001aa2966ab39d2 sequence=2995 wave=1 accepted=1546/5000
+2026-08-25T21:21:17.338Z DEBUG  generation_start             sequence=3005 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="firewall_network_security" subdomain="geo_ip_reputation" difficulty=6 repair_count=0 language="en"
+2026-08-25T21:21:18.033Z INFO   generation_complete          sequence=2996 wave=1 candidate_id=47828c0d17387c9af3cf3a378e32d29ef3652ebe684db3bfccbc778708c8d406 model="deepseek-v4-flash-0731" prompt_characters=3033
+2026-08-25T21:21:18.034Z DEBUG  review_start                 candidate_id=47828c0d17387c9af3cf3a378e32d29ef3652ebe684db3bfccbc778708c8d406 sequence=2996 wave=1 model="qwen38-nvfp4"
+2026-08-25T21:21:18.034Z DEBUG  review_request_start         candidate_id=47828c0d17387c9af3cf3a378e32d29ef3652ebe684db3bfccbc778708c8d406 sequence=2996 wave=1 model=qwen38-nvfp4
+2026-08-25T21:21:24.715Z INFO   generation_complete          sequence=3000 wave=1 candidate_id=9ea344869b68ebf31d19c37a9684fab7428162ac75e18da31067213ebaef7a55 model="deepseek-v4-flash-0731" prompt_characters=2500
+2026-08-25T21:21:24.715Z DEBUG  review_start                 candidate_id=9ea344869b68ebf31d19c37a9684fab7428162ac75e18da31067213ebaef7a55 sequence=3000 wave=1 model="qwen38-nvfp4"
+2026-08-25T21:21:24.715Z DEBUG  review_request_start         candidate_id=9ea344869b68ebf31d19c37a9684fab7428162ac75e18da31067213ebaef7a55 sequence=3000 wave=1 model=qwen38-nvfp4
+2026-08-25T21:21:25.053Z DEBUG  heartbeat                    status=running; the last non-heartbeat event is the current pipeline step
+2026-08-25T21:21:26.628Z INFO   generation_complete          sequence=2999 wave=1 candidate_id=46d21c600d25840d8b7a72c9963d23a0ddf321f40bf0a3c5aaadacec87ea8bf6 model="deepseek-v4-flash-0731" prompt_characters=2862
+2026-08-25T21:21:26.629Z DEBUG  review_start                 candidate_id=46d21c600d25840d8b7a72c9963d23a0ddf321f40bf0a3c5aaadacec87ea8bf6 sequence=2999 wave=1 model="qwen38-nvfp4"
+2026-08-25T21:21:26.629Z DEBUG  review_request_start         candidate_id=46d21c600d25840d8b7a72c9963d23a0ddf321f40bf0a3c5aaadacec87ea8bf6 sequence=2999 wave=1 model=qwen38-nvfp4
+2026-08-25T21:21:34.283Z INFO   review_decision              candidate_id=cc4cb85d3d78931164f3479ebe7311693bf0dcc4648e0912d94f069ccb12b378 sequence=2998 wave=1 outcome=Accept claims_to_verify=0
+2026-08-25T21:21:34.283Z INFO   review_complete              candidate_id=cc4cb85d3d78931164f3479ebe7311693bf0dcc4648e0912d94f069ccb12b378 sequence=2998 wave=1 outcome=Accept adjudicated=false
+2026-08-25T21:21:34.283Z INFO   candidate_accepted           candidate_id=cc4cb85d3d78931164f3479ebe7311693bf0dcc4648e0912d94f069ccb12b378 sequence=2998 wave=1 accepted=1547/5000
+2026-08-25T21:21:34.283Z DEBUG  generation_start             sequence=3006 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="vpn_remote_access" subdomain="phase1_phase2_selectors" difficulty=9 repair_count=0 language="en"
+2026-08-25T21:21:34.557Z INFO   review_decision              candidate_id=a579e2a20307a16e65e6985f77c713adba3c7fdfa98c34e445fd95278c1857de sequence=2997 wave=1 outcome=NeedsVerification claims_to_verify=1
+2026-08-25T21:21:34.557Z INFO   adjudication_start           candidate_id=a579e2a20307a16e65e6985f77c713adba3c7fdfa98c34e445fd95278c1857de sequence=2997 wave=1 claims=1 references=0 model=qwen38-nvfp4
+2026-08-25T21:21:42.117Z INFO   adjudication_complete        candidate_id=a579e2a20307a16e65e6985f77c713adba3c7fdfa98c34e445fd95278c1857de sequence=2997 wave=1 outcome=Reject
+2026-08-25T21:21:42.118Z INFO   review_complete              candidate_id=a579e2a20307a16e65e6985f77c713adba3c7fdfa98c34e445fd95278c1857de sequence=2997 wave=1 outcome=NeedsVerification adjudicated=true
+2026-08-25T21:21:42.118Z WARN   candidate_rejected           candidate_id=a579e2a20307a16e65e6985f77c713adba3c7fdfa98c34e445fd95278c1857de sequence=2997 wave=1 stage=model_review disposition=verification_rejected
+2026-08-25T21:21:42.118Z DEBUG  generation_start             sequence=3007 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="layer2_switching" subdomain="dhcp_snooping" difficulty=6 repair_count=0 language="en"
+2026-08-25T21:21:48.165Z INFO   generation_complete          sequence=3001 wave=1 candidate_id=f1c80a21da66f0b7b03f0ccbf7ec12206c6f888c0715c3c7308d248d0eef2825 model="deepseek-v4-flash-0731" prompt_characters=2618
+2026-08-25T21:21:48.166Z DEBUG  review_start                 candidate_id=f1c80a21da66f0b7b03f0ccbf7ec12206c6f888c0715c3c7308d248d0eef2825 sequence=3001 wave=1 model="qwen38-nvfp4"
+2026-08-25T21:21:48.166Z DEBUG  review_request_start         candidate_id=f1c80a21da66f0b7b03f0ccbf7ec12206c6f888c0715c3c7308d248d0eef2825 sequence=3001 wave=1 model=qwen38-nvfp4
+2026-08-25T21:21:50.677Z INFO   review_decision              candidate_id=47828c0d17387c9af3cf3a378e32d29ef3652ebe684db3bfccbc778708c8d406 sequence=2996 wave=1 outcome=Accept claims_to_verify=0
+2026-08-25T21:21:50.677Z INFO   review_complete              candidate_id=47828c0d17387c9af3cf3a378e32d29ef3652ebe684db3bfccbc778708c8d406 sequence=2996 wave=1 outcome=Accept adjudicated=false
+2026-08-25T21:21:50.678Z INFO   candidate_accepted           candidate_id=47828c0d17387c9af3cf3a378e32d29ef3652ebe684db3bfccbc778708c8d406 sequence=2996 wave=1 accepted=1548/5000
+2026-08-25T21:21:50.678Z DEBUG  generation_start             sequence=3008 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="network_automation" subdomain="terraform" difficulty=4 repair_count=0 language="en"
+2026-08-25T21:21:51.597Z INFO   review_decision              candidate_id=9ea344869b68ebf31d19c37a9684fab7428162ac75e18da31067213ebaef7a55 sequence=3000 wave=1 outcome=Accept claims_to_verify=0
+2026-08-25T21:21:51.597Z INFO   review_complete              candidate_id=9ea344869b68ebf31d19c37a9684fab7428162ac75e18da31067213ebaef7a55 sequence=3000 wave=1 outcome=Accept adjudicated=false
+2026-08-25T21:21:51.598Z INFO   candidate_accepted           candidate_id=9ea344869b68ebf31d19c37a9684fab7428162ac75e18da31067213ebaef7a55 sequence=3000 wave=1 accepted=1549/5000
+2026-08-25T21:21:51.598Z DEBUG  generation_start             sequence=3009 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="layer2_switching" subdomain="qinq" difficulty=5 repair_count=0 language="en"
+2026-08-25T21:21:51.900Z INFO   generation_complete          sequence=3002 wave=1 candidate_id=1cbfcd41bf5d0889215d329cfb313b0580bf38b637105782af0f09dc7c4cdd4c model="deepseek-v4-flash-0731" prompt_characters=2383
+2026-08-25T21:21:51.901Z DEBUG  review_start                 candidate_id=1cbfcd41bf5d0889215d329cfb313b0580bf38b637105782af0f09dc7c4cdd4c sequence=3002 wave=1 model="qwen38-nvfp4"
+2026-08-25T21:21:51.901Z DEBUG  review_request_start         candidate_id=1cbfcd41bf5d0889215d329cfb313b0580bf38b637105782af0f09dc7c4cdd4c sequence=3002 wave=1 model=qwen38-nvfp4
+2026-08-25T21:21:54.336Z INFO   review_decision              candidate_id=46d21c600d25840d8b7a72c9963d23a0ddf321f40bf0a3c5aaadacec87ea8bf6 sequence=2999 wave=1 outcome=Accept claims_to_verify=0
+2026-08-25T21:21:54.337Z INFO   review_complete              candidate_id=46d21c600d25840d8b7a72c9963d23a0ddf321f40bf0a3c5aaadacec87ea8bf6 sequence=2999 wave=1 outcome=Accept adjudicated=false
+2026-08-25T21:21:54.337Z INFO   candidate_accepted           candidate_id=46d21c600d25840d8b7a72c9963d23a0ddf321f40bf0a3c5aaadacec87ea8bf6 sequence=2999 wave=1 accepted=1550/5000
+2026-08-25T21:21:54.337Z DEBUG  generation_start             sequence=3010 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="layer3_routing" subdomain="static_routes" difficulty=9 repair_count=0 language="en"
+2026-08-25T21:21:55.053Z DEBUG  heartbeat                    status=running; the last non-heartbeat event is the current pipeline step
+2026-08-25T21:21:57.071Z INFO   generation_complete          sequence=3003 wave=1 candidate_id=bb1c528f2345be2bedc6897731e3c89e3dbb8f56a9d344d2bc4ff004065498a4 model="deepseek-v4-flash-0731" prompt_characters=2559
+2026-08-25T21:21:57.072Z DEBUG  review_start                 candidate_id=bb1c528f2345be2bedc6897731e3c89e3dbb8f56a9d344d2bc4ff004065498a4 sequence=3003 wave=1 model="qwen38-nvfp4"
+2026-08-25T21:21:57.072Z DEBUG  review_request_start         candidate_id=bb1c528f2345be2bedc6897731e3c89e3dbb8f56a9d344d2bc4ff004065498a4 sequence=3003 wave=1 model=qwen38-nvfp4
+2026-08-25T21:22:05.583Z INFO   review_decision              candidate_id=f1c80a21da66f0b7b03f0ccbf7ec12206c6f888c0715c3c7308d248d0eef2825 sequence=3001 wave=1 outcome=Accept claims_to_verify=0
+2026-08-25T21:22:05.583Z INFO   review_complete              candidate_id=f1c80a21da66f0b7b03f0ccbf7ec12206c6f888c0715c3c7308d248d0eef2825 sequence=3001 wave=1 outcome=Accept adjudicated=false
+2026-08-25T21:22:05.584Z INFO   candidate_accepted           candidate_id=f1c80a21da66f0b7b03f0ccbf7ec12206c6f888c0715c3c7308d248d0eef2825 sequence=3001 wave=1 accepted=1551/5000
+2026-08-25T21:22:05.584Z DEBUG  generation_start             sequence=3011 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="firewall_network_security" subdomain="ips_ids" difficulty=4 repair_count=0 language="en"
+2026-08-25T21:22:07.608Z INFO   generation_complete          sequence=3005 wave=1 candidate_id=0771e649b3a38c5fd271fcba8f3df52521bfe84d3413760294d1ee99454ae646 model="deepseek-v4-flash-0731" prompt_characters=2390
+2026-08-25T21:22:07.609Z DEBUG  review_start                 candidate_id=0771e649b3a38c5fd271fcba8f3df52521bfe84d3413760294d1ee99454ae646 sequence=3005 wave=1 model="qwen38-nvfp4"
+2026-08-25T21:22:07.609Z DEBUG  review_request_start         candidate_id=0771e649b3a38c5fd271fcba8f3df52521bfe84d3413760294d1ee99454ae646 sequence=3005 wave=1 model=qwen38-nvfp4
+2026-08-25T21:22:10.269Z INFO   generation_complete          sequence=3004 wave=1 candidate_id=2f3b4f309ce75aa4d78ac2867b66304718a03df0793d11a4572b3fdbe0410851 model="deepseek-v4-flash-0731" prompt_characters=2529
+2026-08-25T21:22:10.270Z DEBUG  review_start                 candidate_id=2f3b4f309ce75aa4d78ac2867b66304718a03df0793d11a4572b3fdbe0410851 sequence=3004 wave=1 model="qwen38-nvfp4"
+2026-08-25T21:22:10.270Z DEBUG  review_request_start         candidate_id=2f3b4f309ce75aa4d78ac2867b66304718a03df0793d11a4572b3fdbe0410851 sequence=3004 wave=1 model=qwen38-nvfp4
+2026-08-25T21:22:15.128Z INFO   review_decision              candidate_id=1cbfcd41bf5d0889215d329cfb313b0580bf38b637105782af0f09dc7c4cdd4c sequence=3002 wave=1 outcome=Accept claims_to_verify=0
+2026-08-25T21:22:15.128Z INFO   review_complete              candidate_id=1cbfcd41bf5d0889215d329cfb313b0580bf38b637105782af0f09dc7c4cdd4c sequence=3002 wave=1 outcome=Accept adjudicated=false
+2026-08-25T21:22:15.129Z INFO   candidate_accepted           candidate_id=1cbfcd41bf5d0889215d329cfb313b0580bf38b637105782af0f09dc7c4cdd4c sequence=3002 wave=1 accepted=1552/5000
+2026-08-25T21:22:15.129Z DEBUG  generation_start             sequence=3012 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="network_performance_qos" subdomain="qos_classification_marking" difficulty=9 repair_count=0 language="en"
+2026-08-25T21:22:22.656Z INFO   review_decision              candidate_id=bb1c528f2345be2bedc6897731e3c89e3dbb8f56a9d344d2bc4ff004065498a4 sequence=3003 wave=1 outcome=Accept claims_to_verify=0
+2026-08-25T21:22:22.657Z INFO   review_complete              candidate_id=bb1c528f2345be2bedc6897731e3c89e3dbb8f56a9d344d2bc4ff004065498a4 sequence=3003 wave=1 outcome=Accept adjudicated=false
+2026-08-25T21:22:22.658Z INFO   candidate_accepted           candidate_id=bb1c528f2345be2bedc6897731e3c89e3dbb8f56a9d344d2bc4ff004065498a4 sequence=3003 wave=1 accepted=1553/5000
+2026-08-25T21:22:22.658Z DEBUG  generation_start             sequence=3013 wave=1 model="deepseek-v4-flash-0731" category="enterprise_netops" domain="network_services" subdomain="ntp_ptp" difficulty=6 repair_count=0 language="en"
+2026-08-25T21:22:25.053Z DEBUG  heartbeat                    status=running; the last non-heartbeat event is the current pipeline step
+2026-08-25T21:22:30.467Z INFO   generation_complete          sequence=3007 wave=1 candidate_id=b4e3e837ed84d94608758827aa3827ca7eb08ceba7bbc346db824dfac532cdb4 model="deepseek-v4-flash-0731" prompt_characters=2343
+2026-08-25T21:22:30.467Z DEBUG  review_start                 candidate_id=b4e3e837ed84d94608758827aa3827ca7eb08ceba7bbc346db824dfac532cdb4 sequence=3007 wave=1 model="qwen38-nvfp4"
+2026-08-25T21:22:30.467Z DEBUG  review_request_start         candidate_id=b4e3e837ed84d94608758827aa3827ca7eb08ceba7bbc346db824dfac532cdb4 sequence=3007 wave=1 model=qwen38-nvfp4
+2026-08-25T21:22:30.635Z INFO   generation_complete          sequence=3006 wave=1 candidate_id=5aea2ee0ff0d0687a12c54637df95b2d146f654d2fb2a7a3f7905604ae519378 model="deepseek-v4-flash-0731" prompt_characters=2223
+2026-08-25T21:22:30.635Z DEBUG  review_start                 candidate_id=5aea2ee0ff0d0687a12c54637df95b2d146f654d2fb2a7a3f7905604ae519378 sequence=3006 wave=1 model="qwen38-nvfp4"
+2026-08-25T21:22:30.635Z DEBUG  review_request_start         candidate_id=5aea2ee0ff0d0687a12c54637df95b2d146f654d2fb2a7a3f7905604ae519378 sequence=3006 wave=1 model=qwen38-nvfp4
+2026-08-25T21:22:34.947Z INFO   generation_complete          sequence=3008 wave=1 candidate_id=b4b20334b8b543b25d9255fc90c6a9bbc2ffd4f25e2f5ce3e43dabbcf214af5f model="deepseek-v4-flash-0731" prompt_characters=2121
+2026-08-25T21:22:34.947Z DEBUG  review_start                 candidate_id=b4b20334b8b543b25d9255fc90c6a9bbc2ffd4f25e2f5ce3e43dabbcf214af5f sequence=3008 wave=1 model="qwen38-nvfp4"
+2026-08-25T21:22:34.947Z DEBUG  review_request_start         candidate_id=b4b20334b8b543b25d9255fc90c6a9bbc2ffd4f25e2f5ce3e43dabbcf214af5f sequence=3008 wave=1 model=qwen38-nvfp4
+2026-08-25T21:22:39.890Z INFO   review_decision              candidate_id=2f3b4f309ce75aa4d78ac2867b66304718a03df0793d11a4572b3fdbe0410851 sequence=3004 wave=1 outcome=NeedsVerification claims_to_verify=2
+2026-08-25T21:22:39.890Z INFO   adjudication_start           candidate_id=2f3b4f309ce75aa4d78ac2867b66304718a03df0793d11a4572b3fdbe0410851 sequence=3004 wave=1 claims=2 references=0 model=qwen38-nvfp4
+2026-08-25T21:22:42.630Z INFO   review_decision              candidate_id=0771e649b3a38c5fd271fcba8f3df52521bfe84d3413760294d1ee99454ae646 sequence=3005 wave=1 outcome=NeedsVerification claims_to_verify=1
+2026-08-25T21:22:42.630Z INFO   adjudication_start           candidate_id=0771e649b3a38c5fd271fcba8f3df52521bfe84d3413760294d1ee99454ae646 sequence=3005 wave=1 claims=1 references=0 model=qwen38-nvfp4
