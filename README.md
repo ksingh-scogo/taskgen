@@ -156,7 +156,7 @@ Every line is flushed immediately and uses a simple UTC text format:
 ```text
 2026-08-25T08:31:04.127Z INFO   wave_start                   wave=1 queued=10 accepted=0 attempts=0 remaining_capacity=100
 2026-08-25T08:31:04.130Z DEBUG  generation_start             sequence=1 wave=1 model="gpt-5.6-luna-max" category="network" domain="routing" subdomain="bgp" difficulty=7 repair_count=0 language="en"
-2026-08-25T08:33:04.512Z WARN   generation_retry             sequence=1 wave=1 reason=timeout elapsed_seconds=120.3 taskgen_limit_seconds=600 retry=1/5 wait_seconds=2
+2026-08-25T08:31:19.512Z WARN   generation_retry             sequence=1 wave=1 reason=connect_timeout elapsed_seconds=15.0 taskgen_limit_seconds=15 retry=1/5 wait_seconds=3
 2026-08-25T08:34:10.842Z INFO   review_complete              candidate_id=... sequence=1 wave=1 outcome=Accept adjudicated=false
 2026-08-25T08:34:10.850Z INFO   candidate_accepted           candidate_id=... sequence=1 wave=1 accepted=1/10
 ```
@@ -185,6 +185,8 @@ Cumulative stage time:
   Review requests: 1.45 minutes (86.9 seconds)
   Adjudication requests: 0.00 minutes (0.0 seconds)
   Regeneration for unaccepted prompts: 0.00 minutes (0.0 seconds), candidates=0 repairs=0 fresh_replacements=0
+Requests: generation=3 retries=1 timeouts=1 connect_timeouts=1 errors=0 | review=2 retries=0 timeouts=0 connect_timeouts=0 errors=0 | adjudication=0
+Timing note: stage times are cumulative request/pipeline time and may overlap under concurrency; they are not expected to sum to wall time
 ======================================================
 ```
 
@@ -472,7 +474,7 @@ Schema, coordinate, safety, and dedup checks still run, but `reviews.jsonl` is e
 | Generation provider | `--api-base`, `--api-key`, `--keyfile`, `-m/--model` | Endpoint, credentials, and model; this guide recommends passing `--model gpt-5.6-luna-max` explicitly |
 | Volume | `-c/--count`, `--max-candidates` | Required new accepted rows; candidate ceiling defaults to `max(100, 20 × count)` |
 | Concurrency | `-w/--workers`, `--review-workers`, `--review-requests-per-minute` | Enabled by default: independent generation/review worker pools plus an optional review/adjudication rate limit |
-| Reliability | `--request-timeout-seconds`, `--max-repairs-per-coordinate` | HTTP timeout (default `120`) and revise repairs (`0` or `1`, default `1`) |
+| Reliability | `--request-timeout-seconds`, `--connect-timeout-seconds`, `--max-repairs-per-coordinate` | Whole-request timeout, TCP connection timeout, and revise repairs (`0` or `1`, default `1`) |
 | Taxonomy sampling | `--taxonomy`, `--seed`, `--distribution`, `--difficulty`, `--multilingual` | Omit `--taxonomy` for embedded IT Ops; pass a YAML for NetOps or another taxonomy; other flags control reproducible sampling |
 | Generation prompt | `--system-prompt`, `--system-prompt-file`, `-t/--temperature`, `--max-output-tokens` | Prompt and completion controls |
 | Review | `--review-model`, `--review-api-base`, `--review-api-key`, `--review-keyfile`, `--review-system-prompt`, `--review-system-prompt-file`, `--review-max-output-tokens`, `--skip-review` | Reviewer provider and policy controls |
@@ -490,6 +492,7 @@ Defaults worth knowing:
 | Generation workers | `5` |
 | Review workers | `5` |
 | Request timeout | `600` seconds for GPT-5/o-series/Luna; `120` seconds otherwise; `--request-timeout-seconds` overrides it |
+| TCP connect timeout | `15` seconds; `--connect-timeout-seconds` overrides it without changing the model-response deadline |
 | Candidate ceiling | `max(100, 20 × count)` |
 | Temperature | `0.9` |
 | Reviewer endpoint/model/key | Inherit generation settings when the endpoint is unchanged |
@@ -517,6 +520,7 @@ Concurrency is **on by default**; there is no enable switch.
 - `--review-workers` is the maximum number of candidate review pipelines processed concurrently. A `needs_verification` adjudication stays within that candidate's review pipeline. Its default is `5`.
 - Generation and review overlap. As soon as a generated candidate is persisted to `candidates.jsonl`, it can enter review while later generation requests continue. With both defaults, Taskgen can have up to 5 generation items and 5 review pipelines in flight at the same time.
 - `--review-requests-per-minute` is optional and is **not** a worker count. It limits the combined rate of review and adjudication HTTP requests, including retries and structured-output fallback requests. It does not limit generation requests.
+- TCP connection establishment has its own 15-second default deadline. A connect timeout means no HTTP request reached the model endpoint; Taskgen retries it automatically with jittered exponential backoff so concurrent workers do not reconnect in lockstep.
 
 For one local GPU serving both generation and review, start conservatively:
 
@@ -787,7 +791,7 @@ Example accepted task-v2 record:
 |---|---|
 | `generation API key is required` | Set `OPENAI_API_KEY`, pass `--api-key`, or use `--keyfile`; local servers still need a non-empty placeholder such as `none` |
 | Reviewer endpoint differs from generation endpoint | Add `--review-api-key` or `--review-keyfile` |
-| A `[TIMEOUT]` line appears but the run continues | This is a retryable request failure, not a terminal run failure. Taskgen reports whether it reached its own deadline or ended earlier upstream, then retries with backoff. The run fails only after active candidates exhaust their retry budgets. |
+| A `[TIMEOUT]` line appears but the run continues | This is a retryable failure, not a terminal run failure. `connect_timeout` means TCP connection establishment failed before reaching the model; `request_timeout` means an established request exceeded its deadline. Taskgen retries with jittered backoff and fails only after active candidates exhaust their retry budgets. |
 | `run directory is not empty` | Choose a new `--run-dir`; Taskgen never merges into a non-empty run directory |
 | Semantic model cannot download | Pre-populate `--semantic-model-cache` or use `--dedup-mode lexical` |
 | Candidate limit exhausted | Inspect `rejected.jsonl` and `run.json`, improve the generator/reviewer setup, or raise `--max-candidates` deliberately |

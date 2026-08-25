@@ -8,6 +8,7 @@ pub struct RequestTelemetry {
     retries: AtomicU64,
     rate_limits: AtomicU64,
     timeouts: AtomicU64,
+    connect_timeouts: AtomicU64,
     errors: AtomicU64,
     total_ms: AtomicU64,
 }
@@ -18,6 +19,7 @@ pub struct RequestTelemetrySnapshot {
     pub retries: u64,
     pub rate_limits: u64,
     pub timeouts: u64,
+    pub connect_timeouts: u64,
     pub errors: u64,
     pub total_ms: u64,
 }
@@ -37,6 +39,12 @@ impl RequestTelemetry {
         self.timeouts.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn record_connect_timeout(&self, elapsed_ms: u64) {
+        self.record_request(elapsed_ms);
+        self.timeouts.fetch_add(1, Ordering::Relaxed);
+        self.connect_timeouts.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn record_error(&self, elapsed_ms: u64) {
         self.record_request(elapsed_ms);
         self.errors.fetch_add(1, Ordering::Relaxed);
@@ -52,6 +60,7 @@ impl RequestTelemetry {
             retries: self.retries.load(Ordering::Relaxed),
             rate_limits: self.rate_limits.load(Ordering::Relaxed),
             timeouts: self.timeouts.load(Ordering::Relaxed),
+            connect_timeouts: self.connect_timeouts.load(Ordering::Relaxed),
             errors: self.errors.load(Ordering::Relaxed),
             total_ms: self.total_ms.load(Ordering::Relaxed),
         }
@@ -73,16 +82,18 @@ mod tests {
         telemetry.record_success(125);
         telemetry.record_rate_limit(40);
         telemetry.record_timeout(25);
+        telemetry.record_connect_timeout(15);
         telemetry.record_error(10);
         telemetry.record_retry();
         telemetry.record_retry();
 
         let snapshot = telemetry.snapshot();
-        assert_eq!(snapshot.requests, 4);
+        assert_eq!(snapshot.requests, 5);
         assert_eq!(snapshot.retries, 2);
         assert_eq!(snapshot.rate_limits, 1);
-        assert_eq!(snapshot.timeouts, 1);
+        assert_eq!(snapshot.timeouts, 2);
+        assert_eq!(snapshot.connect_timeouts, 1);
         assert_eq!(snapshot.errors, 1);
-        assert_eq!(snapshot.total_ms, 200);
+        assert_eq!(snapshot.total_ms, 215);
     }
 }
