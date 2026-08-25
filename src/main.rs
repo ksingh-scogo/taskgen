@@ -450,6 +450,10 @@ struct GenerateArgs {
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     request_timeout_seconds: Option<u64>,
 
+    /// TCP connection-establishment timeout. Defaults to 15 seconds.
+    #[arg(long, default_value_t = 15, value_parser = clap::value_parser!(u64).range(1..))]
+    connect_timeout_seconds: u64,
+
     /// Directory containing every artifact for this run. Defaults under ./taskgen/runs using taxonomy, model, count, and local start time.
     #[arg(long)]
     run_dir: Option<PathBuf>,
@@ -1422,15 +1426,34 @@ fn load_proxies(path: &PathBuf) -> Result<Vec<reqwest::Proxy>> {
     Ok(proxies)
 }
 
-fn build_clients(proxies: &[reqwest::Proxy], timeout: std::time::Duration) -> Vec<reqwest::Client> {
+fn taskgen_http_client_builder(
+    request_timeout: std::time::Duration,
+    connect_timeout: std::time::Duration,
+    pool_size: usize,
+) -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .timeout(request_timeout)
+        .connect_timeout(connect_timeout)
+        .pool_idle_timeout(std::time::Duration::from_secs(60))
+        .pool_max_idle_per_host(pool_size.max(1))
+        .http2_keep_alive_interval(std::time::Duration::from_secs(30))
+        .http2_keep_alive_timeout(std::time::Duration::from_secs(10))
+        .http2_keep_alive_while_idle(true)
+}
+
+fn build_clients(
+    proxies: &[reqwest::Proxy],
+    request_timeout: std::time::Duration,
+    connect_timeout: std::time::Duration,
+    pool_size: usize,
+) -> Result<Vec<reqwest::Client>> {
     proxies
         .iter()
         .map(|p| {
-            reqwest::Client::builder()
+            taskgen_http_client_builder(request_timeout, connect_timeout, pool_size)
                 .proxy(p.clone())
-                .timeout(timeout)
                 .build()
-                .expect("failed to build client with proxy")
+                .context("failed to build HTTP client with proxy")
         })
         .collect()
 }
@@ -1597,9 +1620,18 @@ enum ApiError {
     CompletionTruncated(String),
     InvalidCompletion(String),
     Billing(String),
-    Timeout(String),
+    Timeout {
+        message: String,
+        phase: TimeoutPhase,
+    },
     Cancelled,
     Other(anyhow::Error),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TimeoutPhase {
+    Connect,
+    Request,
 }
 
 impl std::fmt::Display for ApiError {
@@ -1617,7 +1649,10 @@ impl std::fmt::Display for ApiError {
                 write!(f, "invalid model completion: {message}")
             }
             ApiError::Billing(msg) => write!(f, "billing error: {}", msg),
-            ApiError::Timeout(message) => write!(f, "request timed out: {message}"),
+            ApiError::Timeout { message, phase } => match phase {
+                TimeoutPhase::Connect => write!(f, "connection timed out: {message}"),
+                TimeoutPhase::Request => write!(f, "request timed out: {message}"),
+            },
             ApiError::Cancelled => write!(f, "cancelled"),
             ApiError::Other(e) => write!(f, "{}", e),
         }
@@ -1677,6 +1712,13 @@ fn timeout_source_hint(elapsed: std::time::Duration, configured_seconds: u64) ->
     }
 }
 
+fn jittered_retry_wait_seconds(retries: u32, maximum_seconds: u64) -> u64 {
+    let base = 2u64.pow(retries).min(maximum_seconds);
+    let jitter_span = (base / 2).max(1);
+    base.saturating_add(rand::random::<u64>() % (jitter_span + 1))
+        .min(maximum_seconds)
+}
+
 async fn api_request(
     client: &reqwest::Client,
     url: &str,
@@ -1696,7 +1738,14 @@ async fn api_request(
         Ok(r) => r,
         Err(e) => {
             if e.is_timeout() {
-                return Err(ApiError::Timeout(transport_error_diagnostic(&e)));
+                return Err(ApiError::Timeout {
+                    message: transport_error_diagnostic(&e),
+                    phase: if e.is_connect() {
+                        TimeoutPhase::Connect
+                    } else {
+                        TimeoutPhase::Request
+                    },
+                });
             }
             return Err(ApiError::Transport(transport_error_diagnostic(&e)));
         }
@@ -1754,6 +1803,7 @@ struct GenerateTaskRequest<'a> {
     consecutive_exhausted_candidates: &'a AtomicUsize,
     availability_failure_threshold: usize,
     request_timeout_seconds: u64,
+    connect_timeout_seconds: u64,
     progress: &'a ProgressBar,
     telemetry: &'a telemetry::RequestTelemetry,
     logger: &'a runlog::RunLogger,
@@ -1779,6 +1829,7 @@ async fn generate_task(
         consecutive_exhausted_candidates,
         availability_failure_threshold,
         request_timeout_seconds,
+        connect_timeout_seconds,
         progress,
         telemetry,
         logger,
@@ -1863,7 +1914,7 @@ async fn generate_task(
                     return Err(ApiError::RateLimit(retry_after));
                 }
                 telemetry.record_retry();
-                let wait = retry_after.unwrap_or_else(|| 2u64.pow(retries).min(60));
+                let wait = retry_after.unwrap_or_else(|| jittered_retry_wait_seconds(retries, 60));
                 progress.suspend(|| {
                     eprintln!(
                         "[RATE] 429 hit, waiting {}s (retry {}/{})",
@@ -1878,9 +1929,19 @@ async fn generate_task(
                 );
                 tokio::time::sleep(tokio::time::Duration::from_secs(wait)).await;
             }
-            Err(ApiError::Timeout(message)) => {
+            Err(ApiError::Timeout { message, phase }) => {
                 let elapsed = request_started.elapsed();
-                telemetry.record_timeout(elapsed.as_millis().min(u64::MAX as u128) as u64);
+                let reason = if phase == TimeoutPhase::Connect {
+                    "connect_timeout"
+                } else {
+                    "request_timeout"
+                };
+                let elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
+                if phase == TimeoutPhase::Connect {
+                    telemetry.record_connect_timeout(elapsed_ms);
+                } else {
+                    telemetry.record_timeout(elapsed_ms);
+                }
                 retries += 1;
                 if retries > MAX_RETRIES {
                     let count =
@@ -1893,7 +1954,7 @@ async fn generate_task(
                     logger.error(
                         "generation_retries_exhausted",
                         &format!(
-                            "sequence={candidate_sequence} wave={wave} reason=timeout exhausted_candidates={count}/{availability_failure_threshold}"
+                            "sequence={candidate_sequence} wave={wave} reason={reason} exhausted_candidates={count}/{availability_failure_threshold}"
                         ),
                     );
                     if count >= availability_failure_threshold {
@@ -1904,14 +1965,23 @@ async fn generate_task(
                         });
                         cancel.store(true, Ordering::Relaxed);
                     }
-                    return Err(ApiError::Timeout(message));
+                    return Err(ApiError::Timeout { message, phase });
                 }
                 telemetry.record_retry();
-                let wait = 2u64.pow(retries).min(30);
-                let source = timeout_source_hint(elapsed, request_timeout_seconds);
+                let wait = jittered_retry_wait_seconds(retries, 30);
+                let timeout_limit = if phase == TimeoutPhase::Connect {
+                    connect_timeout_seconds
+                } else {
+                    request_timeout_seconds
+                };
+                let source = if phase == TimeoutPhase::Connect {
+                    "TCP connection establishment"
+                } else {
+                    timeout_source_hint(elapsed, request_timeout_seconds)
+                };
                 progress.suspend(|| {
                     eprintln!(
-                        "[TIMEOUT] generation request ended after {:.1}s ({source}; Taskgen limit {request_timeout_seconds}s): {}. Waiting {wait}s (retry {retries}/{MAX_RETRIES})",
+                        "[TIMEOUT] generation {reason} after {:.1}s ({source}; Taskgen limit {timeout_limit}s): {}. Waiting {wait}s (retry {retries}/{MAX_RETRIES})",
                         elapsed.as_secs_f64(),
                         truncate_body(&message, 300),
                     );
@@ -1919,7 +1989,7 @@ async fn generate_task(
                 logger.warn(
                     "generation_retry",
                     &format!(
-                        "sequence={candidate_sequence} wave={wave} reason=timeout elapsed_seconds={:.1} taskgen_limit_seconds={request_timeout_seconds} source={} retry={retries}/{MAX_RETRIES} wait_seconds={wait} error={}",
+                        "sequence={candidate_sequence} wave={wave} reason={reason} elapsed_seconds={:.1} taskgen_limit_seconds={timeout_limit} source={} retry={retries}/{MAX_RETRIES} wait_seconds={wait} error={}",
                         elapsed.as_secs_f64(),
                         runlog::quoted(source),
                         runlog::quoted(&truncate_body(&message, 300))
@@ -1958,7 +2028,7 @@ async fn generate_task(
                     return Err(ApiError::Transport(message));
                 }
                 telemetry.record_retry();
-                let wait = 2u64.pow(retries).min(30);
+                let wait = jittered_retry_wait_seconds(retries, 30);
                 progress.suspend(|| {
                     eprintln!(
                         "[TRANSPORT] request failed, waiting {wait}s (retry {retries}/{MAX_RETRIES}): {message}"
@@ -1982,7 +2052,7 @@ async fn generate_task(
                     return Err(ApiError::Transient(status, body));
                 }
                 telemetry.record_retry();
-                let wait = 2u64.pow(retries).min(30);
+                let wait = jittered_retry_wait_seconds(retries, 30);
                 progress.suspend(|| {
                     eprintln!(
                         "[TRANSIENT] {status}, waiting {wait}s (retry {retries}/{MAX_RETRIES})"
@@ -2564,6 +2634,8 @@ fn review_log_config(
         ),
         "review_workers": args.review_workers,
         "review_requests_per_minute": args.review_requests_per_minute,
+        "request_timeout_seconds": 120,
+        "connect_timeout_seconds": 15,
         "run_dir": run_dir,
         "review_reference_dir": args.review_reference_dir,
         "adjudication_model_requested": args.adjudication_model,
@@ -2626,9 +2698,12 @@ async fn run_review(args: ReviewArgs) -> Result<()> {
     });
     let review_telemetry = Arc::new(telemetry::RequestTelemetry::default());
     let adjudication_telemetry = Arc::new(telemetry::RequestTelemetry::default());
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()?;
+    let client = taskgen_http_client_builder(
+        std::time::Duration::from_secs(120),
+        std::time::Duration::from_secs(15),
+        args.review_workers,
+    )
+    .build()?;
     let review_rate_limiter =
         review::ReviewRateLimiter::from_requests_per_minute(args.review_requests_per_minute)?;
 
@@ -2963,7 +3038,9 @@ async fn run_review(args: ReviewArgs) -> Result<()> {
         "review_errors":review_errors,
         "concurrency":{
             "review_workers":args.review_workers,
-            "review_requests_per_minute":args.review_requests_per_minute
+            "review_requests_per_minute":args.review_requests_per_minute,
+            "request_timeout_seconds":120,
+            "connect_timeout_seconds":15
         },
         "review":{"model":review_provider.model,"endpoint_origin":review_provider.api_base.origin().ascii_serialization()},
         "adjudication":{"model":adjudication_provider.model,"endpoint_origin":adjudication_provider.api_base.origin().ascii_serialization()},
@@ -3171,6 +3248,7 @@ struct GenerationReportContext<'a> {
     existing_records: usize,
     coordinate_seed: u64,
     request_timeout_seconds: u64,
+    connect_timeout_seconds: u64,
     paths: &'a artifacts::PublishedPaths,
 }
 
@@ -3315,14 +3393,16 @@ impl GenerationOperatorSummary {
                 self.replacement_generations
             ),
             format!(
-                "Requests: generation={} retries={} timeouts={} errors={} | review={} retries={} timeouts={} errors={} | adjudication={}",
+                "Requests: generation={} retries={} timeouts={} connect_timeouts={} errors={} | review={} retries={} timeouts={} connect_timeouts={} errors={} | adjudication={}",
                 self.generation_requests.requests,
                 self.generation_requests.retries,
                 self.generation_requests.timeouts,
+                self.generation_requests.connect_timeouts,
                 self.generation_requests.errors,
                 self.review_requests.requests,
                 self.review_requests.retries,
                 self.review_requests.timeouts,
+                self.review_requests.connect_timeouts,
                 self.review_requests.errors,
                 self.adjudication_requests.requests
             ),
@@ -3574,6 +3654,7 @@ fn generation_run_report(
             "review_workers": context.args.review_workers,
             "review_requests_per_minute": context.args.review_requests_per_minute,
             "request_timeout_seconds": context.request_timeout_seconds,
+            "connect_timeout_seconds": context.connect_timeout_seconds,
             "runtime": "tokio-multi-thread",
             "runtime_worker_threads": runtime_worker_threads(),
             "logical_cpus": logical_cpus,
@@ -3762,6 +3843,7 @@ fn generation_log_config(
     effective_semantic_model: dedup::SemanticModel,
     effective_seed: u64,
     request_timeout_seconds: u64,
+    connect_timeout_seconds: u64,
     max_candidates: usize,
     run_dir: &Path,
 ) -> serde_json::Value {
@@ -3802,6 +3884,8 @@ fn generation_log_config(
         "effective_max_candidates": max_candidates,
         "request_timeout_seconds": args.request_timeout_seconds,
         "effective_request_timeout_seconds": request_timeout_seconds,
+        "connect_timeout_seconds": args.connect_timeout_seconds,
+        "effective_connect_timeout_seconds": connect_timeout_seconds,
         "run_dir": run_dir,
         "append_from": args.append_from,
         "proxies": args.proxies,
@@ -3896,6 +3980,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     };
     let request_timeout_seconds =
         effective_request_timeout_seconds(&generation_provider.model, args.request_timeout_seconds);
+    let connect_timeout_seconds = args.connect_timeout_seconds.min(request_timeout_seconds);
     let review_credentials = if args.review_keyfile.is_some() || args.review_api_key.is_some() {
         Some(provider::load_credential_pool(
             args.review_keyfile.as_deref(),
@@ -3970,25 +4055,41 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
 
     let dedup_index = Arc::new(std::sync::Mutex::new(dedup_index));
 
+    let request_timeout = std::time::Duration::from_secs(request_timeout_seconds);
+    let connect_timeout = std::time::Duration::from_secs(connect_timeout_seconds);
+    let connection_pool_size = args
+        .workers
+        .saturating_add(if args.skip_review {
+            0
+        } else {
+            args.review_workers
+        })
+        .max(1);
     let clients: Arc<Vec<reqwest::Client>> = Arc::new(match &args.proxies {
         Some(proxy_path) => {
             let proxies = load_proxies(proxy_path)?;
-            let timeout = std::time::Duration::from_secs(request_timeout_seconds);
             if args.rotating_proxy {
                 let index = thread_rng().gen_range(0..proxies.len());
                 vec![
-                    reqwest::Client::builder()
-                        .proxy(proxies.into_iter().nth(index).unwrap())
-                        .timeout(timeout)
-                        .build()?,
+                    taskgen_http_client_builder(
+                        request_timeout,
+                        connect_timeout,
+                        connection_pool_size,
+                    )
+                    .proxy(proxies.into_iter().nth(index).unwrap())
+                    .build()?,
                 ]
             } else {
-                build_clients(&proxies, timeout)
+                build_clients(
+                    &proxies,
+                    request_timeout,
+                    connect_timeout,
+                    connection_pool_size,
+                )?
             }
         }
         None => vec![
-            reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(request_timeout_seconds))
+            taskgen_http_client_builder(request_timeout, connect_timeout, connection_pool_size)
                 .build()?,
         ],
     });
@@ -4065,6 +4166,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             "review_workers": args.review_workers,
             "review_requests_per_minute": args.review_requests_per_minute,
             "request_timeout_seconds": request_timeout_seconds,
+            "connect_timeout_seconds": connect_timeout_seconds,
             "runtime": "tokio-multi-thread",
             "runtime_worker_threads": runtime_worker_threads(),
             "logical_cpus": std::thread::available_parallelism().map(|value| value.get()).unwrap_or(1),
@@ -4113,6 +4215,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         effective_semantic_model,
         effective_seed,
         request_timeout_seconds,
+        connect_timeout_seconds,
         max_candidates,
         &run_dir,
     ));
@@ -4354,6 +4457,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                             consecutive_exhausted_candidates: &consecutive_exhausted_candidates,
                             availability_failure_threshold,
                             request_timeout_seconds,
+                            connect_timeout_seconds,
                             progress: &pb,
                             telemetry: &generation_telemetry,
                             logger: &logger,
@@ -5041,6 +5145,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         existing_records: existing,
         coordinate_seed: effective_seed,
         request_timeout_seconds,
+        connect_timeout_seconds,
         paths: &run_paths,
     };
     if let Some(terminal_error) = terminal_error {
@@ -5251,6 +5356,23 @@ mod tests {
     fn timeout_diagnostic_distinguishes_client_and_upstream_deadlines() {
         assert!(timeout_source_hint(std::time::Duration::from_secs(120), 600).contains("upstream"));
         assert!(timeout_source_hint(std::time::Duration::from_secs(600), 600).contains("Taskgen"));
+        assert!(
+            ApiError::Timeout {
+                message: "socket deadline".into(),
+                phase: TimeoutPhase::Connect,
+            }
+            .to_string()
+            .starts_with("connection timed out")
+        );
+    }
+
+    #[test]
+    fn retry_backoff_adds_bounded_jitter() {
+        for _ in 0..100 {
+            assert!((2..=3).contains(&jittered_retry_wait_seconds(1, 30)));
+            assert!((4..=6).contains(&jittered_retry_wait_seconds(2, 30)));
+            assert_eq!(jittered_retry_wait_seconds(10, 30), 30);
+        }
     }
 
     #[test]
@@ -5450,6 +5572,29 @@ mod tests {
         };
         assert_eq!(args.review_workers, 2);
         assert_eq!(args.max_candidates, Some(40));
+    }
+
+    #[test]
+    fn generation_connect_timeout_has_a_short_default_and_override() {
+        let default = Cli::try_parse_from(["taskgen", "generate", "--api-key", "x"]).unwrap();
+        let Command::Generate(default) = default.command else {
+            panic!("expected generation command");
+        };
+        assert_eq!(default.connect_timeout_seconds, 15);
+
+        let overridden = Cli::try_parse_from([
+            "taskgen",
+            "generate",
+            "--api-key",
+            "x",
+            "--connect-timeout-seconds",
+            "7",
+        ])
+        .unwrap();
+        let Command::Generate(overridden) = overridden.command else {
+            panic!("expected generation command");
+        };
+        assert_eq!(overridden.connect_timeout_seconds, 7);
     }
 
     #[test]
@@ -6060,6 +6205,7 @@ mod tests {
             retries: 1,
             rate_limits: 0,
             timeouts: 1,
+            connect_timeouts: 1,
             errors: 0,
             total_ms: 90_000,
         };
@@ -6114,6 +6260,7 @@ mod tests {
         assert!(rendered.contains("Overall: input=135 output=246 total=381"));
         assert!(rendered.contains("Regeneration for unaccepted prompts"));
         assert!(rendered.contains("candidates=1 repairs=1 fresh_replacements=0"));
+        assert!(rendered.contains("timeouts=1 connect_timeouts=1"));
     }
 
     #[tokio::test]
@@ -6473,6 +6620,7 @@ mod tests {
             3
         );
         assert_eq!(report["concurrency"]["generation_workers"], 2);
+        assert_eq!(report["concurrency"]["connect_timeout_seconds"], 15);
         assert_eq!(report["pipeline"]["generation_review_overlap"], true);
         assert_eq!(report["pipeline"]["max_in_flight_items"], 7);
         assert_eq!(report["efficiency"]["top_up_waves"], 1);
@@ -6537,6 +6685,7 @@ mod tests {
             "count=2",
             "model=\"test-model\"",
             "workers=2",
+            "connect_timeout_seconds=15",
             "taxonomy_id=\"scogo-enterprise-netops-v2\"",
         ] {
             assert!(log.contains(config), "run log missing {config}: {log}");

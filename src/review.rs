@@ -555,7 +555,11 @@ async fn request_structured_with_format(
     let response = match response {
         Ok(response) => response,
         Err(error) if error.is_timeout() => {
-            telemetry.record_timeout(elapsed_millis(started.elapsed()));
+            if error.is_connect() {
+                telemetry.record_connect_timeout(elapsed_millis(started.elapsed()));
+            } else {
+                telemetry.record_timeout(elapsed_millis(started.elapsed()));
+            }
             return Err(ReviewAttemptError::Retryable(
                 anyhow::anyhow!(error).context(format!("{operation} request timed out")),
             ));
