@@ -32,6 +32,7 @@ pub mod review;
 pub mod schema;
 pub mod taxonomy;
 pub mod telemetry;
+pub mod upgrade;
 
 const DEFAULT_SYSTEM_PROMPT: &str = r#"Write prompts as if a competent on-call asked a question at 2am — Slack, PagerDuty, a war-room thread, or an SSH session. They might be tired or frustrated, but they're competent. They state symptoms, what they already checked, and what they're afraid of. Don't be a child. Don't be a robot. Don't write a formal runbook. Be a human who forgot to be formal.
 Good casual: "zabbix is paging every 30s on the same host, I already restarted the agent, still flapping—mute or real disk?", "canary's eating error budget and CAB's frozen till Monday, rollback or ride it?", "BGP to DR flapped twice, underlay looks fine, overlay SLA class is red"
@@ -227,6 +228,8 @@ enum Command {
     Generate(Box<GenerateArgs>),
     Review(Box<ReviewArgs>),
     Dedup(DedupArgs),
+    /// Download, verify, and install the latest official release.
+    Upgrade,
     Atif {
         #[command(subcommand)]
         command: AtifCommand,
@@ -2311,6 +2314,7 @@ async fn main() -> Result<()> {
         Command::Generate(args) => run_generate(*args).await,
         Command::Review(args) => run_review(*args).await,
         Command::Dedup(args) => run_dedup(args).await,
+        Command::Upgrade => upgrade::run().await,
         Command::Atif { command } => {
             let (direction, args) = match command {
                 AtifCommand::Export(args) => (atif::ConversionDirection::Export, args),
@@ -4556,6 +4560,13 @@ mod tests {
     }
 
     #[test]
+    fn parses_upgrade_subcommand_without_api_key() {
+        let cli = Cli::try_parse_from(["taskgen", "upgrade"])
+            .expect("upgrade command should parse without provider credentials");
+        assert!(matches!(cli.command, Command::Upgrade));
+    }
+
+    #[test]
     fn parses_atif_import_and_export_without_api_key() {
         for operation in ["import", "export"] {
             let cli = Cli::try_parse_from([
@@ -4650,6 +4661,7 @@ mod tests {
             "docs/it-ops-taxonomy.yaml",
             "docs/netops-taxonomy.yaml",
             "--system-prompt-file",
+            "taskgen upgrade",
             "taskgen atif export",
             "taskgen atif import",
             "ATIF-v1.7",

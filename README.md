@@ -28,6 +28,14 @@ sudo install -m 0755 taskgen /usr/local/bin/taskgen
 
 The release also contains `SHA256SUMS`; verify the downloaded asset before installing it. There are no prebuilt x86_64 or Windows binaries.
 
+After this first manual installation, future upgrades are one command:
+
+```bash
+sudo taskgen upgrade
+```
+
+Use `taskgen upgrade` without `sudo` when the current executable's directory is writable by your user. The command selects the matching ARM64 release asset, compares the current executable with `SHA256SUMS`, downloads only when needed, verifies SHA-256, and atomically replaces the executable.
+
 To build from source instead, install the current stable Rust toolchain and run:
 
 ```bash
@@ -187,11 +195,12 @@ Tune `--workers` and `--review-workers` independently. When one server handles b
 
 ## Command map
 
-Taskgen has **5 top-level commands**:
+Taskgen has **6 top-level commands**:
 
 ```text
 taskgen
 ├── generate
+├── upgrade
 ├── review
 ├── dedup
 ├── atif
@@ -201,22 +210,24 @@ taskgen
     └── validate
 ```
 
-`atif` and `taxonomy` are command groups. Excluding Clap's generated `help` command, there are **6 actionable command paths**:
+`atif` and `taxonomy` are command groups. Excluding Clap's generated `help` command, there are **7 actionable command paths**:
 
 | # | Command path | What it does | API calls? |
 |---:|---|---|---|
 | 1 | `taskgen generate` | Generates, validates, deduplicates, reviews, and publishes prompt seeds | Yes |
-| 2 | `taskgen review` | Replays the review/adjudication gate over existing candidates | Yes |
-| 3 | `taskgen dedup` | Deduplicates any JSONL prompt dataset | No |
-| 4 | `taskgen taxonomy validate` | Validates taxonomy structure, weights, references, and reachability | No |
-| 5 | `taskgen atif export` | Converts canonical completed audit records to ATIF-v1.7 | No |
-| 6 | `taskgen atif import` | Converts ATIF-v1.7 to canonical unverified audit records | No |
+| 2 | `taskgen upgrade` | Downloads, verifies, and installs the latest official release | GitHub only |
+| 3 | `taskgen review` | Replays the review/adjudication gate over existing candidates | Yes |
+| 4 | `taskgen dedup` | Deduplicates any JSONL prompt dataset | No |
+| 5 | `taskgen taxonomy validate` | Validates taxonomy structure, weights, references, and reachability | No |
+| 6 | `taskgen atif export` | Converts canonical completed audit records to ATIF-v1.7 | No |
+| 7 | `taskgen atif import` | Converts ATIF-v1.7 to canonical unverified audit records | No |
 
 Run these at any time to see the authoritative flags for your installed version:
 
 ```bash
 taskgen --help
 taskgen generate --help
+taskgen upgrade --help
 taskgen review --help
 taskgen dedup --help
 taskgen atif export --help
@@ -491,7 +502,32 @@ Reviewer prompts follow the same order with `--review-system-prompt*`.
 
 `--distribution` accepts comma-separated `category=weight` pairs. Every taxonomy category must appear exactly once and the weights must sum to `1.0`. `--difficulty` accepts `d1=weight,...,d10=weight` (or numeric keys); supplied weights must sum to `1.0`. For long distributions, editing the taxonomy YAML is easier and safer.
 
-## 2. `taskgen review`
+## 2. `taskgen upgrade`
+
+Use this after the first manual installation to replace the currently running Taskgen executable with the latest official GitHub release:
+
+```bash
+taskgen upgrade
+```
+
+For a binary installed under `/usr/local/bin`, the containing directory is normally writable only by root:
+
+```bash
+sudo taskgen upgrade
+```
+
+The upgrade process:
+
+1. Detects Linux ARM64 or macOS Apple Silicon and selects the corresponding release asset.
+2. Downloads the latest `SHA256SUMS` and compares it with the current executable.
+3. Stops immediately without downloading the binary when it is already current.
+4. Streams a changed release into a temporary file beside the executable, with a 128 MiB safety limit.
+5. Verifies the downloaded SHA-256 before changing the installation.
+6. Sets executable permissions and atomically replaces the old binary. A failed download or checksum mismatch leaves the current executable untouched.
+
+The command supports the same platforms as the prebuilt releases. Source-only x86_64 or Windows installations must still be updated by rebuilding. The first release containing `taskgen upgrade` must be installed manually once; all later releases can use the subcommand.
+
+## 3. `taskgen review`
 
 Use `review` to evaluate an existing candidate file with a new reviewer without regenerating prompts. It accepts either plain task-v2 JSONL records or the envelopes in a generation run's `candidates.jsonl`.
 
@@ -548,7 +584,7 @@ taskgen review \
 
 Key `review` options are `--input`, `--taxonomy`, provider/model/key flags, `--system-prompt*`, `--max-output-tokens`, `--review-workers`, `--review-requests-per-minute`, `--review-reference-dir`, adjudicator overrides, `--gold-labels`, and `--run-dir`. The review API key can come from `TASKGEN_REVIEW_API_KEY`; the adjudication key can come from `TASKGEN_ADJUDICATION_API_KEY`.
 
-## 3. `taskgen dedup`
+## 4. `taskgen dedup`
 
 Use `dedup` for an existing JSONL dataset. It does not require a taxonomy or an API key.
 
@@ -593,7 +629,7 @@ Dropped or invalid records receive `_dedup` metadata with their reason, line, sc
 
 All options are `--input`, `--output`, `--dropped`, `--report`, `--prompt-field`, `--dedup-mode`, `--jaccard-threshold`, `--semantic-threshold`, `--dedup-ngram`, `--semantic-model`, `--semantic-model-cache`, and `--overwrite`.
 
-## 4. `taskgen taxonomy validate`
+## 5. `taskgen taxonomy validate`
 
 Use this before generation whenever a taxonomy YAML has been added or edited.
 
@@ -613,7 +649,7 @@ Current bundled inventory:
 
 Every task composes category, domain, subdomain, task family, environment, platform scope, platforms, incident mechanism, evidence condition/bundle, action risk, difficulty, and presentation. The compiler rejects combinations outside the taxonomy's inherited capability set.
 
-## 5. `taskgen atif export`
+## 6. `taskgen atif export`
 
 ATIF conversion is for **completed teacher trajectories later in the pipeline**, not the prompt seeds produced directly by `generate`.
 
@@ -633,7 +669,7 @@ taskgen atif export \
   --output data/trajectories.atif.jsonl
 ```
 
-## 6. `taskgen atif import`
+## 7. `taskgen atif import`
 
 Import external ATIF-v1.7 trajectories into canonical audit records:
 
