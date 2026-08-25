@@ -163,6 +163,33 @@ Every line is flushed immediately and uses a simple UTC text format:
 
 The beginning of `run.log` records every command option plus effective defaults, provider models/endpoints, taxonomy, concurrency, seed, prompt fingerprints, dedup settings, limits, and artifact paths. API keys and keyfile contents are always redacted; inline prompt contents are represented only by character count and SHA-256.
 
+At startup, the command prints and logs the generation start time. At success or failure, it prints a final operator summary and writes the same lines as timestamped `run_summary` events in `run.log`:
+
+```text
+================ Taskgen Run Summary ================
+Status: SUCCESS
+Started: 2026-08-25T09:00:00+00:00
+Finished: 2026-08-25T09:05:31+00:00
+Overall wall time: 5.52 minutes (331.4 seconds)
+Results: requested=2 accepted=2 rejected=0 attempts=2 final_records=2 acceptance_rate=100.0% throughput=0.36 tasks/min
+Review outcomes: accept=2 revise=0 reject=0 needs_verification=0
+Recovery: top_up_waves=0 coordinate_replacements=0
+Tokens:
+  Generation: input=2837 output=13490 total=16327
+  Review: input=3981 output=2416 total=6397
+  Adjudication: input=0 output=0 total=0
+  Overall: input=6818 output=15906 total=22724
+Cumulative stage time:
+  Generation requests: 4.64 minutes (278.6 seconds)
+  Generation pipeline (requests + retry waits): 4.68 minutes (280.6 seconds)
+  Review requests: 1.45 minutes (86.9 seconds)
+  Adjudication requests: 0.00 minutes (0.0 seconds)
+  Regeneration for unaccepted prompts: 0.00 minutes (0.0 seconds), candidates=0 repairs=0 fresh_replacements=0
+======================================================
+```
+
+`run.json` retains the same machine-readable data under `operator_summary`, `timing`, and `regeneration`. Regeneration means model time spent on a reviewer-requested repair or a fresh top-up candidate after an initial prompt was not accepted. Stage times are cumulative across concurrent requests and can overlap, so they are not expected to add up to wall-clock time.
+
 Check the accepted count and terminal status:
 
 ```bash

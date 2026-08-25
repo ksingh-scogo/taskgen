@@ -1190,6 +1190,11 @@ struct AtomicStats {
     review_output_tokens: AtomicU64,
     adjudication_input_tokens: AtomicU64,
     adjudication_output_tokens: AtomicU64,
+    generation_pipeline_ms: AtomicU64,
+    regeneration_pipeline_ms: AtomicU64,
+    regeneration_candidates: AtomicUsize,
+    repair_generation_candidates: AtomicUsize,
+    replacement_generation_candidates: AtomicUsize,
     coordinate_replacements: AtomicU64,
     top_up_waves: AtomicUsize,
     review_accepts: AtomicUsize,
@@ -1214,6 +1219,11 @@ impl AtomicStats {
             review_output_tokens: AtomicU64::new(0),
             adjudication_input_tokens: AtomicU64::new(0),
             adjudication_output_tokens: AtomicU64::new(0),
+            generation_pipeline_ms: AtomicU64::new(0),
+            regeneration_pipeline_ms: AtomicU64::new(0),
+            regeneration_candidates: AtomicUsize::new(0),
+            repair_generation_candidates: AtomicUsize::new(0),
+            replacement_generation_candidates: AtomicUsize::new(0),
             coordinate_replacements: AtomicU64::new(0),
             top_up_waves: AtomicUsize::new(0),
             review_accepts: AtomicUsize::new(0),
@@ -3167,6 +3177,7 @@ struct GenerationReportContext<'a> {
 struct GenerationReportOutcome<'a> {
     status: &'a str,
     terminal_error: Option<&'a str>,
+    completed_at: chrono::DateTime<chrono::Utc>,
     elapsed: std::time::Duration,
     final_records: usize,
     accepted_distribution: &'a AcceptedDistribution,
@@ -3174,6 +3185,167 @@ struct GenerationReportOutcome<'a> {
     generation_requests: telemetry::RequestTelemetrySnapshot,
     review_requests: telemetry::RequestTelemetrySnapshot,
     adjudication_requests: telemetry::RequestTelemetrySnapshot,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct GenerationOperatorSummary {
+    status: String,
+    started_at: String,
+    completed_at: String,
+    total_run_seconds: f64,
+    total_run_minutes: f64,
+    requested_records: usize,
+    accepted_records: usize,
+    rejected_candidates: usize,
+    candidate_attempts: usize,
+    final_records: usize,
+    acceptance_rate: f64,
+    tasks_per_minute: f64,
+    review_accepts: usize,
+    review_revises: usize,
+    review_rejects: usize,
+    review_needs_verification: usize,
+    top_up_waves: usize,
+    coordinate_replacements: u64,
+    generation_input_tokens: u64,
+    generation_output_tokens: u64,
+    review_input_tokens: u64,
+    review_output_tokens: u64,
+    adjudication_input_tokens: u64,
+    adjudication_output_tokens: u64,
+    total_input_tokens: u64,
+    total_output_tokens: u64,
+    total_tokens: u64,
+    generation_request_seconds: f64,
+    generation_pipeline_seconds: f64,
+    review_request_seconds: f64,
+    adjudication_request_seconds: f64,
+    regeneration_seconds: f64,
+    regeneration_candidates: usize,
+    repair_generations: usize,
+    replacement_generations: usize,
+    generation_requests: telemetry::RequestTelemetrySnapshot,
+    review_requests: telemetry::RequestTelemetrySnapshot,
+    adjudication_requests: telemetry::RequestTelemetrySnapshot,
+    timing_note: &'static str,
+}
+
+impl GenerationOperatorSummary {
+    fn render_lines(&self) -> Vec<String> {
+        vec![
+            "================ Taskgen Run Summary ================".to_string(),
+            format!("Status: {}", self.status.to_ascii_uppercase()),
+            format!("Started: {}", self.started_at),
+            format!("Finished: {}", self.completed_at),
+            format!(
+                "Overall wall time: {:.2} minutes ({:.1} seconds)",
+                self.total_run_minutes, self.total_run_seconds
+            ),
+            format!(
+                "Results: requested={} accepted={} rejected={} attempts={} final_records={} acceptance_rate={:.1}% throughput={:.2} tasks/min",
+                self.requested_records,
+                self.accepted_records,
+                self.rejected_candidates,
+                self.candidate_attempts,
+                self.final_records,
+                self.acceptance_rate * 100.0,
+                self.tasks_per_minute
+            ),
+            format!(
+                "Review outcomes: accept={} revise={} reject={} needs_verification={}",
+                self.review_accepts,
+                self.review_revises,
+                self.review_rejects,
+                self.review_needs_verification
+            ),
+            format!(
+                "Recovery: top_up_waves={} coordinate_replacements={}",
+                self.top_up_waves, self.coordinate_replacements
+            ),
+            "Tokens:".to_string(),
+            format!(
+                "  Generation: input={} output={} total={}",
+                self.generation_input_tokens,
+                self.generation_output_tokens,
+                self.generation_input_tokens + self.generation_output_tokens
+            ),
+            format!(
+                "  Review: input={} output={} total={}",
+                self.review_input_tokens,
+                self.review_output_tokens,
+                self.review_input_tokens + self.review_output_tokens
+            ),
+            format!(
+                "  Adjudication: input={} output={} total={}",
+                self.adjudication_input_tokens,
+                self.adjudication_output_tokens,
+                self.adjudication_input_tokens + self.adjudication_output_tokens
+            ),
+            format!(
+                "  Overall: input={} output={} total={}",
+                self.total_input_tokens, self.total_output_tokens, self.total_tokens
+            ),
+            "Cumulative stage time:".to_string(),
+            format!(
+                "  Generation requests: {:.2} minutes ({:.1} seconds)",
+                self.generation_request_seconds / 60.0,
+                self.generation_request_seconds
+            ),
+            format!(
+                "  Generation pipeline (requests + retry waits): {:.2} minutes ({:.1} seconds)",
+                self.generation_pipeline_seconds / 60.0,
+                self.generation_pipeline_seconds
+            ),
+            format!(
+                "  Review requests: {:.2} minutes ({:.1} seconds)",
+                self.review_request_seconds / 60.0,
+                self.review_request_seconds
+            ),
+            format!(
+                "  Adjudication requests: {:.2} minutes ({:.1} seconds)",
+                self.adjudication_request_seconds / 60.0,
+                self.adjudication_request_seconds
+            ),
+            format!(
+                "  Regeneration for unaccepted prompts: {:.2} minutes ({:.1} seconds), candidates={} repairs={} fresh_replacements={}",
+                self.regeneration_seconds / 60.0,
+                self.regeneration_seconds,
+                self.regeneration_candidates,
+                self.repair_generations,
+                self.replacement_generations
+            ),
+            format!(
+                "Requests: generation={} retries={} timeouts={} errors={} | review={} retries={} timeouts={} errors={} | adjudication={}",
+                self.generation_requests.requests,
+                self.generation_requests.retries,
+                self.generation_requests.timeouts,
+                self.generation_requests.errors,
+                self.review_requests.requests,
+                self.review_requests.retries,
+                self.review_requests.timeouts,
+                self.review_requests.errors,
+                self.adjudication_requests.requests
+            ),
+            format!("Timing note: {}", self.timing_note),
+            "======================================================".to_string(),
+        ]
+    }
+}
+
+fn emit_generation_operator_summary(
+    summary: &GenerationOperatorSummary,
+    logger: &runlog::RunLogger,
+) {
+    println!();
+    for line in summary.render_lines() {
+        println!("{line}");
+        logger.info("run_summary", &line);
+    }
+}
+
+struct GeneratedRunReport {
+    report: serde_json::Value,
+    summary: GenerationOperatorSummary,
 }
 
 fn runtime_worker_threads() -> usize {
@@ -3240,11 +3412,109 @@ fn rejection_summary(path: &std::path::Path) -> Result<serde_json::Value> {
     Ok(serde_json::json!({"by_stage": by_stage, "by_reason": by_reason}))
 }
 
+fn generation_operator_summary(
+    context: &GenerationReportContext<'_>,
+    outcome: &GenerationReportOutcome<'_>,
+) -> GenerationOperatorSummary {
+    let total_run_seconds = outcome.elapsed.as_secs_f64();
+    let total_run_minutes = total_run_seconds / 60.0;
+    let accepted_records = outcome.stats.tasks.load(Ordering::Relaxed);
+    let candidate_attempts = outcome.stats.attempts.load(Ordering::Relaxed);
+    let generation_input_tokens = outcome.stats.input_tokens.load(Ordering::Relaxed);
+    let generation_output_tokens = outcome.stats.output_tokens.load(Ordering::Relaxed);
+    let review_input_tokens = outcome.stats.review_input_tokens.load(Ordering::Relaxed);
+    let review_output_tokens = outcome.stats.review_output_tokens.load(Ordering::Relaxed);
+    let adjudication_input_tokens = outcome
+        .stats
+        .adjudication_input_tokens
+        .load(Ordering::Relaxed);
+    let adjudication_output_tokens = outcome
+        .stats
+        .adjudication_output_tokens
+        .load(Ordering::Relaxed);
+    let total_input_tokens = generation_input_tokens
+        .saturating_add(review_input_tokens)
+        .saturating_add(adjudication_input_tokens);
+    let total_output_tokens = generation_output_tokens
+        .saturating_add(review_output_tokens)
+        .saturating_add(adjudication_output_tokens);
+    GenerationOperatorSummary {
+        status: outcome.status.to_string(),
+        started_at: context.started_at.to_rfc3339(),
+        completed_at: outcome.completed_at.to_rfc3339(),
+        total_run_seconds,
+        total_run_minutes,
+        requested_records: context.args.count,
+        accepted_records,
+        rejected_candidates: outcome.stats.errors.load(Ordering::Relaxed),
+        candidate_attempts,
+        final_records: outcome.final_records,
+        acceptance_rate: if candidate_attempts > 0 {
+            accepted_records as f64 / candidate_attempts as f64
+        } else {
+            0.0
+        },
+        tasks_per_minute: if total_run_minutes > 0.0 {
+            accepted_records as f64 / total_run_minutes
+        } else {
+            0.0
+        },
+        review_accepts: outcome.stats.review_accepts.load(Ordering::Relaxed),
+        review_revises: outcome.stats.review_revises.load(Ordering::Relaxed),
+        review_rejects: outcome.stats.review_rejects.load(Ordering::Relaxed),
+        review_needs_verification: outcome
+            .stats
+            .review_needs_verification
+            .load(Ordering::Relaxed),
+        top_up_waves: outcome.stats.top_up_waves.load(Ordering::Relaxed),
+        coordinate_replacements: outcome
+            .stats
+            .coordinate_replacements
+            .load(Ordering::Relaxed),
+        generation_input_tokens,
+        generation_output_tokens,
+        review_input_tokens,
+        review_output_tokens,
+        adjudication_input_tokens,
+        adjudication_output_tokens,
+        total_input_tokens,
+        total_output_tokens,
+        total_tokens: total_input_tokens.saturating_add(total_output_tokens),
+        generation_request_seconds: outcome.generation_requests.total_ms as f64 / 1000.0,
+        generation_pipeline_seconds: outcome.stats.generation_pipeline_ms.load(Ordering::Relaxed)
+            as f64
+            / 1000.0,
+        review_request_seconds: outcome.review_requests.total_ms as f64 / 1000.0,
+        adjudication_request_seconds: outcome.adjudication_requests.total_ms as f64 / 1000.0,
+        regeneration_seconds: outcome
+            .stats
+            .regeneration_pipeline_ms
+            .load(Ordering::Relaxed) as f64
+            / 1000.0,
+        regeneration_candidates: outcome
+            .stats
+            .regeneration_candidates
+            .load(Ordering::Relaxed),
+        repair_generations: outcome
+            .stats
+            .repair_generation_candidates
+            .load(Ordering::Relaxed),
+        replacement_generations: outcome
+            .stats
+            .replacement_generation_candidates
+            .load(Ordering::Relaxed),
+        generation_requests: outcome.generation_requests,
+        review_requests: outcome.review_requests,
+        adjudication_requests: outcome.adjudication_requests,
+        timing_note: "stage times are cumulative request/pipeline time and may overlap under concurrency; they are not expected to sum to wall time",
+    }
+}
+
 fn generation_run_report(
     context: &GenerationReportContext<'_>,
     outcome: GenerationReportOutcome<'_>,
-) -> Result<serde_json::Value> {
-    let completed_at = chrono::Utc::now();
+) -> Result<GeneratedRunReport> {
+    let completed_at = outcome.completed_at;
     let duration_seconds = outcome.elapsed.as_secs_f64();
     let duration_minutes = duration_seconds / 60.0;
     let accepted = outcome.stats.tasks.load(Ordering::Relaxed);
@@ -3273,7 +3543,8 @@ fn generation_run_report(
         ),
     });
 
-    Ok(serde_json::json!({
+    let summary = generation_operator_summary(context, &outcome);
+    let report = serde_json::json!({
         "schema_version": "scogo.taskgen.run.v3",
         "command_version": env!("CARGO_PKG_VERSION"),
         "run_id": context.run_id,
@@ -3283,6 +3554,7 @@ fn generation_run_report(
         "completed_at": completed_at.to_rfc3339(),
         "duration_seconds": duration_seconds,
         "duration_minutes": duration_minutes,
+        "operator_summary": &summary,
         "run_directory": context.paths.run_dir,
         "taxonomy_id": context.taxonomy.id(),
         "taxonomy_kind": format!("{:?}", context.taxonomy.kind()).to_ascii_lowercase(),
@@ -3350,9 +3622,20 @@ fn generation_run_report(
             "output_tokens": outcome.stats.adjudication_output_tokens.load(Ordering::Relaxed),
         },
         "timing": {
+            "wall_clock_ms": outcome.elapsed.as_millis().min(u64::MAX as u128) as u64,
             "generation_total_ms": outcome.generation_requests.total_ms,
+            "generation_pipeline_ms": outcome.stats.generation_pipeline_ms.load(Ordering::Relaxed),
             "review_total_ms": outcome.review_requests.total_ms,
             "adjudication_total_ms": outcome.adjudication_requests.total_ms,
+            "regeneration_total_ms": outcome.stats.regeneration_pipeline_ms.load(Ordering::Relaxed),
+            "timing_semantics": "cumulative stage times overlap under concurrency and do not sum to wall-clock time",
+        },
+        "regeneration": {
+            "candidates": outcome.stats.regeneration_candidates.load(Ordering::Relaxed),
+            "repair_generations": outcome.stats.repair_generation_candidates.load(Ordering::Relaxed),
+            "replacement_generations": outcome.stats.replacement_generation_candidates.load(Ordering::Relaxed),
+            "total_ms": outcome.stats.regeneration_pipeline_ms.load(Ordering::Relaxed),
+            "total_minutes": outcome.stats.regeneration_pipeline_ms.load(Ordering::Relaxed) as f64 / 60_000.0,
         },
         "requests": {
             "generation": outcome.generation_requests,
@@ -3391,7 +3674,8 @@ fn generation_run_report(
             "run": {"file":"run.json"},
             "run_log": {"file":"run.log"},
         },
-    }))
+    });
+    Ok(GeneratedRunReport { report, summary })
 }
 
 fn select_terminal_error(
@@ -3578,6 +3862,7 @@ fn generation_log_config(
 async fn run_generate(args: GenerateArgs) -> Result<()> {
     let started_at = chrono::Utc::now();
     let started_clock = std::time::Instant::now();
+    println!("Generation started: {}", started_at.to_rfc3339());
     let taxonomy = match args.taxonomy.as_deref() {
         Some(path) => taxonomy::TaxonomyCatalog::from_path(path)?,
         None => taxonomy::TaxonomyCatalog::embedded_itops()?,
@@ -3831,6 +4116,10 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         max_candidates,
         &run_dir,
     ));
+    logger.info(
+        "generation_started",
+        &format!("started_at={}", started_at.to_rfc3339()),
+    );
     let heartbeat = logger.start_heartbeat();
     logger.info(
         "artifacts_ready",
@@ -3984,6 +4273,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                 let review_token_override = args.review_max_output_tokens;
                 let max_repairs_per_coordinate = args.max_repairs_per_coordinate;
                 let availability_failure_threshold = args.workers.max(1);
+                let requested_count = args.count;
                 async move {
                     // Work for a large wave is sampled up front but dispatched
                     // lazily through buffer_unordered. Do not count or emit one
@@ -4004,12 +4294,20 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                         proxy_counter.fetch_add(1, Ordering::Relaxed) % clients.len();
                     let client = &clients[client_index];
                     let credential = generation_provider.credentials.next();
+                    let generation_kind = if work.repair_of.is_some() {
+                        "repair"
+                    } else if work.sequence > requested_count {
+                        "replacement"
+                    } else {
+                        "initial"
+                    };
                     logger.debug(
                         "generation_start",
                         &format!(
-                            "sequence={} wave={} model={} category={} domain={} subdomain={} difficulty={} repair_count={} language={}",
+                            "sequence={} wave={} kind={} model={} category={} domain={} subdomain={} difficulty={} repair_count={} language={}",
                             work.sequence,
                             work.wave,
+                            generation_kind,
                             runlog::quoted(&use_model),
                             runlog::quoted(&work.sample.category_id),
                             runlog::quoted(&work.sample.domain_id),
@@ -4025,6 +4323,21 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                             .await
                             .map_err(|_| anyhow::anyhow!("generation pipeline cancelled"))?;
                         let in_flight = InFlightGuard::enter(&stats.generation_in_flight);
+                        if generation_kind != "initial" {
+                            stats
+                                .regeneration_candidates
+                                .fetch_add(1, Ordering::Relaxed);
+                            if generation_kind == "repair" {
+                                stats
+                                    .repair_generation_candidates
+                                    .fetch_add(1, Ordering::Relaxed);
+                            } else {
+                                stats
+                                    .replacement_generation_candidates
+                                    .fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                        let generation_started = std::time::Instant::now();
                         update_live_progress(&pb, &stats, "generation request running");
                         let result = generate_task(GenerateTaskRequest {
                             client,
@@ -4048,6 +4361,30 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                             wave: work.wave,
                         })
                         .await;
+                        let generation_elapsed_ms = generation_started
+                            .elapsed()
+                            .as_millis()
+                            .min(u64::MAX as u128)
+                            as u64;
+                        stats
+                            .generation_pipeline_ms
+                            .fetch_add(generation_elapsed_ms, Ordering::Relaxed);
+                        if generation_kind != "initial" {
+                            stats
+                                .regeneration_pipeline_ms
+                                .fetch_add(generation_elapsed_ms, Ordering::Relaxed);
+                        }
+                        logger.debug(
+                            "generation_cycle_complete",
+                            &format!(
+                                "sequence={} wave={} kind={} elapsed_seconds={:.3} success={}",
+                                work.sequence,
+                                work.wave,
+                                generation_kind,
+                                generation_elapsed_ms as f64 / 1000.0,
+                                result.is_ok()
+                            ),
+                        );
                         drop(in_flight);
                         drop(_permit);
                         result
@@ -4709,11 +5046,12 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     if let Some(terminal_error) = terminal_error {
         cancel.store(true, Ordering::Relaxed);
         pb.abandon_with_message("incomplete; final output not published");
-        let report = generation_run_report(
+        let generated_report = generation_run_report(
             &report_context,
             GenerationReportOutcome {
                 status: "failed",
                 terminal_error: Some(&terminal_error),
+                completed_at: chrono::Utc::now(),
                 elapsed: started_clock.elapsed(),
                 final_records: staged_count,
                 accepted_distribution: &staged_distribution,
@@ -4724,8 +5062,15 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             },
         )?;
         let run = artifacts.lock().unwrap().take().unwrap();
-        run.finish_incomplete(&report)?;
+        run.finish_incomplete(&generated_report.report)?;
         heartbeat.stop();
+        logger.error(
+            "generation_finished",
+            &format!(
+                "completed_at={} total_run_minutes={:.3} status=failed",
+                generated_report.summary.completed_at, generated_report.summary.total_run_minutes
+            ),
+        );
         logger.error(
             "run_complete",
             &format!(
@@ -4734,6 +5079,11 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                 runlog::quoted(&terminal_error)
             ),
         );
+        println!(
+            "Generation finished: {}",
+            generated_report.summary.completed_at
+        );
+        emit_generation_operator_summary(&generated_report.summary, &logger);
         logger.sync()?;
         bail!(
             "{terminal_error}. Partial audit artifacts retained at {}",
@@ -4741,11 +5091,12 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         );
     }
 
-    let report = generation_run_report(
+    let generated_report = generation_run_report(
         &report_context,
         GenerationReportOutcome {
             status: "success",
             terminal_error: None,
+            completed_at: chrono::Utc::now(),
             elapsed: started_clock.elapsed(),
             final_records: staged_count,
             accepted_distribution: &staged_distribution,
@@ -4760,7 +5111,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         &format!("accepted={accepted} staged={staged_count}"),
     );
     let run = artifacts.lock().unwrap().take().unwrap();
-    let published = run.publish(&report)?;
+    let published = run.publish(&generated_report.report)?;
     let final_count = staged_count;
     pb.finish_with_message("exact accepted count published");
     heartbeat.stop();
@@ -4772,7 +5123,13 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             runlog::quoted(&published.output.display().to_string())
         ),
     );
-    logger.sync()?;
+    logger.info(
+        "generation_finished",
+        &format!(
+            "completed_at={} total_run_minutes={:.3} status=success",
+            generated_report.summary.completed_at, generated_report.summary.total_run_minutes
+        ),
+    );
     println!(
         "Generated exactly {} newly accepted tasks ({} total) -> {}",
         args.count,
@@ -4790,6 +5147,12 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     println!("Rejected candidates: {}", published.rejected.display());
     println!("Run report: {}", published.run.display());
     println!("Run log: {}", logger.path().display());
+    println!(
+        "Generation finished: {}",
+        generated_report.summary.completed_at
+    );
+    emit_generation_operator_summary(&generated_report.summary, &logger);
+    logger.sync()?;
     Ok(())
 }
 
@@ -5690,6 +6053,69 @@ mod tests {
         assert_eq!(review_cost(&stats, None, Some(0.25)), 1.0);
     }
 
+    #[test]
+    fn operator_summary_renders_tokens_timing_and_regeneration() {
+        let requests = telemetry::RequestTelemetrySnapshot {
+            requests: 3,
+            retries: 1,
+            rate_limits: 0,
+            timeouts: 1,
+            errors: 0,
+            total_ms: 90_000,
+        };
+        let summary = GenerationOperatorSummary {
+            status: "success".into(),
+            started_at: "2026-08-25T09:00:00+00:00".into(),
+            completed_at: "2026-08-25T09:05:00+00:00".into(),
+            total_run_seconds: 300.0,
+            total_run_minutes: 5.0,
+            requested_records: 2,
+            accepted_records: 2,
+            rejected_candidates: 1,
+            candidate_attempts: 3,
+            final_records: 2,
+            acceptance_rate: 2.0 / 3.0,
+            tasks_per_minute: 0.4,
+            review_accepts: 2,
+            review_revises: 1,
+            review_rejects: 0,
+            review_needs_verification: 1,
+            top_up_waves: 1,
+            coordinate_replacements: 1,
+            generation_input_tokens: 100,
+            generation_output_tokens: 200,
+            review_input_tokens: 30,
+            review_output_tokens: 40,
+            adjudication_input_tokens: 5,
+            adjudication_output_tokens: 6,
+            total_input_tokens: 135,
+            total_output_tokens: 246,
+            total_tokens: 381,
+            generation_request_seconds: 90.0,
+            generation_pipeline_seconds: 100.0,
+            review_request_seconds: 30.0,
+            adjudication_request_seconds: 5.0,
+            regeneration_seconds: 20.0,
+            regeneration_candidates: 1,
+            repair_generations: 1,
+            replacement_generations: 0,
+            generation_requests: requests,
+            review_requests: requests,
+            adjudication_requests: requests,
+            timing_note: "stages overlap",
+        };
+        let rendered = summary.render_lines().join("\n");
+
+        assert!(rendered.contains("Overall wall time: 5.00 minutes"));
+        assert!(rendered.contains("Review outcomes: accept=2 revise=1 reject=0"));
+        assert!(rendered.contains("Recovery: top_up_waves=1 coordinate_replacements=1"));
+        assert!(rendered.contains("Generation: input=100 output=200 total=300"));
+        assert!(rendered.contains("Review: input=30 output=40 total=70"));
+        assert!(rendered.contains("Overall: input=135 output=246 total=381"));
+        assert!(rendered.contains("Regeneration for unaccepted prompts"));
+        assert!(rendered.contains("candidates=1 repairs=1 fresh_replacements=0"));
+    }
+
     #[tokio::test]
     async fn provider_error_body_never_reaches_rejection_artifacts() {
         use wiremock::matchers::{method, path};
@@ -6050,6 +6476,16 @@ mod tests {
         assert_eq!(report["pipeline"]["generation_review_overlap"], true);
         assert_eq!(report["pipeline"]["max_in_flight_items"], 7);
         assert_eq!(report["efficiency"]["top_up_waves"], 1);
+        assert_eq!(report["regeneration"]["candidates"], 1);
+        assert_eq!(report["regeneration"]["repair_generations"], 0);
+        assert_eq!(report["regeneration"]["replacement_generations"], 1);
+        assert!(report["timing"]["regeneration_total_ms"].as_u64().is_some());
+        assert_eq!(report["operator_summary"]["accepted_records"], 2);
+        assert!(
+            report["operator_summary"]["total_tokens"]
+                .as_u64()
+                .is_some()
+        );
         assert_eq!(report["generation"]["effective_models"][0], "test-model");
         assert_eq!(report["review"]["effective_models"][0], "test-model");
         assert!(report["started_at"].as_str().is_some());
@@ -6091,7 +6527,9 @@ mod tests {
             "review_start",
             "review_complete",
             "candidate_accepted",
+            "generation_finished",
             "run_complete",
+            "run_summary",
         ] {
             assert!(log.contains(event), "run log missing {event}: {log}");
         }
@@ -6397,6 +6835,12 @@ mod tests {
         assert_eq!(review_records[0]["final_disposition"], "revise_queued");
         assert_eq!(review_records[1]["final_disposition"], "accepted");
         assert_eq!(review_records[1]["adjudication"]["model"], "same-model");
+        let report: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(paths.run).unwrap()).unwrap();
+        assert_eq!(report["regeneration"]["candidates"], 1);
+        assert_eq!(report["regeneration"]["repair_generations"], 1);
+        assert_eq!(report["regeneration"]["replacement_generations"], 0);
+        assert!(report["regeneration"]["total_ms"].as_u64().is_some());
     }
 
     #[tokio::test]
