@@ -144,8 +144,27 @@ data/runs/itops-smoke/
 ├── candidates.jsonl  # every generated candidate, persisted before review
 ├── reviews.jsonl     # reviewer/adjudicator decisions and token usage
 ├── rejected.jsonl    # deterministic, dedup, generation, and review rejections
-└── run.json          # status, configuration, counts, timing, cost, and checksums
+├── run.json          # status, configuration, counts, timing, cost, and checksums
+└── run.log           # live timestamped text progress and debug events
 ```
+
+Follow a live run from another terminal:
+
+```bash
+tail -f data/runs/itops-smoke/run.log
+```
+
+Every line is flushed immediately and uses a simple UTC text format:
+
+```text
+2026-08-25T08:31:04.127Z INFO   wave_start                   wave=1 queued=10 accepted=0 attempts=0 remaining_capacity=100
+2026-08-25T08:31:04.130Z DEBUG  generation_start             sequence=1 wave=1 model="gpt-5.6-luna-max" category="network" domain="routing" subdomain="bgp" difficulty=7 repair_count=0 language="en"
+2026-08-25T08:33:04.512Z WARN   generation_retry             sequence=1 wave=1 reason=timeout elapsed_seconds=120.3 taskgen_limit_seconds=600 retry=1/5 wait_seconds=2
+2026-08-25T08:34:10.842Z INFO   review_complete              candidate_id=... sequence=1 wave=1 outcome=Accept adjudicated=false
+2026-08-25T08:34:10.850Z INFO   candidate_accepted           candidate_id=... sequence=1 wave=1 accepted=1/10
+```
+
+The beginning of `run.log` records every command option plus effective defaults, provider models/endpoints, taxonomy, concurrency, seed, prompt fingerprints, dedup settings, limits, and artifact paths. API keys and keyfile contents are always redacted; inline prompt contents are represented only by character count and SHA-256.
 
 Check the accepted count and terminal status:
 
@@ -558,7 +577,7 @@ taskgen review \
   --run-dir data/runs/itops-review-002
 ```
 
-The review run writes accepted rows to `tasks.jsonl`, all decisions to `reviews.jsonl`, rejections/errors to `rejected.jsonl`, and calibration/telemetry to `run.json`. It validates input schema and taxonomy coordinates before making review calls. It does not regenerate, repair, or deduplicate candidates.
+The review run writes accepted rows to `tasks.jsonl`, all decisions to `reviews.jsonl`, rejections/errors to `rejected.jsonl`, calibration/telemetry to `run.json`, and live progress to `run.log`. It validates input schema and taxonomy coordinates before making review calls. It does not regenerate, repair, or deduplicate candidates.
 
 ### Calibrate a reviewer against human labels
 

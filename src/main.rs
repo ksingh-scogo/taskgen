@@ -29,6 +29,7 @@ pub mod dedup;
 pub mod provider;
 pub mod references;
 pub mod review;
+pub mod runlog;
 pub mod schema;
 pub mod taxonomy;
 pub mod telemetry;
@@ -705,6 +706,12 @@ struct CandidateReviewContext {
     review_rate_limiter: Option<Arc<review::ReviewRateLimiter>>,
 }
 
+#[derive(Clone)]
+struct EvaluationLogContext {
+    logger: Arc<runlog::RunLogger>,
+    candidate_fields: String,
+}
+
 impl CandidateEvaluation {
     fn accepted(&self) -> bool {
         self.review.decision.outcome == review::ReviewOutcome::Accept
@@ -719,10 +726,20 @@ async fn evaluate_candidate(
     entry: &TaskEntry,
     deterministic_checks: DeterministicCandidateChecks,
     context: CandidateReviewContext,
+    log: Option<EvaluationLogContext>,
 ) -> Result<CandidateEvaluation> {
     use review::{CandidateAdjudicator, CandidateReviewer};
 
     let candidate = serde_json::to_value(entry)?;
+    if let Some(log) = &log {
+        log.logger.debug(
+            "review_request_start",
+            &format!(
+                "{} model={}",
+                log.candidate_fields, context.review_provider.model
+            ),
+        );
+    }
     let reviewer = review::ReviewClient::new(
         context.review_provider,
         context.client.clone(),
@@ -739,6 +756,17 @@ async fn evaluate_candidate(
             deterministic_checks: Some(serde_json::to_value(deterministic_checks)?),
         })
         .await?;
+    if let Some(log) = &log {
+        log.logger.info(
+            "review_decision",
+            &format!(
+                "{} outcome={:?} claims_to_verify={}",
+                log.candidate_fields,
+                reviewed.decision.outcome,
+                reviewed.decision.claims_requiring_verification.len()
+            ),
+        );
+    }
     if reviewed.decision.outcome != review::ReviewOutcome::NeedsVerification {
         return Ok(CandidateEvaluation {
             review: reviewed,
@@ -757,6 +785,18 @@ async fn evaluate_candidate(
         }
     }
     let references: Vec<_> = by_id.into_values().collect();
+    if let Some(log) = &log {
+        log.logger.info(
+            "adjudication_start",
+            &format!(
+                "{} claims={} references={} model={}",
+                log.candidate_fields,
+                reviewed.decision.claims_requiring_verification.len(),
+                references.len(),
+                context.adjudication_provider.model
+            ),
+        );
+    }
     let adjudicator = review::AdjudicationClient::new(
         context.adjudication_provider,
         context.client,
@@ -772,6 +812,15 @@ async fn evaluate_candidate(
             system_prompt: include_str!("../prompts/prompt-adjudication-system-v1.txt").to_string(),
         })
         .await?;
+    if let Some(log) = &log {
+        log.logger.info(
+            "adjudication_complete",
+            &format!(
+                "{} outcome={:?}",
+                log.candidate_fields, adjudication.decision.outcome
+            ),
+        );
+    }
     Ok(CandidateEvaluation {
         review: reviewed,
         adjudication: Some(adjudication),
@@ -1698,6 +1747,9 @@ struct GenerateTaskRequest<'a> {
     request_timeout_seconds: u64,
     progress: &'a ProgressBar,
     telemetry: &'a telemetry::RequestTelemetry,
+    logger: &'a runlog::RunLogger,
+    candidate_sequence: usize,
+    wave: usize,
 }
 
 async fn generate_task(
@@ -1720,6 +1772,9 @@ async fn generate_task(
         request_timeout_seconds,
         progress,
         telemetry,
+        logger,
+        candidate_sequence,
+        wave,
     } = request;
     let task_message = task_generation_message(sample, language, feedback);
     let user_msg = model_user_message(model, &task_message);
@@ -1776,6 +1831,13 @@ async fn generate_task(
                             "[CONTENT] invalid completion, retrying ({retries}/{MAX_RETRIES}): {error}"
                         );
                     });
+                    logger.warn(
+                        "generation_retry",
+                        &format!(
+                            "sequence={candidate_sequence} wave={wave} reason=invalid_content retry={retries}/{MAX_RETRIES} error={}",
+                            runlog::quoted(&error.to_string())
+                        ),
+                    );
                     continue;
                 }
                 telemetry.record_success(
@@ -1799,6 +1861,12 @@ async fn generate_task(
                         wait, retries, MAX_RETRIES
                     );
                 });
+                logger.warn(
+                    "generation_retry",
+                    &format!(
+                        "sequence={candidate_sequence} wave={wave} reason=rate_limit retry={retries}/{MAX_RETRIES} wait_seconds={wait}"
+                    ),
+                );
                 tokio::time::sleep(tokio::time::Duration::from_secs(wait)).await;
             }
             Err(ApiError::Timeout(message)) => {
@@ -1813,6 +1881,12 @@ async fn generate_task(
                             "[TIMEOUT] candidate exhausted {MAX_RETRIES} retries ({count}/{availability_failure_threshold} consecutive exhausted candidates)"
                         );
                     });
+                    logger.error(
+                        "generation_retries_exhausted",
+                        &format!(
+                            "sequence={candidate_sequence} wave={wave} reason=timeout exhausted_candidates={count}/{availability_failure_threshold}"
+                        ),
+                    );
                     if count >= availability_failure_threshold {
                         progress.suspend(|| {
                             eprintln!(
@@ -1833,6 +1907,15 @@ async fn generate_task(
                         truncate_body(&message, 300),
                     );
                 });
+                logger.warn(
+                    "generation_retry",
+                    &format!(
+                        "sequence={candidate_sequence} wave={wave} reason=timeout elapsed_seconds={:.1} taskgen_limit_seconds={request_timeout_seconds} source={} retry={retries}/{MAX_RETRIES} wait_seconds={wait} error={}",
+                        elapsed.as_secs_f64(),
+                        runlog::quoted(source),
+                        runlog::quoted(&truncate_body(&message, 300))
+                    ),
+                );
                 tokio::time::sleep(tokio::time::Duration::from_secs(wait)).await;
             }
             Err(ApiError::Transport(message)) => {
@@ -1848,6 +1931,13 @@ async fn generate_task(
                             "[TRANSPORT] candidate exhausted {MAX_RETRIES} retries ({count}/{availability_failure_threshold} consecutive exhausted candidates): {message}"
                         );
                     });
+                    logger.error(
+                        "generation_retries_exhausted",
+                        &format!(
+                            "sequence={candidate_sequence} wave={wave} reason=transport exhausted_candidates={count}/{availability_failure_threshold} error={}",
+                            runlog::quoted(&message)
+                        ),
+                    );
                     if count >= availability_failure_threshold {
                         progress.suspend(|| {
                             eprintln!(
@@ -1865,6 +1955,13 @@ async fn generate_task(
                         "[TRANSPORT] request failed, waiting {wait}s (retry {retries}/{MAX_RETRIES}): {message}"
                     );
                 });
+                logger.warn(
+                    "generation_retry",
+                    &format!(
+                        "sequence={candidate_sequence} wave={wave} reason=transport retry={retries}/{MAX_RETRIES} wait_seconds={wait} error={}",
+                        runlog::quoted(&message)
+                    ),
+                );
                 tokio::time::sleep(tokio::time::Duration::from_secs(wait)).await;
             }
             Err(ApiError::Transient(status, body)) => {
@@ -1882,6 +1979,12 @@ async fn generate_task(
                         "[TRANSIENT] {status}, waiting {wait}s (retry {retries}/{MAX_RETRIES})"
                     );
                 });
+                logger.warn(
+                    "generation_retry",
+                    &format!(
+                        "sequence={candidate_sequence} wave={wave} reason=transient_http status={status} retry={retries}/{MAX_RETRIES} wait_seconds={wait}"
+                    ),
+                );
                 tokio::time::sleep(tokio::time::Duration::from_secs(wait)).await;
             }
             Err(ApiError::CompletionTruncated(message)) => {
@@ -1893,6 +1996,13 @@ async fn generate_task(
                         "[CONTENT] completion hit the output-token limit; replacing this candidate without repeating the same capped request"
                     );
                 });
+                logger.warn(
+                    "generation_rejected",
+                    &format!(
+                        "sequence={candidate_sequence} wave={wave} reason=completion_truncated error={}",
+                        runlog::quoted(&message)
+                    ),
+                );
                 return Err(ApiError::CompletionTruncated(message));
             }
             Err(ApiError::InvalidCompletion(message)) => {
@@ -1909,6 +2019,13 @@ async fn generate_task(
                         "[CONTENT] invalid completion, retrying ({retries}/{MAX_RETRIES}): {message}"
                     );
                 });
+                logger.warn(
+                    "generation_retry",
+                    &format!(
+                        "sequence={candidate_sequence} wave={wave} reason=invalid_completion retry={retries}/{MAX_RETRIES} error={}",
+                        runlog::quoted(&message)
+                    ),
+                );
             }
             Err(ApiError::Billing(msg)) => {
                 telemetry.record_error(
@@ -1917,6 +2034,13 @@ async fn generate_task(
                 progress.suspend(|| {
                     eprintln!("[FATAL] billing error, shutting down gracefully: {}", msg);
                 });
+                logger.error(
+                    "run_fatal",
+                    &format!(
+                        "sequence={candidate_sequence} wave={wave} reason=billing error={}",
+                        runlog::quoted(&msg)
+                    ),
+                );
                 cancel.store(true, Ordering::Relaxed);
                 return Err(ApiError::Billing(msg));
             }
@@ -2350,6 +2474,103 @@ async fn main() -> Result<()> {
     }
 }
 
+fn secret_config(keyfile: Option<&Path>, single_key_configured: bool, inherited: bool) -> String {
+    if let Some(path) = keyfile {
+        format!("keyfile:{} (contents redacted)", path.display())
+    } else if single_key_configured {
+        "[REDACTED: single key configured]".to_string()
+    } else if inherited {
+        "[REDACTED: inherited from previous provider]".to_string()
+    } else {
+        "[not configured]".to_string()
+    }
+}
+
+fn safe_api_base(url: &url::Url) -> String {
+    let mut sanitized = url.clone();
+    let _ = sanitized.set_username("");
+    let _ = sanitized.set_password(None);
+    sanitized.set_query(None);
+    sanitized.set_fragment(None);
+    sanitized.to_string()
+}
+
+fn safe_requested_api_base(raw: &str) -> String {
+    provider::normalize_api_base(raw)
+        .map(|url| safe_api_base(&url))
+        .unwrap_or_else(|_| "[invalid URL omitted]".to_string())
+}
+
+fn prompt_config(
+    inline: Option<&String>,
+    file: Option<&PathBuf>,
+    effective: &str,
+    fallback: &str,
+) -> serde_json::Value {
+    let source = if let Some(prompt) = inline {
+        format!("inline ({} chars; content omitted)", prompt.chars().count())
+    } else if let Some(path) = file {
+        format!("file:{}", path.display())
+    } else {
+        fallback.to_string()
+    };
+    serde_json::json!({
+        "source": source,
+        "characters": effective.chars().count(),
+        "sha256": format!("{:x}", Sha256::digest(effective.as_bytes())),
+    })
+}
+
+fn review_log_config(
+    args: &ReviewArgs,
+    taxonomy: &taxonomy::TaxonomyCatalog,
+    review_provider: &provider::ProviderConfig,
+    adjudication_provider: &provider::ProviderConfig,
+    system_prompt: &str,
+    run_dir: &Path,
+    input_records: usize,
+) -> serde_json::Value {
+    serde_json::json!({
+        "command": "taskgen review",
+        "input": args.input,
+        "input_records": input_records,
+        "taxonomy": args.taxonomy,
+        "taxonomy_id": taxonomy.id(),
+        "api_base_requested": safe_requested_api_base(&args.api_base),
+        "api_base": safe_api_base(&review_provider.api_base),
+        "api_key": secret_config(args.keyfile.as_deref(), args.api_key.is_some(), false),
+        "model_requested": args.model,
+        "model": review_provider.model,
+        "keyfile": args.keyfile,
+        "system_prompt": prompt_config(
+            args.system_prompt.as_ref(),
+            args.system_prompt_file.as_ref(),
+            system_prompt,
+            "taxonomy default or embedded review prompt",
+        ),
+        "max_output_tokens": args.max_output_tokens,
+        "effective_max_output_tokens": review_max_output_tokens(
+            &review_provider.model,
+            args.max_output_tokens,
+        ),
+        "review_workers": args.review_workers,
+        "review_requests_per_minute": args.review_requests_per_minute,
+        "run_dir": run_dir,
+        "review_reference_dir": args.review_reference_dir,
+        "adjudication_model_requested": args.adjudication_model,
+        "adjudication_model": adjudication_provider.model,
+        "adjudication_api_base_requested": args.adjudication_api_base.as_deref().map(safe_requested_api_base),
+        "adjudication_api_base": safe_api_base(&adjudication_provider.api_base),
+        "adjudication_api_key": secret_config(
+            args.adjudication_keyfile.as_deref(),
+            args.adjudication_api_key.is_some(),
+            args.adjudication_keyfile.is_none() && args.adjudication_api_key.is_none(),
+        ),
+        "adjudication_keyfile": args.adjudication_keyfile,
+        "gold_labels": args.gold_labels,
+    })
+}
+
 async fn run_review(args: ReviewArgs) -> Result<()> {
     let started_at = chrono::Utc::now();
     let started_clock = std::time::Instant::now();
@@ -2500,6 +2721,26 @@ async fn run_review(args: ReviewArgs) -> Result<()> {
             "input_records":candidates.len(),
         }),
     )?;
+    let logger = Arc::new(runlog::RunLogger::create(&run_dir, "taskgen review")?);
+    logger.config(&review_log_config(
+        &args,
+        &taxonomy,
+        &review_provider,
+        &adjudication_provider,
+        &system_prompt,
+        &run_dir,
+        candidates.len(),
+    ));
+    let heartbeat = logger.start_heartbeat();
+    logger.info(
+        "artifacts_ready",
+        &format!(
+            "run_dir={} log={}",
+            runlog::quoted(&run_dir.display().to_string()),
+            runlog::quoted(&logger.path().display().to_string())
+        ),
+    );
+    println!("Run log: {}", logger.path().display());
     for candidate in &candidates {
         artifacts.write_candidate(&candidate.envelope)?;
     }
@@ -2512,6 +2753,15 @@ async fn run_review(args: ReviewArgs) -> Result<()> {
             reviewable_candidates.push(candidate);
         } else {
             deterministic_rejections += 1;
+            logger.warn(
+                "candidate_rejected",
+                &format!(
+                    "candidate_id={} sequence={} stage=deterministic_validation hard_failures={}",
+                    candidate.id,
+                    candidate.sequence,
+                    candidate.deterministic_checks.hard_failures.len()
+                ),
+            );
             artifacts.write_rejection(&serde_json::json!({
                 "schema_version":"scogo.taskgen.rejection.v2",
                 "candidate_id":candidate.id,
@@ -2541,7 +2791,15 @@ async fn run_review(args: ReviewArgs) -> Result<()> {
             let adjudication_telemetry = adjudication_telemetry.clone();
             let reference_store = reference_store.clone();
             let review_rate_limiter = review_rate_limiter.clone();
+            let logger = logger.clone();
             async move {
+                logger.debug(
+                    "review_start",
+                    &format!(
+                        "candidate_id={} sequence={}",
+                        candidate.id, candidate.sequence
+                    ),
+                );
                 let context = CandidateReviewContext {
                     taxonomy_id,
                     taxonomy_kind,
@@ -2559,9 +2817,37 @@ async fn run_review(args: ReviewArgs) -> Result<()> {
                     &candidate.entry,
                     candidate.deterministic_checks.clone(),
                     context,
+                    Some(EvaluationLogContext {
+                        logger: logger.clone(),
+                        candidate_fields: format!(
+                            "candidate_id={} sequence={} mode=standalone_review",
+                            candidate.id, candidate.sequence
+                        ),
+                    }),
                 )
                 .await
                 .map_err(|error| format!("{error:#}"));
+                match &result {
+                    Ok(evaluation) => logger.info(
+                        "review_complete",
+                        &format!(
+                            "candidate_id={} sequence={} outcome={:?} adjudicated={}",
+                            candidate.id,
+                            candidate.sequence,
+                            evaluation.review.decision.outcome,
+                            evaluation.adjudication.is_some()
+                        ),
+                    ),
+                    Err(error) => logger.error(
+                        "review_error",
+                        &format!(
+                            "candidate_id={} sequence={} error={}",
+                            candidate.id,
+                            candidate.sequence,
+                            runlog::quoted(error)
+                        ),
+                    ),
+                }
                 (candidate, result)
             }
         })
@@ -2601,9 +2887,23 @@ async fn run_review(args: ReviewArgs) -> Result<()> {
         let final_disposition = if evaluation.accepted() {
             accepted += 1;
             artifacts.write_accepted_line(&candidate.serialized)?;
+            logger.info(
+                "candidate_accepted",
+                &format!(
+                    "candidate_id={} sequence={} accepted={} rejected={} errors={}",
+                    candidate.id, candidate.sequence, accepted, rejected, review_errors
+                ),
+            );
             "accepted"
         } else {
             rejected += 1;
+            logger.warn(
+                "candidate_rejected",
+                &format!(
+                    "candidate_id={} sequence={} stage=model_review outcome={:?}",
+                    candidate.id, candidate.sequence, evaluation.review.decision.outcome
+                ),
+            );
             artifacts.write_rejection(&serde_json::json!({
                 "schema_version":"scogo.taskgen.rejection.v2",
                 "candidate_id":candidate.id,
@@ -2660,8 +2960,27 @@ async fn run_review(args: ReviewArgs) -> Result<()> {
         "adjudication":{"model":adjudication_provider.model,"endpoint_origin":adjudication_provider.api_base.origin().ascii_serialization()},
         "requests":{"review":review_telemetry.snapshot(),"adjudication":adjudication_telemetry.snapshot()},
         "calibration":calibration,
+        "artifacts":{"run_log":{"file":"run.log"}},
     });
+    logger.info(
+        "publication_start",
+        &format!("accepted={accepted} rejected={rejected} review_errors={review_errors}"),
+    );
     let published = artifacts.publish(&report)?;
+    heartbeat.stop();
+    logger.info(
+        "run_complete",
+        &format!(
+            "status={} accepted={accepted} rejected={rejected} review_errors={review_errors} output={}",
+            if review_errors == 0 {
+                "success"
+            } else {
+                "completed_with_errors"
+            },
+            runlog::quoted(&published.output.display().to_string())
+        ),
+    );
+    logger.sync()?;
     println!(
         "Reviewed {} candidates: {} accepted, {} rejected, {} review errors -> {}",
         accepted + rejected + review_errors,
@@ -3071,6 +3390,7 @@ fn generation_run_report(
             "reviews": artifact_descriptor(&context.paths.reviews, "reviews.jsonl")?,
             "rejected": artifact_descriptor(&context.paths.rejected, "rejected.jsonl")?,
             "run": {"file":"run.json"},
+            "run_log": {"file":"run.log"},
         },
     }))
 }
@@ -3143,6 +3463,117 @@ where
         .context("run artifacts are no longer available")?;
     write(run)?;
     run.flush_visible()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn generation_log_config(
+    args: &GenerateArgs,
+    taxonomy: &taxonomy::TaxonomyCatalog,
+    generation_provider: &provider::ProviderConfig,
+    review_provider: &provider::ProviderConfig,
+    adjudication_provider: &provider::ProviderConfig,
+    system_prompt: &str,
+    review_system_prompt: &str,
+    effective_generation_models: &[String],
+    effective_review_models: &[String],
+    effective_semantic_model: dedup::SemanticModel,
+    effective_seed: u64,
+    request_timeout_seconds: u64,
+    max_candidates: usize,
+    run_dir: &Path,
+) -> serde_json::Value {
+    serde_json::json!({
+        "command": "taskgen generate",
+        "api_base_requested": safe_requested_api_base(&args.api_base),
+        "api_base": safe_api_base(&generation_provider.api_base),
+        "api_key": secret_config(args.keyfile.as_deref(), args.api_key.is_some(), false),
+        "model": args.model,
+        "effective_generation_models": effective_generation_models,
+        "keyfile": args.keyfile,
+        "generation_credential_count": generation_provider.credentials.len(),
+        "system_prompt": prompt_config(
+            args.system_prompt.as_ref(),
+            args.system_prompt_file.as_ref(),
+            system_prompt,
+            "taxonomy default or embedded generator prompt",
+        ),
+        "system_prompt_file": args.system_prompt_file,
+        "taxonomy": args.taxonomy,
+        "taxonomy_source": args.taxonomy.as_ref().map_or_else(
+            || "embedded IT Ops".to_string(),
+            |path| path.display().to_string(),
+        ),
+        "taxonomy_id": taxonomy.id(),
+        "taxonomy_kind": format!("{:?}", taxonomy.kind()).to_ascii_lowercase(),
+        "seed": args.seed,
+        "effective_seed": effective_seed,
+        "count": args.count,
+        "distribution": args.distribution,
+        "difficulty": args.difficulty,
+        "temperature": args.temperature,
+        "max_output_tokens": args.max_output_tokens,
+        "workers": args.workers,
+        "review_workers": args.review_workers,
+        "review_requests_per_minute": args.review_requests_per_minute,
+        "max_candidates": args.max_candidates,
+        "effective_max_candidates": max_candidates,
+        "request_timeout_seconds": args.request_timeout_seconds,
+        "effective_request_timeout_seconds": request_timeout_seconds,
+        "run_dir": run_dir,
+        "append_from": args.append_from,
+        "proxies": args.proxies,
+        "rotating_proxy": args.rotating_proxy,
+        "review_model": args.review_model,
+        "effective_review_model": review_provider.model,
+        "effective_review_models": effective_review_models,
+        "skip_review": args.skip_review,
+        "review_api_base_requested": args.review_api_base.as_deref().map(safe_requested_api_base),
+        "review_api_base": safe_api_base(&review_provider.api_base),
+        "review_api_key": secret_config(
+            args.review_keyfile.as_deref(),
+            args.review_api_key.is_some(),
+            args.review_keyfile.is_none() && args.review_api_key.is_none(),
+        ),
+        "review_keyfile": args.review_keyfile,
+        "review_reference_dir": args.review_reference_dir,
+        "adjudication_model": args.adjudication_model,
+        "effective_adjudication_model": adjudication_provider.model,
+        "adjudication_api_base_requested": args.adjudication_api_base.as_deref().map(safe_requested_api_base),
+        "adjudication_api_base": safe_api_base(&adjudication_provider.api_base),
+        "adjudication_api_key": secret_config(
+            args.adjudication_keyfile.as_deref(),
+            args.adjudication_api_key.is_some(),
+            args.adjudication_keyfile.is_none() && args.adjudication_api_key.is_none(),
+        ),
+        "adjudication_keyfile": args.adjudication_keyfile,
+        "review_system_prompt": prompt_config(
+            args.review_system_prompt.as_ref(),
+            args.review_system_prompt_file.as_ref(),
+            review_system_prompt,
+            "taxonomy default or embedded review prompt",
+        ),
+        "review_system_prompt_file": args.review_system_prompt_file,
+        "review_max_output_tokens": args.review_max_output_tokens,
+        "effective_review_max_output_tokens": review_max_output_tokens(
+            &review_provider.model,
+            args.review_max_output_tokens,
+        ),
+        "max_repairs_per_coordinate": args.max_repairs_per_coordinate,
+        "dedup_mode": args.dedup_mode,
+        "jaccard_threshold": args.jaccard_threshold,
+        "semantic_threshold": args.semantic_threshold,
+        "dedup_ngram": args.dedup_ngram,
+        "semantic_model": args.semantic_model.map(|model| model.model_id()),
+        "effective_semantic_model": effective_semantic_model.model_id(),
+        "semantic_model_cache": args.semantic_model_cache,
+        "free_models": args.free_models,
+        "input_price": args.input_price,
+        "output_price": args.output_price,
+        "review_input_price": args.review_input_price,
+        "review_output_price": args.review_output_price,
+        "budget": args.budget,
+        "multilingual": args.multilingual,
+    })
 }
 
 async fn run_generate(args: GenerateArgs) -> Result<()> {
@@ -3343,7 +3774,8 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             "mode": if args.skip_review { "streaming_generation_only" } else { "streaming_generation_review_overlap" },
             "generation_review_overlap": !args.skip_review,
             "max_in_flight_items": args.workers.saturating_add(if args.skip_review { 0 } else { args.review_workers }),
-        }
+        },
+        "artifacts":{"run_log":{"file":"run.log"}}
     });
     let artifacts =
         artifacts::RunArtifacts::create(&run_dir, args.append_from.as_deref(), &initial_report)?;
@@ -3368,6 +3800,44 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     let max_candidates = args
         .max_candidates
         .unwrap_or_else(|| args.count.saturating_mul(20).max(100));
+    let logger = Arc::new(runlog::RunLogger::create(&run_dir, "taskgen generate")?);
+    logger.config(&generation_log_config(
+        &args,
+        &taxonomy,
+        &generation_provider,
+        &review_provider,
+        &adjudication_provider,
+        &system_prompt,
+        &review_system_prompt,
+        &effective_generation_models,
+        &effective_review_models,
+        effective_semantic_model,
+        effective_seed,
+        request_timeout_seconds,
+        max_candidates,
+        &run_dir,
+    ));
+    let heartbeat = logger.start_heartbeat();
+    logger.info(
+        "artifacts_ready",
+        &format!(
+            "run_dir={} log={} candidates={} reviews={} rejected={} report={}",
+            runlog::quoted(&run_dir.display().to_string()),
+            runlog::quoted(&run_paths.log.display().to_string()),
+            runlog::quoted(&run_paths.candidates.display().to_string()),
+            runlog::quoted(&run_paths.reviews.display().to_string()),
+            runlog::quoted(&run_paths.rejected.display().to_string()),
+            runlog::quoted(&run_paths.run.display().to_string())
+        ),
+    );
+    logger.info(
+        "pipeline_ready",
+        &format!(
+            "generation_workers={} review_workers={} overlap={} max_candidates={max_candidates}",
+            args.workers, args.review_workers, !args.skip_review
+        ),
+    );
+    println!("Run log: {}", logger.path().display());
     let taxonomy_id = taxonomy.id().to_string();
     let taxonomy_kind = format!("{:?}", taxonomy.kind()).to_ascii_lowercase();
     let explicit_review_model = args.review_model.is_some();
@@ -3393,6 +3863,10 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                 );
             if spent >= limit {
                 execution_error = Some("budget exhausted before exact acceptance".into());
+                logger.warn(
+                    "budget_exhausted",
+                    &format!("spent={spent:.6} limit={limit:.6}"),
+                );
                 break;
             }
         }
@@ -3443,6 +3917,15 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             "wave {wave}: generating/reviewing {} candidates",
             work_items.len()
         ));
+        logger.info(
+            "wave_start",
+            &format!(
+                "wave={wave} queued={} accepted={} attempts={} remaining_capacity={remaining_capacity}",
+                work_items.len(),
+                stats.tasks.load(Ordering::Relaxed),
+                stats.attempts.load(Ordering::Relaxed)
+            ),
+        );
         let pipeline_limit = args
             .workers
             .saturating_add(if args.skip_review {
@@ -3470,6 +3953,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                 let adjudication_telemetry = adjudication_telemetry.clone();
                 let review_rate_limiter = review_rate_limiter.clone();
                 let cancel = cancel.clone();
+                let logger = logger.clone();
                 let consecutive_exhausted_candidates =
                     consecutive_exhausted_candidates.clone();
                 let generation_permits = generation_permits.clone();
@@ -3506,6 +3990,21 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                         proxy_counter.fetch_add(1, Ordering::Relaxed) % clients.len();
                     let client = &clients[client_index];
                     let credential = generation_provider.credentials.next();
+                    logger.debug(
+                        "generation_start",
+                        &format!(
+                            "sequence={} wave={} model={} category={} domain={} subdomain={} difficulty={} repair_count={} language={}",
+                            work.sequence,
+                            work.wave,
+                            runlog::quoted(&use_model),
+                            runlog::quoted(&work.sample.category_id),
+                            runlog::quoted(&work.sample.domain_id),
+                            runlog::quoted(&work.sample.subdomain_id),
+                            work.sample.difficulty,
+                            work.repair_count,
+                            runlog::quoted(work.language.as_deref().unwrap_or("en"))
+                        ),
+                    );
                     let generated = {
                         let _permit = generation_permits
                             .acquire()
@@ -3530,6 +4029,9 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                             request_timeout_seconds,
                             progress: &pb,
                             telemetry: &generation_telemetry,
+                            logger: &logger,
+                            candidate_sequence: work.sequence,
+                            wave: work.wave,
                         })
                         .await;
                         drop(in_flight);
@@ -3538,10 +4040,25 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                     };
                     let generated = match generated {
                         Ok(generated) => generated,
-                        Err(ApiError::Cancelled) => return Ok(None),
+                        Err(ApiError::Cancelled) => {
+                            logger.debug(
+                                "generation_cancelled",
+                                &format!("sequence={} wave={}", work.sequence, work.wave),
+                            );
+                            return Ok(None);
+                        }
                         Err(error) => {
                             stats.errors.fetch_add(1, Ordering::Relaxed);
                             let reason = error.to_string();
+                            logger.error(
+                                "generation_failed",
+                                &format!(
+                                    "sequence={} wave={} error={}",
+                                    work.sequence,
+                                    work.wave,
+                                    runlog::quoted(&reason)
+                                ),
+                            );
                             write_live_artifact(&artifacts, |run| {
                                 run.write_rejection(&serde_json::json!({
                                     "schema_version":"scogo.taskgen.rejection.v2",
@@ -3610,6 +4127,15 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                         Err(error) => {
                             stats.errors.fetch_add(1, Ordering::Relaxed);
                             let reason = format!("{error:#}");
+                            logger.error(
+                                "candidate_build_failed",
+                                &format!(
+                                    "sequence={} wave={} error={}",
+                                    work.sequence,
+                                    work.wave,
+                                    runlog::quoted(&reason)
+                                ),
+                            );
                             write_live_artifact(&artifacts, |run| {
                                 run.write_rejection(&serde_json::json!({
                                     "schema_version":"scogo.taskgen.rejection.v2",
@@ -3638,6 +4164,17 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                     });
                     write_live_artifact(&artifacts, |run| run.write_candidate(&candidate_record))?;
                     stats.generated_candidates.fetch_add(1, Ordering::Relaxed);
+                    logger.info(
+                        "generation_complete",
+                        &format!(
+                            "sequence={} wave={} candidate_id={} model={} prompt_characters={}",
+                            candidate.work.sequence,
+                            candidate.work.wave,
+                            candidate.candidate_id,
+                            runlog::quoted(&candidate.entry.taskgen_model),
+                            candidate.entry.prompt.chars().count()
+                        ),
+                    );
                     update_live_progress(&pb, &stats, "generation complete");
 
                     if !candidate.deterministic_checks.hard_failures.is_empty() {
@@ -3649,6 +4186,16 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                             "hard_failures":candidate.deterministic_checks.hard_failures,
                             "candidate":candidate.entry,
                         });
+                        logger.warn(
+                            "candidate_rejected",
+                            &format!(
+                                "candidate_id={} sequence={} wave={} stage=deterministic_validation hard_failures={}",
+                                candidate.candidate_id,
+                                candidate.work.sequence,
+                                candidate.work.wave,
+                                candidate.deterministic_checks.hard_failures.len()
+                            ),
+                        );
                         write_live_artifact(&artifacts, |run| run.write_rejection(&rejection))?;
                         update_live_progress(&pb, &stats, "candidate rejected");
                         return Ok(None);
@@ -3668,6 +4215,13 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                             "reason":"exact candidate-pool duplicate",
                             "candidate":candidate.entry,
                         });
+                        logger.warn(
+                            "candidate_rejected",
+                            &format!(
+                                "candidate_id={} sequence={} wave={} stage=dedup_precheck reason=exact_candidate_pool_duplicate",
+                                candidate.candidate_id, candidate.work.sequence, candidate.work.wave
+                            ),
+                        );
                         write_live_artifact(&artifacts, |run| run.write_rejection(&rejection))?;
                         update_live_progress(&pb, &stats, "candidate rejected");
                         return Ok(None);
@@ -3691,6 +4245,17 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                             "duplicate":duplicate,
                             "candidate":candidate.entry,
                         });
+                        logger.warn(
+                            "candidate_rejected",
+                            &format!(
+                                "candidate_id={} sequence={} wave={} stage=dedup_precheck reason={:?} score={:?}",
+                                candidate.candidate_id,
+                                candidate.work.sequence,
+                                candidate.work.wave,
+                                duplicate.reason,
+                                duplicate.score
+                            ),
+                        );
                         write_live_artifact(&artifacts, |run| run.write_rejection(&rejection))?;
                         update_live_progress(&pb, &stats, "candidate rejected");
                         return Ok(None);
@@ -3712,6 +4277,17 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                         };
                         if let Some(duplicate) = duplicate {
                             stats.errors.fetch_add(1, Ordering::Relaxed);
+                            logger.warn(
+                                "candidate_rejected",
+                                &format!(
+                                    "candidate_id={} sequence={} wave={} stage=dedup_final reason={:?} score={:?}",
+                                    candidate.candidate_id,
+                                    candidate.work.sequence,
+                                    candidate.work.wave,
+                                    duplicate.reason,
+                                    duplicate.score
+                                ),
+                            );
                             let rejection = serde_json::json!({
                                 "schema_version":"scogo.taskgen.rejection.v2",
                                 "candidate_id":candidate.candidate_id,
@@ -3728,6 +4304,17 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                         })?;
                         stats.tasks.fetch_add(1, Ordering::Relaxed);
                         pb.inc(1);
+                        logger.info(
+                            "candidate_accepted",
+                            &format!(
+                                "candidate_id={} sequence={} wave={} review=skipped accepted={}/{}",
+                                candidate.candidate_id,
+                                candidate.work.sequence,
+                                candidate.work.wave,
+                                stats.tasks.load(Ordering::Relaxed),
+                                args.count
+                            ),
+                        );
                         update_live_progress(&pb, &stats, "accepted (review skipped)");
                         return Ok(None);
                     }
@@ -3759,6 +4346,16 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                         reference_store,
                         review_rate_limiter,
                     };
+                    logger.debug(
+                        "review_start",
+                        &format!(
+                            "candidate_id={} sequence={} wave={} model={}",
+                            candidate.candidate_id,
+                            candidate.work.sequence,
+                            candidate.work.wave,
+                            runlog::quoted(&context.review_provider.model)
+                        ),
+                    );
                     let evaluation = {
                         let _permit = review_permits
                             .acquire()
@@ -3770,6 +4367,15 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                             &candidate.entry,
                             candidate.deterministic_checks.clone(),
                             context,
+                            Some(EvaluationLogContext {
+                                logger: logger.clone(),
+                                candidate_fields: format!(
+                                    "candidate_id={} sequence={} wave={}",
+                                    candidate.candidate_id,
+                                    candidate.work.sequence,
+                                    candidate.work.wave
+                                ),
+                            }),
                         )
                         .await;
                         drop(in_flight);
@@ -3779,9 +4385,32 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                     stats.reviewed_candidates.fetch_add(1, Ordering::Relaxed);
                     update_live_progress(&pb, &stats, "review complete");
                     let evaluation = match evaluation {
-                        Ok(evaluation) => evaluation,
+                        Ok(evaluation) => {
+                            logger.info(
+                                "review_complete",
+                                &format!(
+                                    "candidate_id={} sequence={} wave={} outcome={:?} adjudicated={}",
+                                    candidate.candidate_id,
+                                    candidate.work.sequence,
+                                    candidate.work.wave,
+                                    evaluation.review.decision.outcome,
+                                    evaluation.adjudication.is_some()
+                                ),
+                            );
+                            evaluation
+                        }
                         Err(error) => {
                             stats.errors.fetch_add(1, Ordering::Relaxed);
+                            logger.error(
+                                "review_error",
+                                &format!(
+                                    "candidate_id={} sequence={} wave={} error={}",
+                                    candidate.candidate_id,
+                                    candidate.work.sequence,
+                                    candidate.work.wave,
+                                    runlog::quoted(&format!("{error:#}"))
+                                ),
+                            );
                             let rejection = serde_json::json!({
                                 "schema_version":"scogo.taskgen.rejection.v2",
                                 "candidate_id":candidate.candidate_id,
@@ -3844,6 +4473,18 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                     } else {
                         None
                     };
+                    if repair.is_some() {
+                        logger.info(
+                            "repair_queued",
+                            &format!(
+                                "candidate_id={} sequence={} wave={} next_repair_count={}",
+                                candidate.candidate_id,
+                                candidate.work.sequence,
+                                candidate.work.wave,
+                                candidate.work.repair_count + 1
+                            ),
+                        );
+                    }
 
                     let mut final_disposition = if evaluation.accepted() {
                         "accepted"
@@ -3913,9 +4554,35 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                     if accepted {
                         stats.tasks.fetch_add(1, Ordering::Relaxed);
                         pb.inc(1);
+                        logger.info(
+                            "candidate_accepted",
+                            &format!(
+                                "candidate_id={} sequence={} wave={} accepted={}/{}",
+                                candidate.candidate_id,
+                                candidate.work.sequence,
+                                candidate.work.wave,
+                                stats.tasks.load(Ordering::Relaxed),
+                                args.count
+                            ),
+                        );
                         update_live_progress(&pb, &stats, "accepted");
                     } else {
                         stats.errors.fetch_add(1, Ordering::Relaxed);
+                        logger.warn(
+                            "candidate_rejected",
+                            &format!(
+                                "candidate_id={} sequence={} wave={} stage={} disposition={}",
+                                candidate.candidate_id,
+                                candidate.work.sequence,
+                                candidate.work.wave,
+                                if final_disposition == "duplicate" {
+                                    "dedup_final"
+                                } else {
+                                    "model_review"
+                                },
+                                final_disposition
+                            ),
+                        );
                         update_live_progress(&pb, &stats, "review rejected");
                     }
                     Ok(repair)
@@ -3929,6 +4596,18 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
                 repair_queue.push_back(repair);
             }
         }
+        logger.info(
+            "wave_complete",
+            &format!(
+                "wave={wave} attempts={} generated={} reviewed={} accepted={} rejected={} repairs_queued={}",
+                stats.attempts.load(Ordering::Relaxed),
+                stats.generated_candidates.load(Ordering::Relaxed),
+                stats.reviewed_candidates.load(Ordering::Relaxed),
+                stats.tasks.load(Ordering::Relaxed),
+                stats.errors.load(Ordering::Relaxed),
+                repair_queue.len()
+            ),
+        );
     }
     shutdown_listener.abort();
 
@@ -3942,6 +4621,15 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         execution_error = Some(format!(
             "candidate limit exhausted after {max_candidates} generated candidates"
         ));
+        logger.warn(
+            "candidate_limit_exhausted",
+            &format!(
+                "attempts={} max_candidates={max_candidates} accepted={}/{}",
+                stats.attempts.load(Ordering::Relaxed),
+                stats.tasks.load(Ordering::Relaxed),
+                args.count
+            ),
+        );
     }
     let accepted = stats.tasks.load(Ordering::Relaxed);
     artifacts.lock().unwrap().as_mut().unwrap().flush()?;
@@ -3953,9 +4641,26 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         .accepted_path()
         .to_path_buf();
     let expected_staged_count = existing + accepted;
+    logger.info(
+        "final_validation_start",
+        &format!(
+            "staged_path={} expected_records={expected_staged_count}",
+            staged_path.display()
+        ),
+    );
     let staged_distribution = match validate_task_file(&staged_path, expected_staged_count) {
-        Ok(distribution) => distribution,
+        Ok(distribution) => {
+            logger.info(
+                "final_validation_complete",
+                &format!("records={}", distribution.records),
+            );
+            distribution
+        }
         Err(error) => {
+            logger.error(
+                "final_validation_failed",
+                &format!("error={}", runlog::quoted(&format!("{error:#}"))),
+            );
             if execution_error.is_none() {
                 execution_error = Some(format!("final task validation failed: {error:#}"));
             }
@@ -4006,6 +4711,16 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         )?;
         let run = artifacts.lock().unwrap().take().unwrap();
         run.finish_incomplete(&report)?;
+        heartbeat.stop();
+        logger.error(
+            "run_complete",
+            &format!(
+                "status=failed accepted={accepted}/{} staged={staged_count} error={}",
+                args.count,
+                runlog::quoted(&terminal_error)
+            ),
+        );
+        logger.sync()?;
         bail!(
             "{terminal_error}. Partial audit artifacts retained at {}",
             run_dir.display()
@@ -4026,10 +4741,24 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             adjudication_requests: adjudication_telemetry.snapshot(),
         },
     )?;
+    logger.info(
+        "publication_start",
+        &format!("accepted={accepted} staged={staged_count}"),
+    );
     let run = artifacts.lock().unwrap().take().unwrap();
     let published = run.publish(&report)?;
     let final_count = staged_count;
     pb.finish_with_message("exact accepted count published");
+    heartbeat.stop();
+    logger.info(
+        "run_complete",
+        &format!(
+            "status=success accepted={accepted}/{} total_records={final_count} output={}",
+            args.count,
+            runlog::quoted(&published.output.display().to_string())
+        ),
+    );
+    logger.sync()?;
     println!(
         "Generated exactly {} newly accepted tasks ({} total) -> {}",
         args.count,
@@ -4046,6 +4775,7 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     }
     println!("Rejected candidates: {}", published.rejected.display());
     println!("Run report: {}", published.run.display());
+    println!("Run log: {}", logger.path().display());
     Ok(())
 }
 
@@ -4739,6 +5469,16 @@ mod tests {
     }
 
     #[test]
+    fn run_log_api_base_omits_url_credentials_and_query_values() {
+        let logged = safe_requested_api_base(
+            "https://api-user:api-password@example.com/v1?token=secret#fragment",
+        );
+        assert_eq!(logged, "https://example.com/v1");
+        assert!(!logged.contains("api-password"));
+        assert!(!logged.contains("secret"));
+    }
+
+    #[test]
     fn keyfiles_parse_even_when_environment_keys_are_present() {
         let cli = Cli::try_parse_from([
             "taskgen",
@@ -4981,9 +5721,12 @@ mod tests {
         assert!(run_generate(*args).await.is_err());
         let rejected = std::fs::read_to_string(run_dir.join("rejected.jsonl")).unwrap();
         let report = std::fs::read_to_string(run_dir.join("run.json")).unwrap();
+        let log = std::fs::read_to_string(run_dir.join("run.log")).unwrap();
         assert!(!rejected.contains("test-secret-key"), "{rejected}");
         assert!(!report.contains("test-secret-key"), "{report}");
+        assert!(!log.contains("test-secret-key"), "{log}");
         assert!(rejected.contains("[REDACTED]"), "{rejected}");
+        assert!(log.contains("[REDACTED"), "{log}");
     }
 
     #[tokio::test]
@@ -5314,6 +6057,7 @@ mod tests {
             1
         );
         assert_eq!(report["artifacts"]["tasks"]["file"], "tasks.jsonl");
+        assert_eq!(report["artifacts"]["run_log"]["file"], "run.log");
         assert_eq!(
             report["artifacts"]["tasks"]["sha256"]
                 .as_str()
@@ -5323,6 +6067,29 @@ mod tests {
         );
         assert!(generation_calls >= 3);
         assert!(review_calls >= 3);
+        let log = std::fs::read_to_string(paths.log).unwrap();
+        for event in [
+            "run_start",
+            "config_complete",
+            "wave_start",
+            "generation_start",
+            "generation_complete",
+            "review_start",
+            "review_complete",
+            "candidate_accepted",
+            "run_complete",
+        ] {
+            assert!(log.contains(event), "run log missing {event}: {log}");
+        }
+        for config in [
+            "count=2",
+            "model=\"test-model\"",
+            "workers=2",
+            "taxonomy_id=\"scogo-enterprise-netops-v2\"",
+        ] {
+            assert!(log.contains(config), "run log missing {config}: {log}");
+        }
+        assert!(!log.contains("test-key"), "{log}");
     }
 
     #[tokio::test]
@@ -5690,6 +6457,18 @@ mod tests {
         assert_eq!(report["accepted_records"], 1);
         assert_eq!(report["calibration"]["false_reject_rate"], 0.0);
         assert_eq!(report["review"]["model"], "same-model");
+        let log = std::fs::read_to_string(paths.log).unwrap();
+        for event in [
+            "run_start",
+            "config_complete",
+            "review_start",
+            "review_complete",
+            "candidate_accepted",
+            "run_complete",
+        ] {
+            assert!(log.contains(event), "review run log missing {event}: {log}");
+        }
+        assert!(!log.contains("test-key"), "{log}");
     }
 
     #[tokio::test]

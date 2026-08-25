@@ -16,6 +16,7 @@ pub struct PublishedPaths {
     pub reviews: PathBuf,
     pub rejected: PathBuf,
     pub run: PathBuf,
+    pub log: PathBuf,
 }
 
 impl PublishedPaths {
@@ -28,6 +29,7 @@ impl PublishedPaths {
             reviews: run_dir.join("reviews.jsonl"),
             rejected: run_dir.join("rejected.jsonl"),
             run: run_dir.join("run.json"),
+            log: run_dir.join("run.log"),
         }
     }
 }
