@@ -9,3 +9,4 @@ docs/superpowers/
 *.jsonl
 *.README.md
 !README.md
+taskgen

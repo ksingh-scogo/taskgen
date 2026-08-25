@@ -1,0 +1,265 @@
+{
+  "accepted_distribution": {
+    "action_risks": {
+      "advisory_plan_only": 2,
+      "approval_gated_change": 1,
+      "read_only_investigation": 7
+    },
+    "categories": {
+      "enterprise_netops": 10
+    },
+    "difficulties": {
+      "4": 1,
+      "5": 2,
+      "6": 3,
+      "7": 2,
+      "9": 2
+    },
+    "domains": {
+      "application_delivery": 1,
+      "firewall_network_security": 2,
+      "layer3_routing": 2,
+      "network_automation": 1,
+      "network_lifecycle_governance": 1,
+      "vpn_remote_access": 2,
+      "wireless_lan": 1
+    },
+    "environments": {
+      "branch": 1,
+      "campus": 2,
+      "cloud": 1,
+      "enterprise_wireless": 1,
+      "hybrid": 3,
+      "kubernetes": 1,
+      "lab_staging": 1
+    },
+    "evidence_bundles": {
+      "config_only": 2,
+      "config_oper_state": 1,
+      "logs_events": 1,
+      "multi_source": 4,
+      "packet_capture": 1,
+      "ticket_runbook": 1
+    },
+    "evidence_conditions": {
+      "contradictory": 1,
+      "missing_live_state": 1,
+      "partial": 3,
+      "sufficient": 5
+    },
+    "incident_mechanisms": {
+      "certificate_identity_failure": 1,
+      "configuration_drift": 1,
+      "control_plane_failure": 1,
+      "data_plane_failure": 1,
+      "misconfiguration": 1,
+      "policy_conflict": 1,
+      "protocol_state_failure": 2,
+      "resource_exhaustion": 1,
+      "software_defect": 1
+    },
+    "platform_scopes": {
+      "multi_platform": 2,
+      "platform_neutral": 3,
+      "single_platform": 5
+    },
+    "platforms": {
+      "aws": 1,
+      "cumulus_linux": 1,
+      "fortinet_fortios": 1,
+      "google_cloud": 1,
+      "opnsense": 1,
+      "oracle_cloud": 1,
+      "palo_alto_panos": 1,
+      "sonic": 1,
+      "zabbix": 1
+    },
+    "presentations": {
+      "api_automation_brief": 1,
+      "architecture_review": 2,
+      "audit_review": 1,
+      "change_request": 2,
+      "cli_ssh_session": 2,
+      "war_room": 2
+    },
+    "records": 10,
+    "subdomains": {
+      "enterprise_netops/application_delivery/pools_members": 1,
+      "enterprise_netops/firewall_network_security/cloud_firewall_policy": 1,
+      "enterprise_netops/firewall_network_security/config_change_rollback": 1,
+      "enterprise_netops/layer3_routing/bfd": 1,
+      "enterprise_netops/layer3_routing/routing_convergence_graceful_restart": 1,
+      "enterprise_netops/network_automation/ansible": 1,
+      "enterprise_netops/network_lifecycle_governance/maintenance_windows": 1,
+      "enterprise_netops/vpn_remote_access/ssl_vpn": 1,
+      "enterprise_netops/vpn_remote_access/ztna_private_access": 1,
+      "enterprise_netops/wireless_lan/rf_planning": 1
+    },
+    "task_families": {
+      "architecture_capacity_migration_optimization": 1,
+      "change_approval_verification_rollback": 1,
+      "config_iac_review_repair": 1,
+      "telemetry_config_log_interpretation": 3,
+      "tool_selection_next_best_action": 1,
+      "troubleshooting_rca": 3
+    }
+  },
+  "accepted_new_records": 10,
+  "adjudication": {
+    "endpoint_origin": "https://omniroute.scogo.ai",
+    "input_tokens": 1987,
+    "model": "cx/gpt-5.6-sol-xhigh",
+    "output_tokens": 455
+  },
+  "artifacts": {
+    "candidates": {
+      "bytes": 44469,
+      "file": "candidates.jsonl",
+      "sha256": "42964cb8cc668765a8c9aa62f0b563eeb3f6963e52e268d57180c98d2e76b408"
+    },
+    "rejected": {
+      "bytes": 13930,
+      "file": "rejected.jsonl",
+      "sha256": "64dabddc2375fa22d11db18ff9da18a19d2b380930d947a9aeb2a35cd30a9a51"
+    },
+    "reviews": {
+      "bytes": 35555,
+      "file": "reviews.jsonl",
+      "sha256": "c2954917ccbf58e39799cf934702bfd76f01ccd72ef3bd93d3b336c2711ac04f"
+    },
+    "run": {
+      "file": "run.json"
+    },
+    "run_log": {
+      "file": "run.log"
+    },
+    "tasks": {
+      "bytes": 32511,
+      "file": "tasks.jsonl",
+      "sha256": "775e22a56b8f6d4151db8907cd63c584aade414bf4af636f4a3e3d780fc15a83"
+    }
+  },
+  "candidate_attempts": 12,
+  "command_version": "0.5.8",
+  "completed_at": "2026-08-25T09:57:09.733529660+00:00",
+  "concurrency": {
+    "generation_workers": 5,
+    "logical_cpus": 20,
+    "request_timeout_seconds": 600,
+    "review_requests_per_minute": null,
+    "review_workers": 5,
+    "runtime": "tokio-multi-thread",
+    "runtime_worker_threads": 20
+  },
+  "coordinate_replacements": 1,
+  "coordinate_seed": 20260820,
+  "dedup": {
+    "jaccard_threshold": 0.800000011920929,
+    "mode": "semantic",
+    "ngram": 5,
+    "semantic_model": "sentence-transformers/all-MiniLM-L6-v2",
+    "semantic_threshold": 0.8999999761581421
+  },
+  "duration_minutes": 7.4788119626,
+  "duration_seconds": 448.728717756,
+  "efficiency": {
+    "attempts_per_accepted": 1.2,
+    "candidate_acceptance_rate": 0.8333333333333334,
+    "coordinate_replacement_rate": 0.08333333333333333,
+    "top_up_waves": 1
+  },
+  "existing_records": 0,
+  "final_records": 10,
+  "generated_candidates": 12,
+  "generation": {
+    "effective_models": [
+      "cx/gpt-5.6-luna-max"
+    ],
+    "endpoint_origin": "https://omniroute.scogo.ai",
+    "input_tokens": 17769,
+    "model": "cx/gpt-5.6-luna-max",
+    "output_tokens": 64686,
+    "priced_cost": 0.0
+  },
+  "pipeline": {
+    "generation_review_overlap": true,
+    "max_in_flight_items": 10,
+    "mode": "streaming_generation_review_overlap"
+  },
+  "progress": {
+    "accepted": 10,
+    "generated_candidates": 12,
+    "rejected": 2,
+    "reviewed_candidates": 12
+  },
+  "rejected_candidates": 2,
+  "rejections": {
+    "by_reason": {},
+    "by_stage": {
+      "model_review_v3": 2
+    }
+  },
+  "requested_new_records": 10,
+  "requests": {
+    "adjudication": {
+      "errors": 0,
+      "rate_limits": 0,
+      "requests": 1,
+      "retries": 0,
+      "timeouts": 0,
+      "total_ms": 19792
+    },
+    "generation": {
+      "errors": 0,
+      "rate_limits": 0,
+      "requests": 12,
+      "retries": 0,
+      "timeouts": 0,
+      "total_ms": 1191293
+    },
+    "review": {
+      "errors": 0,
+      "rate_limits": 0,
+      "requests": 14,
+      "retries": 2,
+      "timeouts": 2,
+      "total_ms": 760282
+    }
+  },
+  "review": {
+    "effective_models": [
+      "cx/gpt-5.6-sol-xhigh"
+    ],
+    "enabled": true,
+    "endpoint_origin": "https://omniroute.scogo.ai",
+    "input_tokens": 23131,
+    "model": "cx/gpt-5.6-sol-xhigh",
+    "outcomes": {
+      "accept": 10,
+      "needs_verification": 1,
+      "reject": 0,
+      "revise": 1
+    },
+    "output_tokens": 22396,
+    "priced_cost": 0.0,
+    "status": "enabled"
+  },
+  "reviewed_candidates": 12,
+  "run_directory": "/home/scogo/work/taskgen/runs/scogo-enterprise-netops-v2+cx-gpt-5.6-luna-max+c10+250826-15-19",
+  "run_id": "5086a1b9",
+  "schema_version": "scogo.taskgen.run.v3",
+  "started_at": "2026-08-25T09:49:41.004811104+00:00",
+  "status": "success",
+  "taxonomy_id": "scogo-enterprise-netops-v2",
+  "taxonomy_kind": "compositional",
+  "terminal_error": null,
+  "throughput": {
+    "candidates_per_minute": 1.6045329204704613,
+    "tasks_per_minute": 1.3371107670587177
+  },
+  "timing": {
+    "adjudication_total_ms": 19792,
+    "generation_total_ms": 1191293,
+    "review_total_ms": 760282
+  }
+}

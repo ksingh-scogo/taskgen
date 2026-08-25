@@ -1,0 +1,30 @@
+{
+  "artifacts": {
+    "run_log": {
+      "file": "run.log"
+    }
+  },
+  "concurrency": {
+    "generation_workers": 5,
+    "logical_cpus": 20,
+    "request_timeout_seconds": 600,
+    "review_requests_per_minute": null,
+    "review_workers": 5,
+    "runtime": "tokio-multi-thread",
+    "runtime_worker_threads": 20
+  },
+  "coordinate_seed": 20260820,
+  "pipeline": {
+    "generation_review_overlap": true,
+    "max_in_flight_items": 10,
+    "mode": "streaming_generation_review_overlap"
+  },
+  "requested_new_records": 3000,
+  "review_enabled": true,
+  "run_id": "737c3d61",
+  "schema_version": "scogo.taskgen.run.v3",
+  "started_at": "2026-08-25T18:26:56.222773240+00:00",
+  "status": "running",
+  "taxonomy_id": "scogo-enterprise-netops-v2",
+  "taxonomy_kind": "compositional"
+}
