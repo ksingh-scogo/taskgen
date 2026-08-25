@@ -3845,3 +3845,14 @@
 2026-08-25T21:19:45.910Z INFO   review_complete              candidate_id=953bb795e89642259dec8a9c2dd4afec05a6d71986f0e0defc4d6bf79f5daab8 sequence=480 wave=1 outcome=Accept adjudicated=false
 2026-08-25T21:19:45.910Z INFO   candidate_accepted           candidate_id=953bb795e89642259dec8a9c2dd4afec05a6d71986f0e0defc4d6bf79f5daab8 sequence=480 wave=1 accepted=431/3000
 2026-08-25T21:19:45.910Z DEBUG  generation_start             sequence=490 wave=1 model="cx/gpt-5.6-luna-max" category="enterprise_netops" domain="vpn_remote_access" subdomain="gre_tunnels" difficulty=5 repair_count=0 language="en"
+2026-08-25T21:19:56.517Z DEBUG  heartbeat                    status=running; the last non-heartbeat event is the current pipeline step
+2026-08-25T21:20:01.110Z INFO   review_decision              candidate_id=b6c072215b1e4297c023ba2876f9e0cf0c8fba446c410dfe58d1dd94ddbd3147 sequence=477 wave=1 outcome=Accept claims_to_verify=0
+2026-08-25T21:20:01.111Z INFO   review_complete              candidate_id=b6c072215b1e4297c023ba2876f9e0cf0c8fba446c410dfe58d1dd94ddbd3147 sequence=477 wave=1 outcome=Accept adjudicated=false
+2026-08-25T21:20:01.111Z INFO   candidate_accepted           candidate_id=b6c072215b1e4297c023ba2876f9e0cf0c8fba446c410dfe58d1dd94ddbd3147 sequence=477 wave=1 accepted=432/3000
+2026-08-25T21:20:01.111Z DEBUG  generation_start             sequence=491 wave=1 model="cx/gpt-5.6-luna-max" category="enterprise_netops" domain="datacenter_fabric" subdomain="evpn_multihoming_esi" difficulty=4 repair_count=0 language="en"
+2026-08-25T21:20:03.506Z INFO   generation_complete          sequence=484 wave=1 candidate_id=c2e306b1f9c8c53dcfc29da941080b13c33b3e736a4d10c1a1e8e74ff2090f76 model="cx/gpt-5.6-luna-max" prompt_characters=2708
+2026-08-25T21:20:03.506Z DEBUG  review_start                 candidate_id=c2e306b1f9c8c53dcfc29da941080b13c33b3e736a4d10c1a1e8e74ff2090f76 sequence=484 wave=1 model="cx/gpt-5.6-sol-xhigh"
+2026-08-25T21:20:03.506Z DEBUG  review_request_start         candidate_id=c2e306b1f9c8c53dcfc29da941080b13c33b3e736a4d10c1a1e8e74ff2090f76 sequence=484 wave=1 model=cx/gpt-5.6-sol-xhigh
+2026-08-25T21:20:18.606Z INFO   generation_complete          sequence=487 wave=1 candidate_id=cf8785f897969f99c25a33056f7057d9ee709a1a84e1af6724dd81da716c38ba model="cx/gpt-5.6-luna-max" prompt_characters=2840
+2026-08-25T21:20:18.607Z DEBUG  review_start                 candidate_id=cf8785f897969f99c25a33056f7057d9ee709a1a84e1af6724dd81da716c38ba sequence=487 wave=1 model="cx/gpt-5.6-sol-xhigh"
+2026-08-25T21:20:18.607Z DEBUG  review_request_start         candidate_id=cf8785f897969f99c25a33056f7057d9ee709a1a84e1af6724dd81da716c38ba sequence=487 wave=1 model=cx/gpt-5.6-sol-xhigh
