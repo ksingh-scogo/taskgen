@@ -1,0 +1,599 @@
+{
+  "metadata_version": "1.0",
+  "generated_at": "2026-08-26",
+  "dataset": {
+    "id": "scogo-enterprise-netops-v2-part-1",
+    "name": "Scogo Sovereign Enterprise NetOps — Prompt Seeds, Part 1",
+    "part": 1,
+    "description": "3,500 synthetic enterprise network-operations task prompts (prompt seeds) sampled from the compositional taxonomy `scogo-enterprise-netops-v2`. Each record is a self-contained, fictional operational scenario — an incident ticket, on-call chat, CLI session, config review, change request, war room, audit, architecture review, or automation brief — carrying embedded evidence fixtures (configs, logs, telemetry, packet summaries, routing tables, topology) and a task instruction. Records are PROMPTS ONLY: there are no reference answers, no assistant messages, no tool results, and no ground-truth labels.",
+    "intended_use": "Seed corpus for teacher-trajectory generation, model evaluation on enterprise NetOps reasoning, and rubric/judge development. This is stage 1 of the pipeline defined in docs/netops-data-contract.md; a schema-valid, review-accepted prompt is not a verified or trainable trajectory.",
+    "out_of_scope": "Telecom / service-provider network operations (3GPP RAN, EPC, 5GC, IMS, spectrum planning, carrier OSS/BSS, carrier optical backbone) and certification-exam question generation are excluded by the taxonomy scope.",
+    "language": "en",
+    "license": "proprietary — Scogo internal"
+  },
+  "file": {
+    "path": "final-dataset/part-1/part-1-tasks.jsonl",
+    "filename": "part-1-tasks.jsonl",
+    "format": "JSON Lines (one JSON object per line, UTF-8, LF line endings, trailing newline)",
+    "record_count": 3500,
+    "size_bytes": 10914725,
+    "size_human": "10.4 MiB",
+    "sha256": "363cb77156a13308c4973d26d94eebc6992dca2d8def7632e9a4f2524ec10805",
+    "encoding": "utf-8",
+    "records_containing_non_ascii": 2904,
+    "note_non_ascii": "21 distinct non-ASCII codepoints, all typographic: em/en dashes (U+2014, U+2013), curly quotes (U+2019, U+201C, U+201D), arrows (U+2192, U+2194, U+2190), and a few math/unit symbols (≤ ≥ × ± µ ° −). No CJK, no emoji. Normalize if a downstream tokenizer or store requires ASCII.",
+    "non_ascii_codepoints_distinct": 21
+  },
+  "schema": {
+    "schema_version": "scogo.taskgen.task.v2",
+    "schema_file": "schemas/task-v2.schema.json",
+    "schema_id": "https://scogo.ai/schemas/taskgen-task-v2.schema.json",
+    "additional_properties": false,
+    "fields": {
+      "schema_version": {
+        "type": "string",
+        "required": true,
+        "const": "scogo.taskgen.task.v2"
+      },
+      "prompt": {
+        "type": "string",
+        "required": true,
+        "constraint": "1..20000 chars",
+        "description": "The full task text handed to a model. Self-contained: scenario framing, embedded evidence fixtures, and the instruction."
+      },
+      "category": {
+        "type": "string",
+        "required": true,
+        "description": "Top-level taxonomy category. Constant `enterprise_netops` in this part."
+      },
+      "domain": {
+        "type": "string",
+        "required": true,
+        "description": "Networking domain, e.g. layer3_routing, firewall_network_security. 25 values present."
+      },
+      "subdomain": {
+        "type": "string",
+        "required": true,
+        "description": "Specific technical topic within the domain, e.g. bgp_route_leak. 517 distinct values present."
+      },
+      "difficulty": {
+        "type": "integer",
+        "required": true,
+        "constraint": "1..10",
+        "description": "Sampled difficulty. Bounded per task_family by the taxonomy."
+      },
+      "coordinates": {
+        "type": "object",
+        "required": true,
+        "description": "The compositional taxonomy coordinate the prompt was generated to realize. See coordinates_fields."
+      },
+      "taskgen_model": {
+        "type": "string",
+        "required": true,
+        "description": "Model that authored the prompt text."
+      },
+      "temperature": {
+        "type": "number",
+        "required": true,
+        "constraint": ">= 0",
+        "description": "Sampling temperature used for generation."
+      },
+      "language": {
+        "type": "string",
+        "required": false,
+        "description": "Optional in the schema; ABSENT from every record in this file."
+      }
+    },
+    "coordinates_fields": {
+      "taxonomy_id": "Taxonomy that defines the axes. Constant `scogo-enterprise-netops-v2`.",
+      "category_id": "Mirrors the top-level `category`. Verified equal in all 3,500 records.",
+      "task_family": "What kind of work the task demands (RCA, telemetry interpretation, config review, next-best-action, change/rollback, abstention, architecture).",
+      "environment": "Where the scenario sits (campus, branch, data_center, hybrid, cloud, multicloud, kubernetes, remote_access, enterprise_wireless, ot, ai_hpc, edge, lab_staging).",
+      "platform_scope": "Enum: platform_neutral | single_platform | multi_platform. Constrains `platforms` cardinality to 0, 1, and 2 respectively.",
+      "platforms": "Array of vendor/platform ids, unique. Empty for platform_neutral.",
+      "incident_mechanism": "The underlying fault class the scenario encodes.",
+      "evidence_condition": "Quality of the supplied evidence: sufficient | partial | contradictory | stale | missing_live_state. Non-`sufficient` values are deliberate — they test abstention and escalation.",
+      "evidence_bundle": "Which artifact types are embedded in the prompt.",
+      "action_risk": "How much action the task authorizes: read_only_investigation | advisory_plan_only | approval_gated_change | staging_or_simulation | emergency_change_decision.",
+      "presentation": "Surface form / channel the prompt is written as."
+    },
+    "key_order_stable": true,
+    "key_order_top_level": [
+      "category",
+      "coordinates",
+      "difficulty",
+      "domain",
+      "prompt",
+      "schema_version",
+      "subdomain",
+      "taskgen_model",
+      "temperature"
+    ],
+    "key_order_coordinates": [
+      "action_risk",
+      "category_id",
+      "environment",
+      "evidence_bundle",
+      "evidence_condition",
+      "incident_mechanism",
+      "platform_scope",
+      "platforms",
+      "presentation",
+      "task_family",
+      "taxonomy_id"
+    ]
+  },
+  "validation": {
+    "validated_at": "2026-08-26",
+    "method": "Field-by-field check of every record against schemas/task-v2.schema.json (required keys, no additional properties, types, enums, ranges, platform_scope/platforms cardinality, platforms uniqueness, category_id == category).",
+    "records_checked": 3500,
+    "records_failing": 0,
+    "json_parse_errors": 0,
+    "missing_or_extra_fields": 0,
+    "type_violations": 0,
+    "difficulty_out_of_range": 0,
+    "platform_cardinality_violations": 0,
+    "category_id_mismatches": 0,
+    "duplicate_records_exact": 0,
+    "duplicate_prompts_exact": 0,
+    "unique_prompts": 3500,
+    "unique_coordinate_tuples": 3500,
+    "note_coordinate_uniqueness": "All 3,500 coordinate tuples (domain, subdomain, task_family, environment, incident_mechanism, evidence_condition, evidence_bundle, action_risk, presentation, platform_scope, platforms) are distinct — no coordinate is realized twice.",
+    "difficulty_within_task_family_bounds": true,
+    "note_difficulty_bounds": "Every record's difficulty falls inside the per-task_family difficulty_min/difficulty_max declared in docs/netops-taxonomy.yaml. Zero violations."
+  },
+  "deduplication": {
+    "in_pipeline": {
+      "mode": "semantic",
+      "semantic_model": "sentence-transformers/all-MiniLM-L6-v2",
+      "semantic_cosine_threshold": 0.9,
+      "lexical_ngram": 5,
+      "lexical_jaccard_threshold": 0.8,
+      "scope": "Applied within each generation run against that run's accumulated corpus."
+    },
+    "post_merge_check": {
+      "exact_duplicate_records": 0,
+      "exact_duplicate_prompts": 0,
+      "lexical_near_duplicate_scan": "5-gram Jaccard over all within-domain pairs (297,813 pairs)",
+      "max_pairwise_jaccard_observed": 0.0553,
+      "pairs_at_or_above_0_80": 0,
+      "pairs_at_or_above_0_50": 0,
+      "caveat": "The post-merge scan is lexical only and restricted to within-domain pairs. A cross-lineage semantic (embedding) dedup pass between the 3,000-record chain and the 500-record run was not run. Lexical overlap is negligible, so semantic near-duplicates are unlikely but not proven absent."
+    },
+    "removed_during_merge": {
+      "count": 1000,
+      "reason": "The netops-deepseek-qwen38-max-resume2 output (1,000 records) is a strict byte-for-byte subset of netops-deepseek-qwen38-max-2000-resume (3,000 records) — the latter resumed from the former. Those 1,000 records were kept once."
+    }
+  },
+  "provenance": {
+    "taxonomy": {
+      "id": "scogo-enterprise-netops-v2",
+      "kind": "compositional",
+      "schema_version": "scogo.taskgen.taxonomy.v3",
+      "file": "docs/netops-taxonomy.yaml",
+      "label": "Scogo Sovereign Enterprise NetOps"
+    },
+    "generator": {
+      "tool": "taskgen (Rust)",
+      "command_versions": [
+        "0.5.0",
+        "0.5.1"
+      ],
+      "repo_commit_at_metadata_time": "f29f12340443492a3b2c3bcfbe876aae7911bdf0",
+      "generation_model": "deepseek-v4-flash-0731",
+      "generation_endpoint": "http://172.16.8.12:8000 (self-hosted)",
+      "system_prompt": "prompts/netops-taskgen-system-v2.txt",
+      "temperatures_used": {
+        "0.4": 2910,
+        "0.9": 590
+      }
+    },
+    "quality_gate": {
+      "stage": "model_review_v3",
+      "review_schema": "schemas/prompt-review-v3.schema.json",
+      "review_system_prompt": "prompts/netops-prompt-review-system-v3.txt",
+      "review_models": [
+        "qwen/qwen3.8-max",
+        "deepseek-v4-flash-0731"
+      ],
+      "outcomes": "accept | revise | reject | needs_verification. Only `accept` records reach this file.",
+      "adjudication_invoked": false,
+      "rejection_reasons_seen_across_source_runs": [
+        "ambiguous_or_unanswerable",
+        "coordinate_mismatch",
+        "hidden_answer_or_solution_leakage",
+        "insufficient_or_invalid_evidence",
+        "internal_contradiction",
+        "invalid_command_or_syntax",
+        "invented_platform_feature",
+        "not_operational",
+        "numerical_or_temporal_inconsistency",
+        "protocol_or_architecture_error",
+        "technical_inaccuracy",
+        "unsupported_causality"
+      ],
+      "caveat": "Reviewer differs across lineages: the 3,000-record chain was reviewed by qwen/qwen3.8-max; the 500-record run was self-reviewed by deepseek-v4-flash-0731 (same model as the generator). The 500 subset therefore carries a weaker, self-review quality signal."
+    },
+    "composition": [
+      {
+        "records_contributed": 3000,
+        "lineage": "netops-deepseek-qwen38-max chain",
+        "terminal_run_id": "16e75f3f",
+        "terminal_run_directory": "pilot-runs/netops-deepseek-qwen38-max-2000-resume",
+        "generation_model": "deepseek-v4-flash-0731",
+        "review_model": "qwen/qwen3.8-max",
+        "run_chain": [
+          {
+            "run_id": "8772e4bc",
+            "coordinate_seed": 20260824,
+            "started_at": "2026-08-21T08:05:35Z",
+            "final_records": null,
+            "note": "aborted; no usable output"
+          },
+          {
+            "run_id": "3e29e87e",
+            "coordinate_seed": 20260825,
+            "started_at": "2026-08-21T18:04:30.854057656+00:00",
+            "final_records": 90,
+            "new_records": 0
+          },
+          {
+            "run_id": "ed738afe",
+            "coordinate_seed": 20260825,
+            "started_at": "2026-08-21T19:17:08.993143176+00:00",
+            "final_records": 1000,
+            "new_records": 910
+          },
+          {
+            "run_id": "ea08c824",
+            "coordinate_seed": 20260826,
+            "started_at": "2026-08-21T23:59:55.127000422+00:00",
+            "final_records": 2569,
+            "new_records": 1569
+          },
+          {
+            "run_id": "16e75f3f",
+            "coordinate_seed": 20260827,
+            "started_at": "2026-08-22T12:31:42.834304930+00:00",
+            "final_records": 3000,
+            "new_records": 431
+          }
+        ],
+        "terminal_run_candidate_acceptance_rate": 0.1661526599845798,
+        "terminal_run_attempts_per_accepted": 6.018561484918793
+      },
+      {
+        "records_contributed": 500,
+        "lineage": "netops-deepseek-500-20260821 retry",
+        "terminal_run_id": "644716ce",
+        "terminal_run_directory": "pilot-runs/netops-deepseek-500-20260821-retry",
+        "generation_model": "deepseek-v4-flash-0731",
+        "review_model": "deepseek-v4-flash-0731",
+        "coordinate_seed": 20260821,
+        "started_at": "2026-08-20T20:00:25.913403+00:00",
+        "completed_at": "2026-08-20T22:00:33.322968+00:00",
+        "candidate_acceptance_rate": 0.9960159362549801,
+        "attempts_per_accepted": 1.004,
+        "preceding_failed_run": {
+          "run_id": "8f5cd117",
+          "final_records": 0
+        }
+      }
+    ],
+    "generation_window": {
+      "first_run_started": "2026-08-20T20:00:25Z",
+      "last_run_completed": "2026-08-22T20:48:32Z"
+    },
+    "token_cost": {
+      "note": "Sum across the two contributing terminal runs plus the earlier chain runs is not fully reconstructible; figures below are the terminal runs only.",
+      "terminal_runs_generation_input_tokens": 4613519,
+      "terminal_runs_generation_output_tokens": 1863186,
+      "priced_cost_usd": 0.0
+    }
+  },
+  "content": {
+    "nature": "Fully synthetic. Every config excerpt, log line, telemetry series, packet summary, hostname, IP, ticket id, and timestamp is a fictional scenario fixture.",
+    "no_live_access": "Prompts must not imply live system access. Embedded evidence is supplied, not fetched.",
+    "pii": "No personal data found. Hostnames, ticket ids, and timestamps are invented. Of 8,523 IPv4 mentions, 8,393 are private/documentation/reserved; the 130 globally-routable ones are well-known public infrastructure used as realistic scenario anchors (8.8.8.8, 1.1.1.1, Azure 168.63.129.16, GCP health-check ranges 35.191.0.0 and 130.211.0.0). 28 email-like strings appear, all on placeholder domains (.local, .example, corp.example.com, contoso.com).",
+    "answers_included": false,
+    "prompt_length": {
+      "chars": {
+        "min": 1011,
+        "p25": 2114,
+        "median": 2388,
+        "mean": 2408.8,
+        "p75": 2673,
+        "p95": 3125,
+        "max": 5262,
+        "total": 8430715
+      },
+      "words_whitespace_split": {
+        "min": 147,
+        "median": 351,
+        "mean": 354.9,
+        "p95": 456,
+        "max": 797,
+        "total": 1242223
+      },
+      "note": "No tokenizer was applied. As a rough guide, ~4 chars/token puts the corpus near 2.1M tokens."
+    },
+    "secrets": "Not audited exhaustively. Credential-shaped strings in configs are synthetic scenario fixtures, not live secrets. Do not treat any token in the corpus as valid."
+  },
+  "distributions": {
+    "note": "Observed counts over all 3,500 records. Compare against the target weights in docs/netops-taxonomy.yaml.",
+    "category": {
+      "enterprise_netops": 3500
+    },
+    "difficulty": {
+      "counts": {
+        "1": 18,
+        "2": 44,
+        "3": 266,
+        "4": 415,
+        "5": 674,
+        "6": 654,
+        "7": 578,
+        "8": 459,
+        "9": 222,
+        "10": 170
+      },
+      "mean": 6.078,
+      "median": 6.0,
+      "taxonomy_target_distribution": {
+        "1": 0.02,
+        "2": 0.03,
+        "3": 0.08,
+        "4": 0.12,
+        "5": 0.18,
+        "6": 0.18,
+        "7": 0.15,
+        "8": 0.12,
+        "9": 0.07,
+        "10": 0.05
+      }
+    },
+    "domain": {
+      "cloud_hybrid_networking": 272,
+      "firewall_network_security": 270,
+      "layer3_routing": 237,
+      "network_observability": 223,
+      "network_services": 205,
+      "container_kubernetes_networking": 178,
+      "wan_internet_edge": 178,
+      "wireless_lan": 177,
+      "network_automation": 161,
+      "sdwan": 152,
+      "nac_zero_trust": 151,
+      "layer2_switching": 142,
+      "application_delivery": 133,
+      "network_performance_qos": 133,
+      "vpn_remote_access": 133,
+      "datacenter_fabric": 115,
+      "ip_addressing_ipam": 101,
+      "sdn_network_virtualization": 94,
+      "network_resilience": 92,
+      "network_lifecycle_governance": 85,
+      "ot_iot_networking": 80,
+      "storage_hpc_ai_networking": 69,
+      "physical_link_hardware": 61,
+      "packet_protocol_foundations": 34,
+      "enterprise_realtime_networking": 24
+    },
+    "subdomain": {
+      "distinct_count": 517,
+      "distinct_per_domain": {
+        "application_delivery": 24,
+        "cloud_hybrid_networking": 24,
+        "container_kubernetes_networking": 26,
+        "datacenter_fabric": 21,
+        "enterprise_realtime_networking": 16,
+        "firewall_network_security": 24,
+        "ip_addressing_ipam": 16,
+        "layer2_switching": 16,
+        "layer3_routing": 21,
+        "nac_zero_trust": 22,
+        "network_automation": 27,
+        "network_lifecycle_governance": 20,
+        "network_observability": 25,
+        "network_performance_qos": 22,
+        "network_resilience": 20,
+        "network_services": 20,
+        "ot_iot_networking": 24,
+        "packet_protocol_foundations": 13,
+        "physical_link_hardware": 17,
+        "sdn_network_virtualization": 20,
+        "sdwan": 19,
+        "storage_hpc_ai_networking": 21,
+        "vpn_remote_access": 22,
+        "wan_internet_edge": 18,
+        "wireless_lan": 22
+      },
+      "top_25": {
+        "cloud_flow_logs": 22,
+        "cloud_subnets_route_tables": 21,
+        "east_west_segmentation": 21,
+        "bgp_route_leak": 20,
+        "dns_recursive": 19,
+        "cloud_load_balancer": 18,
+        "route_redistribution": 17,
+        "doh_dot": 17,
+        "multi_region_network_ha": 17,
+        "bfd": 17,
+        "zone_based_policy": 16,
+        "transit_gateway_vwan_hub_spoke": 16,
+        "ips_ids": 16,
+        "cloud_vpn_gateway": 16,
+        "landing_zone_network_policy": 15,
+        "elephant_mice_flows": 15,
+        "ecmp": 15,
+        "overlay_tunnels": 15,
+        "cloud_onramps": 15,
+        "ospf_adjacency": 15,
+        "access_ports": 15,
+        "cloud_firewall": 15,
+        "digital_experience": 14,
+        "multi_source_evidence_correlation": 14,
+        "snat_dnat": 14
+      }
+    },
+    "task_family": {
+      "troubleshooting_rca": 860,
+      "telemetry_config_log_interpretation": 715,
+      "config_iac_review_repair": 530,
+      "tool_selection_next_best_action": 487,
+      "abstention_uncertainty_escalation": 407,
+      "change_approval_verification_rollback": 336,
+      "architecture_capacity_migration_optimization": 165
+    },
+    "environment": {
+      "hybrid": 577,
+      "data_center": 494,
+      "campus": 376,
+      "cloud": 376,
+      "branch": 351,
+      "multicloud": 226,
+      "kubernetes": 211,
+      "edge": 204,
+      "lab_staging": 195,
+      "remote_access": 166,
+      "enterprise_wireless": 162,
+      "ot": 102,
+      "ai_hpc": 60
+    },
+    "platform_scope": {
+      "single_platform": 1458,
+      "platform_neutral": 1311,
+      "multi_platform": 731
+    },
+    "platforms": {
+      "distinct_count": 99,
+      "total_mentions": 2920,
+      "top_30": {
+        "aws": 161,
+        "azure": 158,
+        "google_cloud": 114,
+        "cisco_ios_xe": 97,
+        "juniper_junos": 96,
+        "sonic": 91,
+        "arista_eos": 91,
+        "palo_alto_panos": 81,
+        "fortinet_fortios": 77,
+        "oracle_cloud": 77,
+        "opnsense": 66,
+        "huawei_vrp": 65,
+        "hpe_aruba_cx": 64,
+        "extreme_exos": 64,
+        "vyos": 61,
+        "pfsense": 61,
+        "cisco_nx_os": 60,
+        "alibaba_cloud": 60,
+        "cloudflare": 59,
+        "frrouting": 58,
+        "checkpoint_gaia": 58,
+        "nokia_srlinux": 55,
+        "cumulus_linux": 51,
+        "cisco_secure_firewall": 47,
+        "sophos_firewall": 44,
+        "cisco_aci": 39,
+        "juniper_srx": 37,
+        "solarwinds": 34,
+        "ansible": 29,
+        "vmware_nsx": 28
+      },
+      "note": "Counts are mentions, not records: a multi_platform record contributes two."
+    },
+    "incident_mechanism": {
+      "misconfiguration": 674,
+      "protocol_state_failure": 358,
+      "configuration_drift": 334,
+      "policy_conflict": 305,
+      "software_defect": 230,
+      "data_plane_failure": 219,
+      "dependency_failure": 214,
+      "control_plane_failure": 194,
+      "resource_exhaustion": 193,
+      "capacity_oversubscription": 137,
+      "asymmetric_path": 135,
+      "observability_gap": 105,
+      "convergence_failure": 93,
+      "external_provider_failure": 83,
+      "multi_fault": 80,
+      "certificate_identity_failure": 73,
+      "physical_degradation": 57,
+      "rf_interference": 16
+    },
+    "evidence_condition": {
+      "sufficient": 1514,
+      "partial": 1044,
+      "contradictory": 376,
+      "missing_live_state": 376,
+      "stale": 190
+    },
+    "evidence_bundle": {
+      "config_oper_state": 592,
+      "multi_source": 571,
+      "logs_events": 387,
+      "telemetry_timeseries": 368,
+      "topology_state": 355,
+      "config_only": 333,
+      "packet_capture": 250,
+      "ticket_runbook": 190,
+      "routing_tables": 178,
+      "iac_diff_plan": 152,
+      "intentionally_missing": 124
+    },
+    "action_risk": {
+      "read_only_investigation": 1905,
+      "advisory_plan_only": 724,
+      "approval_gated_change": 526,
+      "staging_or_simulation": 247,
+      "emergency_change_decision": 98
+    },
+    "presentation": {
+      "oncall_chat": 679,
+      "incident_ticket": 651,
+      "config_review": 449,
+      "war_room": 396,
+      "change_request": 373,
+      "cli_ssh_session": 355,
+      "architecture_review": 231,
+      "audit_review": 213,
+      "api_automation_brief": 153
+    },
+    "taskgen_model": {
+      "deepseek-v4-flash-0731": 3500
+    },
+    "temperature": {
+      "0.4": 2910,
+      "0.9": 590
+    }
+  },
+  "known_limitations": [
+    "Single generator model (deepseek-v4-flash-0731) — stylistic and reasoning-pattern homogeneity is expected. No generator diversity in this part.",
+    "Mixed reviewer strength: 3,000 records reviewed by an independent model (qwen/qwen3.8-max), 500 self-reviewed by the generator. Treat the 500 as lower-assurance.",
+    "Mixed sampling temperature: 2,910 records at 0.4 and 590 at 0.9. The 0.4 majority narrows lexical diversity.",
+    "No cross-lineage semantic dedup pass was run after the merge (lexical overlap is negligible; see deduplication.post_merge_check.caveat).",
+    "Observed axis distributions drift from taxonomy target weights, mostly because coordinate replacement on rejection reshuffles the sampler. Domains such as cloud_hybrid_networking and firewall_network_security are over-represented relative to weight; enterprise_realtime_networking and packet_protocol_foundations are thin (24 and 34 records).",
+    "The 3,000-record terminal run had a 16.6% candidate acceptance rate, driven overwhelmingly by review_error (2,123 of 2,163 rejections) rather than by quality rejections. Those errors are transport/endpoint failures, not judgements about the prompts — but it means the effective review coverage of that wave was retried rather than clean.",
+    "Prompts are unlabelled. There is no reference answer, rubric score, or difficulty ground truth to validate the sampled `difficulty` integer against.",
+    "No train/validation/test split is defined. If you split, group by domain+subdomain to avoid topical leakage.",
+    "Quality was judged by LLM review only. No human review pass has been performed on this part."
+  ],
+  "usage": {
+    "read_python": "import json\nwith open('part-1-tasks.jsonl', encoding='utf-8') as f:\n    tasks = [json.loads(line) for line in f]",
+    "read_jq": "jq -c 'select(.difficulty >= 8 and .coordinates.action_risk == \"read_only_investigation\")' part-1-tasks.jsonl",
+    "verify_integrity": "shasum -a 256 part-1-tasks.jsonl  # expect 363cb77156a13308c4973d26d94eebc6992dca2d8def7632e9a4f2524ec10805",
+    "related_files": {
+      "prompt_schema": "schemas/task-v2.schema.json",
+      "taxonomy": "docs/netops-taxonomy.yaml",
+      "data_contract": "docs/netops-data-contract.md",
+      "generation_system_prompt": "prompts/netops-taskgen-system-v2.txt",
+      "review_system_prompt": "prompts/netops-prompt-review-system-v3.txt",
+      "source_run_manifests": [
+        "pilot-runs/netops-deepseek-qwen38-max-2000-resume-check/run.json",
+        "pilot-runs/netops-deepseek-500-20260821-retry-check/run.json"
+      ],
+      "worked_example": "tests/fixtures/canonical/valid-task.json"
+    }
+  }
+}
