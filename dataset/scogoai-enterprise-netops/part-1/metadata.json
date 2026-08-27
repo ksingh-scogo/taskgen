@@ -9,11 +9,12 @@
     "intended_use": "Seed corpus for teacher-trajectory generation, model evaluation on enterprise NetOps reasoning, and rubric/judge development. This is stage 1 of the pipeline defined in docs/netops-data-contract.md; a schema-valid, review-accepted prompt is not a verified or trainable trajectory.",
     "out_of_scope": "Telecom / service-provider network operations (3GPP RAN, EPC, 5GC, IMS, spectrum planning, carrier OSS/BSS, carrier optical backbone) and certification-exam question generation are excluded by the taxonomy scope.",
     "language": "en",
-    "license": "proprietary — Scogo internal"
+    "license": "proprietary — Scogo internal",
+    "relationship_to_other_parts": "Same taxonomy, same schema. Part 1 (3,500) was written by deepseek-v4-flash-0731 and reviewed by qwen/qwen3.8-max (3,000 records) or self-reviewed by the generator (500 records). Part 2 (4,010) was written by cx/gpt-5.6-luna-max and reviewed plus adjudicated by cx/gpt-5.6-sol-xhigh. Part 3 (5,000) returns to deepseek-v4-flash-0731 as generator with qwen38-nvfp4 as reviewer. Part 1 used coordinate seeds 20260821/20260825/20260826/20260827, none of which Parts 2 or 3 used, so it shares no coordinate with either sibling. The parts have not been cross-deduplicated at the semantic level."
   },
   "file": {
-    "path": "final-dataset/part-1/part-1-tasks.jsonl",
-    "filename": "part-1-tasks.jsonl",
+    "path": "dataset/scogoai-enterprise-netops/part-1/tasks.jsonl",
+    "filename": "tasks.jsonl",
     "format": "JSON Lines (one JSON object per line, UTF-8, LF line endings, trailing newline)",
     "record_count": 3500,
     "size_bytes": 10914725,
@@ -163,6 +164,16 @@
     "removed_during_merge": {
       "count": 1000,
       "reason": "The netops-deepseek-qwen38-max-resume2 output (1,000 records) is a strict byte-for-byte subset of netops-deepseek-qwen38-max-2000-resume (3,000 records) — the latter resumed from the former. Those 1,000 records were kept once."
+    },
+    "cross_part_check": {
+      "exact_prompt_overlap_with_part_2": 0,
+      "exact_prompt_overlap_with_part_3": 0,
+      "coordinate_tuple_overlap_with_part_2": 0,
+      "coordinate_tuple_overlap_with_part_3": 0,
+      "part_1_records_on_a_coordinate_also_in_part_2": 0,
+      "part_1_records_on_a_coordinate_also_in_part_3": 0,
+      "finding": "Part 1 is fully disjoint from both siblings at prompt and coordinate level — it used different coordinate seeds.",
+      "caveat": "Checks are exact-match on prompt text and coordinate tuple. No cross-part embedding comparison was run."
     }
   },
   "provenance": {
@@ -580,9 +591,9 @@
     "Quality was judged by LLM review only. No human review pass has been performed on this part."
   ],
   "usage": {
-    "read_python": "import json\nwith open('part-1-tasks.jsonl', encoding='utf-8') as f:\n    tasks = [json.loads(line) for line in f]",
-    "read_jq": "jq -c 'select(.difficulty >= 8 and .coordinates.action_risk == \"read_only_investigation\")' part-1-tasks.jsonl",
-    "verify_integrity": "shasum -a 256 part-1-tasks.jsonl  # expect 363cb77156a13308c4973d26d94eebc6992dca2d8def7632e9a4f2524ec10805",
+    "read_python": "import json\nwith open('tasks.jsonl', encoding='utf-8') as f:\n    tasks = [json.loads(line) for line in f]",
+    "read_jq": "jq -c 'select(.difficulty >= 8 and .coordinates.action_risk == \"read_only_investigation\")' tasks.jsonl",
+    "verify_integrity": "shasum -a 256 tasks.jsonl  # expect 363cb77156a13308c4973d26d94eebc6992dca2d8def7632e9a4f2524ec10805",
     "related_files": {
       "prompt_schema": "schemas/task-v2.schema.json",
       "taxonomy": "docs/netops-taxonomy.yaml",
@@ -593,7 +604,8 @@
         "pilot-runs/netops-deepseek-qwen38-max-2000-resume-check/run.json",
         "pilot-runs/netops-deepseek-500-20260821-retry-check/run.json"
       ],
-      "worked_example": "tests/fixtures/canonical/valid-task.json"
+      "worked_example": "tests/fixtures/canonical/valid-task.json",
+      "sibling_part": "dataset/scogoai-enterprise-netops/part-2/metadata.json"
     }
   }
 }
