@@ -11,4 +11,6 @@ docs/superpowers/
 !README.md
 #runs/*/run.log
 taskgen
-
+.DS_Store
+pilot-runs/.DS_Store
+runs/.DS_Store
