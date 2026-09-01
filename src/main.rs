@@ -2797,7 +2797,7 @@ async fn run_review(args: ReviewArgs) -> Result<()> {
         &run_dir,
         None,
         &serde_json::json!({
-            "schema_version":"scogo.taskgen.review-run.v1",
+            "schema_version":"scogo.taskgen.run.v3",
             "run_id":run_id,
             "status":"running",
             "started_at":started_at.to_rfc3339(),
@@ -3021,9 +3021,11 @@ async fn run_review(args: ReviewArgs) -> Result<()> {
     } else {
         None
     };
+    artifacts.flush()?;
     let completed_at = chrono::Utc::now();
     let report = serde_json::json!({
-        "schema_version":"scogo.taskgen.review-run.v1",
+        "schema_version":"scogo.taskgen.run.v3",
+        "command_version":env!("CARGO_PKG_VERSION"),
         "run_id":run_id,
         "status":if review_errors == 0 {"success"} else {"completed_with_errors"},
         "started_at":started_at.to_rfc3339(),
@@ -3046,7 +3048,14 @@ async fn run_review(args: ReviewArgs) -> Result<()> {
         "adjudication":{"model":adjudication_provider.model,"endpoint_origin":adjudication_provider.api_base.origin().ascii_serialization()},
         "requests":{"review":review_telemetry.snapshot(),"adjudication":adjudication_telemetry.snapshot()},
         "calibration":calibration,
-        "artifacts":{"run_log":{"file":"run.log"}},
+        "artifacts":{
+            "tasks":artifact_descriptor(artifacts.accepted_path(), "tasks.jsonl")?,
+            "candidates":artifact_descriptor(&artifacts.paths().candidates, "candidates.jsonl")?,
+            "reviews":artifact_descriptor(&artifacts.paths().reviews, "reviews.jsonl")?,
+            "rejected":artifact_descriptor(&artifacts.paths().rejected, "rejected.jsonl")?,
+            "run":{"file":"run.json"},
+            "run_log":{"file":"run.log"},
+        },
     });
     logger.info(
         "publication_start",
@@ -7060,10 +7069,21 @@ mod tests {
         );
         let report: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(paths.run).unwrap()).unwrap();
+        assert_eq!(report["schema_version"], "scogo.taskgen.run.v3");
         assert_eq!(report["status"], "success");
         assert_eq!(report["accepted_records"], 1);
         assert_eq!(report["calibration"]["false_reject_rate"], 0.0);
         assert_eq!(report["review"]["model"], "same-model");
+        for (name, file) in [("tasks", "tasks.jsonl"), ("reviews", "reviews.jsonl")] {
+            let bytes = std::fs::read(run_dir.join(file)).unwrap();
+            assert_eq!(report["artifacts"][name]["file"], file);
+            assert_eq!(report["artifacts"][name]["bytes"], bytes.len());
+            assert_eq!(
+                report["artifacts"][name]["sha256"],
+                format!("{:x}", Sha256::digest(&bytes))
+            );
+        }
+        assert_eq!(report["artifacts"]["run"]["file"], "run.json");
         let log = std::fs::read_to_string(paths.log).unwrap();
         for event in [
             "run_start",
