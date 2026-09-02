@@ -607,6 +607,33 @@ taskgen review \
 
 The review run writes accepted rows to `tasks.jsonl`, all decisions to `reviews.jsonl`, rejections/errors to `rejected.jsonl`, calibration/telemetry to `run.json`, and live progress to `run.log`. It validates input schema and taxonomy coordinates before making review calls. It does not regenerate, repair, or deduplicate candidates.
 
+### Bounded Phase-B source review
+
+Phase-B mode turns `review` into a resumable exact-target gate over one complete, ordered private-HF source file. The Phase-B options are all-or-none: ordinary standalone review is unchanged when `--accepted-target` is absent.
+
+```bash
+taskgen review \
+  --input data/full-source-population.jsonl \
+  --taxonomy docs/netops-taxonomy.yaml \
+  --accepted-target 100 \
+  --run-id netops-phase-b-100 \
+  --work-dir work/netops-phase-b-100 \
+  --final-run-dir runs/netops-phase-b-100 \
+  --source-repo-id ScogoAI/netops-prompt-seed \
+  --source-revision 0123456789abcdef0123456789abcdef01234567 \
+  --source-file part-3/tasks.jsonl \
+  --source-selection unused-phase-b-100 \
+  --source-exclusion-authority evidence/source-exclusion-authority.json \
+  --api-key "$TASKGEN_REVIEW_API_KEY" \
+  --model strong/reviewer
+```
+
+When the exclusion authority is non-empty, also pass `--historical-import-reservation` and repeat `--prior-evidence NAME=PATH` for every exact logical artifact named by the authority. A `pinned_external_legacy` release requires `prior_release_set.<run-id>`, `prior_canonical_tasks.<run-id>`, `prior_legacy_source_receipt.<run-id>`, `prior_taskgen_run.<run-id>`, `prior_taskgen_tasks.<run-id>`, and `prior_taskgen_reviews.<run-id>`.
+
+The work directory contains an immutable credential-free `config.json` and fsynced hash-chained `stage.journal.jsonl`. Resume only with the same inputs and `--resume`; changed source, evidence, taxonomy, target, prompt, model, endpoint, reference corpus, or concurrency settings are rejected before provider setup. API keys and keyfile contents are deliberately excluded from the fingerprint so credentials can rotate.
+
+Taskgen admits at most `target - accepted` concurrent rows. A genuine deterministic or model rejection opens one slot for the next unused source row. Provider or transport exhaustion leaves the row pending and stops without converting it to a quality rejection. A successful run publishes the final directory atomically only at exactly the accepted target with no pending work. It includes `tasks.jsonl`, `reviews.jsonl`, `candidates.jsonl`, `rejected.jsonl`, the complete `source_population.jsonl`, `source_receipt.json`, exclusion/history evidence, prior evidence, and a last-written `run.json`. Repeating the same successful invocation with `--resume` verifies these artifacts without constructing a provider or making API calls.
+
 ### Calibrate a reviewer against human labels
 
 Create a JSONL file with one label per candidate:
