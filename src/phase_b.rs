@@ -324,11 +324,18 @@ fn hold_plan_tree(
 
 impl SourcePlan {
     fn load(args: &crate::ReviewArgs, source: &SourcePopulation, target: usize) -> Result<Self> {
-        let path = canonical_target(
-            args.source_plan_dir
-                .as_deref()
-                .context("Phase-B source-plan dir is required")?,
-        )?;
+        let requested_path = args
+            .source_plan_dir
+            .as_deref()
+            .context("Phase-B source-plan dir is required")?;
+        let requested_entry = requested_path.components().collect::<PathBuf>();
+        if std::fs::symlink_metadata(&requested_entry)?
+            .file_type()
+            .is_symlink()
+        {
+            bail!("Phase-B source-plan directory must not be a symlink");
+        }
+        let path = canonical_target(requested_path)?;
         let pin = args
             .source_plan_sha256
             .as_deref()
@@ -538,7 +545,12 @@ fn validate_source_metadata(
         bail!("Phase-B source metadata contains credential-like content");
     }
     let repo_parts = repo_id.split('/').collect::<Vec<_>>();
-    if repo_parts.len() != 2 || repo_parts.iter().any(|part| part.trim().is_empty()) {
+    if repo_id.trim() != repo_id
+        || repo_parts.len() != 2
+        || repo_parts
+            .iter()
+            .any(|part| part.is_empty() || part.trim() != *part)
+    {
         bail!("Phase-B source repo ID must be owner/name");
     }
     if revision.len() != 40
@@ -549,7 +561,20 @@ fn validate_source_metadata(
         bail!("Phase-B source revision must be a 40-character lowercase commit SHA");
     }
     let path = Path::new(source_file);
-    if path.is_absolute()
+    let components = path.components().collect::<Vec<_>>();
+    let normalized = components
+        .iter()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => value.to_str(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if source_file.trim() != source_file
+        || source_file.contains('\\')
+        || normalized.is_empty()
+        || normalized.iter().any(|part| part.trim() != *part)
+        || normalized.join("/") != source_file
+        || path.is_absolute()
         || path.components().any(|component| {
             matches!(
                 component,
@@ -671,7 +696,10 @@ fn open_nofollow(path: &Path) -> Result<File> {
     let fd = rustix::fs::openat(
         rustix::fs::CWD,
         path,
-        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::NONBLOCK
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW,
         rustix::fs::Mode::empty(),
     )?;
     Ok(File::from(fd))
@@ -698,10 +726,18 @@ fn file_identity(file: &File) -> Result<(FileIdentity, u64)> {
 
 #[cfg(not(unix))]
 fn open_nofollow(path: &Path) -> Result<File> {
-    if std::fs::symlink_metadata(path)?.file_type().is_symlink() {
-        bail!("held input path is a symlink");
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        bail!("held input path is not a regular file");
     }
     Ok(File::open(path)?)
+}
+
+fn require_regular_file(file: &File) -> Result<()> {
+    if !file.metadata()?.is_file() {
+        bail!("held input is not a regular file");
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -715,6 +751,7 @@ impl HeldFile {
     fn capture(path: &Path, max_bytes: usize) -> Result<(Self, Vec<u8>)> {
         let file = open_nofollow(path)
             .with_context(|| format!("failed no-follow open: {}", path.display()))?;
+        require_regular_file(&file)?;
         let (identity, links) = file_identity(&file)?;
         if links != 1 || identity_len(&identity) > max_bytes as u64 {
             bail!("held input must be a bounded single-link regular file");
@@ -736,8 +773,10 @@ impl HeldFile {
     }
 
     fn assert_current(&self) -> Result<()> {
+        require_regular_file(&self.file)?;
         let (held_identity, held_links) = file_identity(&self.file)?;
         let reopened = open_nofollow(&self.path)?;
+        require_regular_file(&reopened)?;
         let (path_identity, path_links) = file_identity(&reopened)?;
         if held_links != 1
             || path_links != 1
@@ -830,10 +869,14 @@ impl HeldDirectory {
         let fd = rustix::fs::openat(
             &directory,
             name.as_bytes(),
-            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::NONBLOCK
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::NOFOLLOW,
             rustix::fs::Mode::empty(),
         )?;
         let file = File::from(fd);
+        require_regular_file(&file)?;
         let (identity, links) = file_identity(&file)?;
         if links != 1 || identity_len(&identity) > max_bytes as u64 {
             bail!("held artifact is not a bounded single-link file");
@@ -858,6 +901,91 @@ impl HeldDirectory {
     #[cfg(not(unix))]
     fn read_file(&self, relative: &Path, max_bytes: usize) -> Result<(HeldFile, Vec<u8>)> {
         HeldFile::capture(&self.path.join(relative), max_bytes)
+    }
+
+    #[cfg(unix)]
+    fn inventory(&self) -> Result<(HashSet<String>, HashSet<String>, Vec<HeldDirectory>)> {
+        fn visit(
+            directory: &File,
+            root: &Path,
+            relative: &Path,
+            files: &mut HashSet<String>,
+            directories: &mut HashSet<String>,
+            held: &mut Vec<HeldDirectory>,
+        ) -> Result<()> {
+            let mut entries = rustix::fs::Dir::read_from(directory)?;
+            while let Some(entry) = entries.read() {
+                let entry = entry?;
+                let name = entry.file_name();
+                if name.to_bytes() == b"." || name.to_bytes() == b".." {
+                    continue;
+                }
+                use std::os::unix::ffi::OsStrExt;
+                let child_relative = relative.join(std::ffi::OsStr::from_bytes(name.to_bytes()));
+                let child_name = child_relative
+                    .to_str()
+                    .context("held directory contains a non-UTF-8 entry")?
+                    .replace('\\', "/");
+                let stat =
+                    rustix::fs::statat(directory, name, rustix::fs::AtFlags::SYMLINK_NOFOLLOW)?;
+                match rustix::fs::FileType::from_raw_mode(stat.st_mode) {
+                    rustix::fs::FileType::RegularFile => {
+                        files.insert(child_name);
+                    }
+                    rustix::fs::FileType::Directory => {
+                        directories.insert(child_name);
+                        let fd = rustix::fs::openat(
+                            directory,
+                            name,
+                            rustix::fs::OFlags::RDONLY
+                                | rustix::fs::OFlags::DIRECTORY
+                                | rustix::fs::OFlags::CLOEXEC
+                                | rustix::fs::OFlags::NOFOLLOW,
+                            rustix::fs::Mode::empty(),
+                        )?;
+                        let file = File::from(fd);
+                        let (identity, _) = file_identity(&file)?;
+                        let child = HeldDirectory {
+                            path: root.join(&child_relative),
+                            file,
+                            identity,
+                        };
+                        visit(&child.file, root, &child_relative, files, directories, held)?;
+                        held.push(child);
+                    }
+                    _ => bail!("held directory tree contains a non-regular entry"),
+                }
+            }
+            Ok(())
+        }
+
+        let mut files = HashSet::new();
+        let mut directories = HashSet::new();
+        let mut held = Vec::new();
+        visit(
+            &self.file,
+            &self.path,
+            Path::new(""),
+            &mut files,
+            &mut directories,
+            &mut held,
+        )?;
+        Ok((files, directories, held))
+    }
+
+    #[cfg(not(unix))]
+    fn inventory(&self) -> Result<(HashSet<String>, HashSet<String>, Vec<HeldDirectory>)> {
+        let mut files = HashSet::new();
+        let mut directories = HashSet::new();
+        let mut held = Vec::new();
+        hold_plan_tree(
+            &self.path,
+            &self.path,
+            &mut files,
+            &mut directories,
+            &mut held,
+        )?;
+        Ok((files, directories, held))
     }
 }
 
@@ -1014,6 +1142,11 @@ fn prepare_run(
     review_prompt: &str,
     taxonomy_snapshot: Option<(HeldFile, Vec<u8>)>,
 ) -> Result<PreparedRun> {
+    let review_api_base = crate::provider::normalize_api_base(&args.api_base)?;
+    let adjudication_api_base = match args.adjudication_api_base.as_deref() {
+        Some(value) => crate::provider::normalize_api_base(value)?,
+        None => review_api_base.clone(),
+    };
     let target = args
         .accepted_target
         .context("Phase-B accepted target is required")?;
@@ -1080,7 +1213,7 @@ fn prepare_run(
         },
         "review":{
             "model":args.model,
-            "endpoint":crate::safe_requested_api_base(&args.api_base),
+            "endpoint":crate::safe_api_base(&review_api_base),
             "prompt_sha256":sha256_bytes(review_prompt.as_bytes()),
             "max_output_tokens":args.max_output_tokens,
             "workers":args.review_workers,
@@ -1089,7 +1222,7 @@ fn prepare_run(
         },
         "adjudication":{
             "model":args.adjudication_model.as_deref().unwrap_or(&args.model),
-            "endpoint":crate::safe_requested_api_base(args.adjudication_api_base.as_deref().unwrap_or(&args.api_base)),
+            "endpoint":crate::safe_api_base(&adjudication_api_base),
         }
     });
     let config_sha256 = sha256_bytes(&serde_json::to_vec(&config)?);
@@ -1114,30 +1247,63 @@ fn sync_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn sibling_work_directory(prepared: &PreparedRun, state: &str) -> Result<PathBuf> {
+    let parent = prepared
+        .work_dir
+        .parent()
+        .context("Phase-B work path has no parent")?;
+    let name = prepared
+        .work_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("Phase-B work path needs a UTF-8 name")?;
+    Ok(parent.join(format!(".{name}.{state}-{}", &prepared.config_sha256[..16])))
+}
+
+fn remove_unanchored_directory(path: &Path, parent: &Path) -> Result<()> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        bail!("unanchored Phase-B path is not a directory");
+    }
+    HeldDirectory::capture(path)?.assert_current()?;
+    std::fs::remove_dir_all(path)?;
+    sync_directory(parent)?;
+    Ok(())
+}
+
 fn initialize_work_files(prepared: &PreparedRun) -> Result<StageJournal> {
-    let config_path = prepared.work_dir.join("config.json");
-    let config_file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&config_path)?;
-    let mut writer = std::io::BufWriter::new(config_file);
-    serde_json::to_writer_pretty(
-        &mut writer,
-        &json!({
+    let parent = prepared.work_dir.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let initializing = sibling_work_directory(prepared, "initializing")?;
+    remove_unanchored_directory(&initializing, parent)?;
+    std::fs::create_dir(&initializing)?;
+    sync_directory(parent)?;
+    let result = (|| -> Result<StageJournal> {
+        let mut config_bytes = serde_json::to_vec_pretty(&json!({
             "schema_version":"scogo.taskgen.phase-b-work.v1",
             "config_sha256":prepared.config_sha256,
             "config":prepared.config,
-        }),
-    )?;
-    writer.write_all(b"\n")?;
-    writer.flush()?;
-    writer.get_ref().sync_all()?;
-    let journal = StageJournal::create(
-        &prepared.work_dir.join("stage.journal.jsonl"),
-        &prepared.config_sha256,
-    )?;
-    sync_directory(&prepared.work_dir)?;
-    Ok(journal)
+        }))?;
+        config_bytes.push(b'\n');
+        write_synced(&initializing.join("config.json"), &config_bytes)?;
+        let journal = StageJournal::create(
+            &initializing.join("stage.journal.jsonl"),
+            &prepared.config_sha256,
+        )?;
+        sync_directory(&initializing)?;
+        sync_directory(parent)?;
+        atomic_rename_noreplace(&initializing, &prepared.work_dir)?;
+        sync_directory(parent)?;
+        Ok(journal)
+    })();
+    if result.is_err() && initializing.exists() {
+        let _ = remove_unanchored_directory(&initializing, parent);
+    }
+    result
 }
 
 fn open_work(prepared: &PreparedRun, resume: bool) -> Result<StageJournal> {
@@ -1151,10 +1317,15 @@ fn open_work(prepared: &PreparedRun, resume: bool) -> Result<StageJournal> {
     let journal_path = prepared.work_dir.join("stage.journal.jsonl");
     if resume {
         if !prepared.work_dir.is_dir() {
+            if sibling_work_directory(prepared, "initializing")?.exists() {
+                return initialize_work_files(prepared);
+            }
             bail!("Phase-B resume work directory does not exist");
         }
         if !config_path.exists() {
             if std::fs::read_dir(&prepared.work_dir)?.next().is_none() {
+                std::fs::remove_dir(&prepared.work_dir)?;
+                sync_directory(prepared.work_dir.parent().unwrap_or_else(|| Path::new(".")))?;
                 return initialize_work_files(prepared);
             }
             bail!("Phase-B initialization is incomplete and work directory is not empty");
@@ -1186,7 +1357,6 @@ fn open_work(prepared: &PreparedRun, resume: bool) -> Result<StageJournal> {
     }
     let parent = prepared.work_dir.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(parent)?;
-    std::fs::create_dir(&prepared.work_dir)?;
     initialize_work_files(prepared)
 }
 
@@ -2176,7 +2346,12 @@ where
         .context("Phase-B final run directory needs a UTF-8 name")?;
     let temporary_name = format!(".{final_name}.prepared-{}", &prepared.config_sha256[..16]);
     let temporary = parent.join(&temporary_name);
+    if journal.snapshot.seal_prepared_manifest_sha256.is_some() {
+        bail!("Phase-B seal is already anchored");
+    }
+    remove_unanchored_directory(&temporary, parent)?;
     std::fs::create_dir(&temporary)?;
+    sync_directory(parent)?;
     let result = (|| -> Result<String> {
         let source_by_id = prepared
             .eligible_rows
@@ -2307,6 +2482,7 @@ where
         manifest_bytes.push(b'\n');
         write_synced(&temporary.join("run.json"), &manifest_bytes)?;
         sync_directory(&temporary)?;
+        sync_directory(parent)?;
         let manifest_sha256 = sha256_bytes(&manifest_bytes);
         journal.append(
             "__run__",
@@ -2418,6 +2594,18 @@ fn verify_run_directory(
         held_files.push(held);
         payloads.insert(name.clone(), bytes);
     }
+    let mut declared_directories = HashSet::new();
+    for file in &declared_files {
+        let mut parent = Path::new(file).parent();
+        while let Some(path) = parent.filter(|path| !path.as_os_str().is_empty()) {
+            declared_directories.insert(path.to_string_lossy().replace('\\', "/"));
+            parent = path.parent();
+        }
+    }
+    let (actual_files, actual_directories, held_directories) = directory.inventory()?;
+    if actual_files != declared_files || actual_directories != declared_directories {
+        bail!("sealed Phase-B directory tree differs from its manifest");
+    }
     let tasks = std::str::from_utf8(&payloads["tasks"])?
         .lines()
         .map(serde_json::from_str::<Value>)
@@ -2467,6 +2655,9 @@ fn verify_run_directory(
         }
     }
     for held in &held_files {
+        held.assert_current()?;
+    }
+    for held in &held_directories {
         held.assert_current()?;
     }
     directory.assert_current()?;
@@ -2969,6 +3160,59 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn source_plan_rejects_top_level_symlink_and_inexact_source_metadata() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("source.jsonl");
+        std::fs::write(&source, format!("{}\n", golden_task())).unwrap();
+        let (plan, pin) = write_empty_plan(temporary.path(), &source);
+        let taxonomy =
+            crate::taxonomy::TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml"))
+                .unwrap();
+        let population = load_source_population(&source, &taxonomy).unwrap();
+
+        let plan_link = temporary.path().join("plan-link");
+        std::os::unix::fs::symlink(&plan, &plan_link).unwrap();
+        for linked_path in [
+            plan_link.clone(),
+            PathBuf::from(format!("{}/", plan_link.display())),
+        ] {
+            let linked_args = phase_b_args(&source, &linked_path, &pin, temporary.path());
+            assert!(SourcePlan::load(&linked_args, &population, 1).is_err());
+        }
+
+        let authority_path = plan.join("source_exclusion_authority.json");
+        let original: Value =
+            serde_json::from_slice(&std::fs::read(&authority_path).unwrap()).unwrap();
+        for (field, value) in [
+            ("repo_id", " ScogoAI/netops-prompt-seed"),
+            ("repo_id", "ScogoAI /netops-prompt-seed"),
+            ("repo_id", "ScogoAI/"),
+            ("source_file", ""),
+            ("source_file", "part-3/tasks.jsonl "),
+            ("source_file", "part-3 /tasks.jsonl"),
+            ("source_file", "part-3//tasks.jsonl"),
+        ] {
+            let mut changed = original.clone();
+            changed[field] = json!(value);
+            let mut identity = changed.as_object().unwrap().clone();
+            identity.remove("authority_id");
+            changed["authority_id"] = json!(format!(
+                "authority_{}",
+                sha256_bytes(&serde_json::to_vec(&identity).unwrap())
+            ));
+            let mut bytes = serde_json::to_vec(&changed).unwrap();
+            bytes.push(b'\n');
+            std::fs::write(&authority_path, &bytes).unwrap();
+            let args = phase_b_args(&source, &plan, &sha256_bytes(&bytes), temporary.path());
+            assert!(
+                SourcePlan::load(&args, &population, 1).is_err(),
+                "accepted inexact {field}={value:?}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn preflight_only_creates_no_work_lock_or_provider_state() {
         let temporary = tempfile::tempdir().unwrap();
@@ -2983,6 +3227,29 @@ mod tests {
         assert!(!temporary.path().join("work").exists());
         assert!(!temporary.path().join("final").exists());
         assert!(!temporary.path().join(".work.phase-b.lock").exists());
+    }
+
+    #[tokio::test]
+    async fn preflight_rejects_invalid_provider_urls_without_side_effects() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("source.jsonl");
+        std::fs::write(&source, format!("{}\n", golden_task())).unwrap();
+        let (plan, pin) = write_empty_plan(temporary.path(), &source);
+
+        for adjudication in [false, true] {
+            let mut args = phase_b_args(&source, &plan, &pin, temporary.path());
+            args.preflight_only = true;
+            if adjudication {
+                args.adjudication_api_base = Some("not a URL".into());
+            } else {
+                args.api_base = "file:///tmp/not-http".into();
+            }
+            let error = run(args).await.unwrap_err();
+            assert!(error.to_string().contains("API base URL"), "{error:#}");
+            assert!(!temporary.path().join("work").exists());
+            assert!(!temporary.path().join("final").exists());
+            assert!(!temporary.path().join(".work.phase-b.lock").exists());
+        }
     }
 
     #[tokio::test]
@@ -3250,6 +3517,35 @@ mod tests {
     }
 
     #[test]
+    fn resume_rebuilds_an_unpublished_atomic_work_initialization() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("source.jsonl");
+        std::fs::write(&source, format!("{}\n", golden_task())).unwrap();
+        let (plan, pin) = write_empty_plan(temporary.path(), &source);
+        let args = phase_b_args(&source, &plan, &pin, temporary.path());
+        let taxonomy =
+            crate::taxonomy::TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml"))
+                .unwrap();
+        let prepared = prepare_run(&args, &taxonomy, "review prompt", None).unwrap();
+        let work_name = prepared.work_dir.file_name().unwrap().to_string_lossy();
+        let initializing = prepared.work_dir.parent().unwrap().join(format!(
+            ".{work_name}.initializing-{}",
+            &prepared.config_sha256[..16]
+        ));
+        std::fs::create_dir(&initializing).unwrap();
+        std::fs::write(initializing.join("config.json"), b"{\"torn\":").unwrap();
+
+        let journal = open_work(&prepared, true).unwrap();
+        assert_eq!(journal.snapshot.rows.len(), 0);
+        assert!(!initializing.exists());
+        let stored: Value =
+            serde_json::from_slice(&std::fs::read(prepared.work_dir.join("config.json")).unwrap())
+                .unwrap();
+        assert_eq!(stored["config_sha256"], prepared.config_sha256);
+        assert!(prepared.work_dir.join("stage.journal.jsonl").is_file());
+    }
+
+    #[test]
     fn journal_recovers_a_torn_tail_and_rejects_terminal_conflicts() {
         let temporary = tempfile::tempdir().unwrap();
         let path = temporary.path().join("stage.journal.jsonl");
@@ -3409,6 +3705,40 @@ mod tests {
 
         assert!(HeldFile::capture(&source, 1024).is_err());
         assert!(HeldFile::capture(&symlink, 1024).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn held_input_rejects_devices_and_fifos_before_reading() {
+        assert!(HeldFile::capture(Path::new("/dev/null"), 1024).is_err());
+
+        let temporary = tempfile::tempdir().unwrap();
+        let fifo = temporary.path().join("evidence.fifo");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let writer_path = fifo.clone();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            if let Ok(fd) = rustix::fs::openat(
+                rustix::fs::CWD,
+                &writer_path,
+                rustix::fs::OFlags::WRONLY
+                    | rustix::fs::OFlags::NONBLOCK
+                    | rustix::fs::OFlags::CLOEXEC,
+                rustix::fs::Mode::empty(),
+            ) {
+                let mut file = File::from(fd);
+                let _ = file.write_all(b"x");
+            }
+        });
+        let result = HeldFile::capture(&fifo, 1024);
+        writer.join().unwrap();
+        assert!(result.is_err());
     }
 
     #[test]
@@ -3877,6 +4207,35 @@ mod tests {
     }
 
     #[test]
+    fn seal_rebuilds_an_unanchored_prepared_directory() {
+        let (_temporary, prepared, snapshot) = seal_fixture();
+        let final_name = prepared
+            .final_run_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy();
+        let unanchored = prepared.final_run_dir.parent().unwrap().join(format!(
+            ".{final_name}.prepared-{}",
+            &prepared.config_sha256[..16]
+        ));
+        std::fs::create_dir(&unanchored).unwrap();
+        std::fs::write(unanchored.join("partial"), b"crash-before-anchor").unwrap();
+        let (mut journal, _) = StageJournal::resume(
+            &prepared.work_dir.join("stage.journal.jsonl"),
+            &prepared.config_sha256,
+        )
+        .unwrap();
+
+        let manifest_sha256 =
+            seal_run(&prepared, &snapshot, &mut journal, || Ok(()), || Ok(())).unwrap();
+        assert!(!unanchored.exists());
+        assert_eq!(
+            verify_sealed_run(&prepared, Some(&manifest_sha256)).unwrap(),
+            manifest_sha256
+        );
+    }
+
+    #[test]
     fn post_rename_resume_requires_and_uses_seal_prepared_anchor() {
         let (_temporary, prepared, snapshot) = seal_fixture();
         let (mut journal, _) = StageJournal::resume(
@@ -3956,6 +4315,40 @@ mod tests {
         std::fs::write(&manifest_path, b"{}\n").unwrap();
         assert!(verify_sealed_run(&prepared, Some(&manifest_sha256)).is_err());
         std::fs::write(&manifest_path, original_manifest).unwrap();
+        assert_eq!(
+            verify_sealed_run(&prepared, Some(&manifest_sha256)).unwrap(),
+            manifest_sha256
+        );
+    }
+
+    #[test]
+    fn sealed_run_verification_rejects_undeclared_tree_entries() {
+        let (_temporary, prepared, snapshot) = seal_fixture();
+        let (mut journal, _) = StageJournal::resume(
+            &prepared.work_dir.join("stage.journal.jsonl"),
+            &prepared.config_sha256,
+        )
+        .unwrap();
+        let manifest_sha256 =
+            seal_run(&prepared, &snapshot, &mut journal, || Ok(()), || Ok(())).unwrap();
+
+        let extra_file = prepared.final_run_dir.join("undeclared.txt");
+        std::fs::write(&extra_file, b"extra").unwrap();
+        assert!(verify_sealed_run(&prepared, Some(&manifest_sha256)).is_err());
+        std::fs::remove_file(extra_file).unwrap();
+
+        let extra_directory = prepared.final_run_dir.join("undeclared");
+        std::fs::create_dir(&extra_directory).unwrap();
+        assert!(verify_sealed_run(&prepared, Some(&manifest_sha256)).is_err());
+        std::fs::remove_dir(extra_directory).unwrap();
+
+        #[cfg(unix)]
+        {
+            let extra_symlink = prepared.final_run_dir.join("undeclared-link");
+            std::os::unix::fs::symlink("run.json", &extra_symlink).unwrap();
+            assert!(verify_sealed_run(&prepared, Some(&manifest_sha256)).is_err());
+            std::fs::remove_file(extra_symlink).unwrap();
+        }
         assert_eq!(
             verify_sealed_run(&prepared, Some(&manifest_sha256)).unwrap(),
             manifest_sha256
