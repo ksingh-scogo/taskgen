@@ -295,7 +295,7 @@ struct ReviewArgs {
     #[arg(long)]
     adjudication_keyfile: Option<PathBuf>,
 
-    #[arg(long)]
+    #[arg(long, conflicts_with = "accepted_target")]
     gold_labels: Option<PathBuf>,
 
     /// Exact number of accepted source rows required by bounded Phase-B review.
@@ -310,8 +310,7 @@ struct ReviewArgs {
             "source_repo_id",
             "source_revision",
             "source_file",
-            "source_selection",
-            "source_exclusion_authority"
+            "source_selection"
         ]
     )]
     accepted_target: Option<usize>,
@@ -340,11 +339,9 @@ struct ReviewArgs {
     #[arg(long, requires = "accepted_target")]
     source_selection: Option<String>,
 
-    #[arg(long, requires = "accepted_target")]
-    source_exclusion_authority: Option<PathBuf>,
-
-    #[arg(long, requires = "accepted_target")]
-    historical_import_reservation: Option<PathBuf>,
+    /// Owner pin RUN_ID=RELEASE_SET_SHA256. Repeat once per prior release.
+    #[arg(long = "prior-release-pin", requires = "accepted_target")]
+    prior_release_pin: Vec<String>,
 
     /// Exact Data Factory logical artifact mapping NAME=PATH. Repeat once per prior artifact.
     #[arg(long = "prior-evidence", requires = "accepted_target")]
@@ -5664,8 +5661,6 @@ mod tests {
             "part-3/tasks.jsonl",
             "--source-selection",
             "unused-phase-b-100",
-            "--source-exclusion-authority",
-            "evidence/source-exclusion-authority.json",
         ])
         .unwrap();
         let Command::Review(args) = parsed.command else {
@@ -5677,6 +5672,7 @@ mod tests {
             args.source_repo_id.as_deref(),
             Some("ScogoAI/netops-prompt-seed")
         );
+        assert!(args.prior_release_pin.is_empty());
 
         let partial = Cli::try_parse_from([
             "taskgen",
@@ -5705,6 +5701,34 @@ mod tests {
             legacy.is_ok(),
             "ordinary standalone review must remain valid"
         );
+
+        let calibration = Cli::try_parse_from([
+            "taskgen",
+            "review",
+            "--input",
+            "source.jsonl",
+            "--taxonomy",
+            "docs/netops-taxonomy.yaml",
+            "--accepted-target",
+            "1",
+            "--run-id",
+            "phase-b",
+            "--work-dir",
+            "work/phase-b",
+            "--final-run-dir",
+            "runs/phase-b",
+            "--source-repo-id",
+            "ScogoAI/netops-prompt-seed",
+            "--source-revision",
+            "0123456789abcdef0123456789abcdef01234567",
+            "--source-file",
+            "part-3/tasks.jsonl",
+            "--source-selection",
+            "phase-b",
+            "--gold-labels",
+            "gold.jsonl",
+        ]);
+        assert!(calibration.is_err(), "Phase-B must reject --gold-labels");
     }
 
     #[test]
@@ -7188,8 +7212,7 @@ mod tests {
             source_revision: None,
             source_file: None,
             source_selection: None,
-            source_exclusion_authority: None,
-            historical_import_reservation: None,
+            prior_release_pin: Vec::new(),
             prior_evidence: Vec::new(),
         })
         .await
@@ -7267,22 +7290,10 @@ mod tests {
             .await;
         let temporary = tempfile::tempdir().unwrap();
         let source = temporary.path().join("source.jsonl");
-        let authority = temporary.path().join("authority.json");
         let source_task: serde_json::Value =
             serde_json::from_str(include_str!("../tests/fixtures/canonical/valid-task.json"))
                 .unwrap();
         std::fs::write(&source, format!("{source_task}\n")).unwrap();
-        std::fs::write(
-            &authority,
-            serde_json::to_vec(&serde_json::json!({
-                "schema_version":"scogo.data-factory.source-exclusion-authority.v1",
-                "excluded_source_task_ids":[],
-                "historical_import_reservation_sha256":null,
-                "prior_completed_releases":[]
-            }))
-            .unwrap(),
-        )
-        .unwrap();
         let work = temporary.path().join("work");
         let final_run = temporary.path().join("final");
         let arguments = |resume: bool, with_key: bool| {
@@ -7313,8 +7324,6 @@ mod tests {
                 "part-3/tasks.jsonl".into(),
                 "--source-selection".into(),
                 "unused-phase-b-rerun".into(),
-                "--source-exclusion-authority".into(),
-                authority.display().to_string(),
                 "--review-workers".into(),
                 "1".into(),
             ];

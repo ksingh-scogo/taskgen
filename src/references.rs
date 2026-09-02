@@ -56,6 +56,19 @@ impl ReferenceStore {
         Ok(Self { documents })
     }
 
+    pub(crate) fn from_documents(rows: Vec<(String, String)>) -> Self {
+        Self {
+            documents: rows
+                .into_iter()
+                .map(|(reference_id, text)| ReferenceDocument {
+                    terms: terms(&text),
+                    reference_id,
+                    text,
+                })
+                .collect(),
+        }
+    }
+
     pub fn retrieve(
         &self,
         query: &str,
