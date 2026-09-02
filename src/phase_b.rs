@@ -64,7 +64,7 @@ const MAX_SOURCE_LINE_BYTES: usize = 16 * 1024 * 1024;
 struct SourcePopulation {
     rows: Vec<SourceRow>,
     tasks: Vec<Value>,
-    canonical_jsonl: Vec<u8>,
+    raw_jsonl: Vec<u8>,
     population_sha256: String,
     held: Option<HeldFile>,
 }
@@ -84,16 +84,10 @@ struct PreparedRun {
     target: usize,
     work_dir: PathBuf,
     final_run_dir: PathBuf,
-    source_repo_id: String,
-    source_revision: String,
-    source_file: String,
     source_selection: String,
     source: SourcePopulation,
     eligible_rows: Vec<SourceRow>,
-    excluded_ids: Vec<String>,
-    exclusion_authority: EvidenceArtifact,
-    historical_reservation: Option<EvidenceArtifact>,
-    prior_releases: Vec<PriorRelease>,
+    source_plan: SourcePlan,
     taxonomy_held: Option<HeldFile>,
     reference_snapshot: ReferenceSnapshot,
     config: Value,
@@ -109,62 +103,46 @@ impl PreparedRun {
             held.assert_current()?;
         }
         self.reference_snapshot.assert_current()?;
-        let source_by_id = self
-            .source
-            .rows
-            .iter()
-            .map(|row| (row.task_id.clone(), row.task.clone()))
-            .collect::<BTreeMap<_, _>>();
-        for release in &self.prior_releases {
-            if release.release.release_id != release.run_id
-                || selected_task_sha256(&source_by_id, &release.selected_ids)?
-                    != release.selected_task_sha256
-            {
-                bail!("typed prior release evidence changed after validation");
-            }
-            for artifact in release.artifacts.values() {
-                artifact
-                    .held
-                    .as_ref()
-                    .context("prior evidence lost its held file")?
-                    .assert_current()?;
-            }
-        }
+        self.source_plan.assert_current()?;
         Ok(())
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct ReleaseSetView {
-    schema_version: String,
-    release_id: String,
-    source_run_id: String,
-    source_artifacts: BTreeMap<String, String>,
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PriorCompletedRelease {
+    evidence_mode: String,
+    run_id: String,
+    release_set_sha256: String,
     source_receipt_sha256: Option<String>,
-    source_manifest_sha256: Option<String>,
-    source_manifest_bytes: Option<usize>,
-    scheduler_contract: Option<String>,
-    work_run_sha256: Option<String>,
-    artifacts: Vec<ReleaseArtifactView>,
+    canonical_tasks_sha256: String,
+    legacy_source_receipt_sha256: Option<String>,
+    taskgen_run_sha256: Option<String>,
+    taskgen_tasks_sha256: Option<String>,
+    taskgen_reviews_sha256: Option<String>,
+    selected_source_task_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct LegacyReceipt {
+struct SourceAuthority {
     schema_version: String,
+    authority_id: String,
     repo_id: String,
     repo_type: String,
     private: bool,
     revision: String,
     source_file: String,
-    selection: String,
-    rows: usize,
-    subset_sha256: String,
+    source_file_rows: usize,
+    source_file_sha256: String,
+    source_population_sha256: String,
+    excluded_source_task_ids: Vec<String>,
+    prior_completed_releases: Vec<PriorCompletedRelease>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct CurrentReceipt {
+struct FinalReceipt {
     schema_version: String,
     repo_id: String,
     repo_type: String,
@@ -182,62 +160,14 @@ struct CurrentReceipt {
     exclusion_authority_sha256: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct ReleaseArtifactView {
-    path: String,
-    sha256: String,
-    bytes: usize,
-    rows: Option<usize>,
-}
-
-#[derive(Debug, Deserialize)]
-struct TaskgenManifestView {
-    schema_version: String,
-    status: String,
-    run_id: String,
-    artifacts: BTreeMap<String, ManifestArtifactView>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ManifestArtifactView {
-    file: String,
-    bytes: Option<usize>,
-    sha256: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CanonicalSourceTask {
-    schema_version: String,
-    source_task_id: String,
-    split_group_id: String,
-    split: String,
-    prompt: String,
-    domain: Option<String>,
-    subdomain: Option<String>,
-    difficulty: Option<String>,
-    #[serde(default)]
-    coordinates: BTreeMap<String, Value>,
-    source_schema_version: String,
-    source_task: Value,
-    source_review: Option<Value>,
-}
-
 #[derive(Debug)]
-enum PriorMode {
-    Current,
-    PinnedExternalLegacy,
-}
-
-#[derive(Debug)]
-struct PriorRelease {
-    run_id: String,
-    release: ReleaseSetView,
-    selected_ids: Vec<String>,
-    selected_task_sha256: String,
+struct SourcePlan {
+    path: PathBuf,
+    directory: HeldDirectory,
+    nested_directories: Vec<HeldDirectory>,
+    authority: SourceAuthority,
+    authority_artifact: EvidenceArtifact,
     artifacts: BTreeMap<String, EvidenceArtifact>,
-    authority_entry: Value,
-    origin_evidence: Value,
 }
 
 fn sha256_bytes(bytes: &[u8]) -> String {
@@ -267,570 +197,310 @@ fn contains_credential(bytes: &[u8]) -> bool {
         })
 }
 
-fn read_evidence(
-    path: &Path,
-    logical_name: &str,
-    relative_file: String,
-) -> Result<EvidenceArtifact> {
-    let (held, bytes) = HeldFile::capture(path, 512 * 1024 * 1024)
-        .with_context(|| format!("failed to read {logical_name}: {}", path.display()))?;
-    if bytes.is_empty() {
-        bail!("{logical_name} is empty");
-    }
-    if contains_credential(&bytes) {
-        bail!("{logical_name} contains credential-like content");
-    }
-    Ok(EvidenceArtifact {
-        logical_name: logical_name.to_string(),
-        relative_file,
-        held: Some(held),
-        sha256: sha256_bytes(&bytes),
-        bytes,
-    })
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
 }
 
-fn parse_mappings(values: &[String], label: &str) -> Result<BTreeMap<String, String>> {
-    let mut mappings = BTreeMap::new();
-    for value in values {
-        let (name, mapped) = value
-            .split_once('=')
-            .with_context(|| format!("invalid {label} mapping {value:?}"))?;
-        if name.is_empty()
-            || mapped.is_empty()
-            || mappings.insert(name.into(), mapped.into()).is_some()
+fn prior_files(prior: &PriorCompletedRelease) -> Result<Vec<(String, String, String)>> {
+    validate_component(&prior.run_id, "source-plan prior run ID")?;
+    let mut files = vec![
+        (
+            format!("prior_release_set.{}", prior.run_id),
+            format!("prior-releases/{}/release_set.json", prior.run_id),
+            prior.release_set_sha256.clone(),
+        ),
+        (
+            format!("prior_canonical_tasks.{}", prior.run_id),
+            format!("prior-releases/{}/canonical_tasks.jsonl", prior.run_id),
+            prior.canonical_tasks_sha256.clone(),
+        ),
+    ];
+    match prior.evidence_mode.as_str() {
+        "current"
+            if prior.source_receipt_sha256.is_some()
+                && prior.legacy_source_receipt_sha256.is_none()
+                && prior.taskgen_run_sha256.is_none()
+                && prior.taskgen_tasks_sha256.is_none()
+                && prior.taskgen_reviews_sha256.is_none() =>
         {
-            bail!("invalid or duplicate {label} mapping for {name:?}");
+            files.push((
+                format!("prior_source_receipt.{}", prior.run_id),
+                format!("prior-releases/{}/source_receipt.json", prior.run_id),
+                prior.source_receipt_sha256.clone().unwrap_or_default(),
+            ));
         }
+        "pinned_external_legacy"
+            if prior.source_receipt_sha256.is_none()
+                && prior.legacy_source_receipt_sha256.is_some()
+                && prior.taskgen_run_sha256.is_some()
+                && prior.taskgen_tasks_sha256.is_some()
+                && prior.taskgen_reviews_sha256.is_some() =>
+        {
+            for (prefix, filename, digest) in [
+                (
+                    "prior_legacy_source_receipt",
+                    "legacy_source_receipt.json",
+                    prior.legacy_source_receipt_sha256.as_ref(),
+                ),
+                (
+                    "prior_taskgen_run",
+                    "taskgen_run.json",
+                    prior.taskgen_run_sha256.as_ref(),
+                ),
+                (
+                    "prior_taskgen_tasks",
+                    "taskgen_tasks.jsonl",
+                    prior.taskgen_tasks_sha256.as_ref(),
+                ),
+                (
+                    "prior_taskgen_reviews",
+                    "taskgen_reviews.jsonl",
+                    prior.taskgen_reviews_sha256.as_ref(),
+                ),
+            ] {
+                files.push((
+                    format!("{prefix}.{}", prior.run_id),
+                    format!("prior-releases/{}/{filename}", prior.run_id),
+                    digest.cloned().unwrap_or_default(),
+                ));
+            }
+        }
+        _ => bail!("source-plan prior evidence mode is incomplete"),
     }
-    Ok(mappings)
-}
-
-fn jsonl_rows(bytes: &[u8], label: &str) -> Result<Vec<Value>> {
-    bytes
-        .split(|byte| *byte == b'\n')
-        .enumerate()
-        .filter(|(_, line)| !line.iter().all(u8::is_ascii_whitespace))
-        .map(|(index, line)| {
-            serde_json::from_slice(line)
-                .with_context(|| format!("invalid {label} JSONL row {}", index + 1))
-        })
-        .collect()
-}
-
-fn selected_task_sha256(
-    source_by_id: &BTreeMap<String, Value>,
-    selected_ids: &[String],
-) -> Result<String> {
-    let mut bytes = Vec::new();
-    for task_id in selected_ids {
-        serde_json::to_writer(
-            &mut bytes,
-            source_by_id
-                .get(task_id)
-                .with_context(|| format!("prior task {task_id} is outside source population"))?,
-        )?;
-        bytes.push(b'\n');
+    if files.iter().any(|(_, _, digest)| !valid_sha256(digest)) {
+        bail!("source-plan prior evidence contains an invalid digest");
     }
-    Ok(sha256_bytes(&bytes))
+    if prior.selected_source_task_ids.is_empty()
+        || prior.selected_source_task_ids
+            != prior
+                .selected_source_task_ids
+                .iter()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+    {
+        bail!("source-plan prior selected task IDs must be sorted and unique");
+    }
+    Ok(files)
 }
 
-fn validate_receipt_source(
-    receipt: &LegacyReceipt,
-    args: &crate::ReviewArgs,
-    task_bytes: Option<&[u8]>,
-    task_count: usize,
+fn hold_plan_tree(
+    root: &Path,
+    directory: &Path,
+    files: &mut HashSet<String>,
+    directories: &mut HashSet<String>,
+    held: &mut Vec<HeldDirectory>,
 ) -> Result<()> {
-    if receipt.schema_version != "scogo.private-hf-subset-receipt.v1"
-        || receipt.repo_id != args.source_repo_id.as_deref().unwrap_or_default()
-        || receipt.repo_type != "dataset"
-        || !receipt.private
-        || receipt.revision != args.source_revision.as_deref().unwrap_or_default()
-        || receipt.source_file != args.source_file.as_deref().unwrap_or_default()
-        || receipt.rows != task_count
-        || task_bytes.is_some_and(|bytes| receipt.subset_sha256 != sha256_bytes(bytes))
-    {
-        bail!("prior source receipt does not match exact source/task evidence");
-    }
-    validate_component(&receipt.selection, "prior source selection")
-}
-
-fn validate_review(review: &Value, expected_index: Option<usize>) -> Result<()> {
-    if review["schema_version"] != "scogo.taskgen.review-record.v3"
-        || review["final_disposition"] != "accepted"
-        || review.get("candidate_id").and_then(Value::as_str).is_none()
-        || review.get("sequence").and_then(Value::as_u64).is_none()
-        || expected_index.is_some_and(|index| {
-            review.get("sequence").and_then(Value::as_u64) != Some((index + 1) as u64)
-        })
-    {
-        bail!("prior Taskgen accepted review is malformed");
-    }
-    let decision = crate::review::ReviewDecision::parse_and_validate(&serde_json::to_string(
-        &review["decision"],
-    )?)?;
-    match decision.outcome {
-        crate::review::ReviewOutcome::Accept => {
-            if review
-                .get("adjudication")
-                .is_some_and(|value| !value.is_null())
-            {
-                bail!("prior accepted review unexpectedly contains adjudication");
-            }
+    for entry in std::fs::read_dir(directory)? {
+        let path = entry?.path();
+        let metadata = std::fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            bail!("source-plan tree contains a symlink");
         }
-        crate::review::ReviewOutcome::NeedsVerification => {
-            let adjudication = review
-                .get("adjudication")
-                .and_then(|value| value.get("decision"))
-                .context("prior verified review is missing adjudication")?;
-            let decision = crate::review::AdjudicationDecision::parse_and_validate(
-                &serde_json::to_string(adjudication)?,
-            )?;
-            if decision.outcome != crate::review::AdjudicationOutcome::Accept {
-                bail!("prior accepted review has rejected adjudication");
-            }
-        }
-        crate::review::ReviewOutcome::Revise | crate::review::ReviewOutcome::Reject => {
-            bail!("prior accepted review has a non-accepted decision");
+        if metadata.is_dir() {
+            directories.insert(
+                path.strip_prefix(root)?
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+            );
+            held.push(HeldDirectory::capture(&path)?);
+            hold_plan_tree(root, &path, files, directories, held)?;
+        } else if metadata.is_file() {
+            files.insert(
+                path.strip_prefix(root)?
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+            );
+        } else {
+            bail!("source-plan tree contains a non-file entry");
         }
     }
     Ok(())
 }
 
-fn validate_canonical_tasks(
-    artifact: &EvidenceArtifact,
-    source_by_id: &BTreeMap<String, Value>,
-    task_review_by_id: Option<&BTreeMap<String, (Value, Value)>>,
-) -> Result<(Vec<String>, String)> {
-    let rows = jsonl_rows(&artifact.bytes, "prior canonical tasks")?;
-    let mut ids = Vec::new();
-    for row in rows {
-        let canonical: CanonicalSourceTask = serde_json::from_value(row)?;
-        let task_id = source_task_id(&canonical.source_task)?;
-        if canonical.schema_version != "scogo.data-factory.source-task.v1"
-            || canonical.source_task_id != task_id
-            || canonical.split_group_id != task_id
-            || !matches!(
-                canonical.split.as_str(),
-                "train" | "validation" | "evaluation"
-            )
-            || canonical.prompt != canonical.source_task["prompt"].as_str().unwrap_or_default()
-            || canonical.domain.as_deref() != canonical.source_task["domain"].as_str()
-            || canonical.subdomain.as_deref() != canonical.source_task["subdomain"].as_str()
-            || canonical.difficulty.as_deref()
-                != canonical.source_task["difficulty"]
-                    .as_i64()
-                    .map(|value| value.to_string())
-                    .as_deref()
-            || canonical.coordinates
-                != serde_json::from_value(canonical.source_task["coordinates"].clone())?
-            || canonical.source_schema_version != "scogo.taskgen.task.v2"
-            || source_by_id.get(&task_id) != Some(&canonical.source_task)
-        {
-            bail!("prior canonical task {task_id} is not bound to the source population");
+impl SourcePlan {
+    fn load(args: &crate::ReviewArgs, source: &SourcePopulation, target: usize) -> Result<Self> {
+        let path = canonical_target(
+            args.source_plan_dir
+                .as_deref()
+                .context("Phase-B source-plan dir is required")?,
+        )?;
+        let pin = args
+            .source_plan_sha256
+            .as_deref()
+            .context("Phase-B source-plan SHA-256 is required")?;
+        if !valid_sha256(pin) {
+            bail!("Phase-B source-plan SHA-256 must be lowercase hex64");
         }
-        let review = canonical
-            .source_review
-            .as_ref()
-            .context("prior canonical task is missing source review")?;
-        if let Some(taskgen) = task_review_by_id {
-            let (task, taskgen_review) = taskgen
-                .get(&task_id)
-                .context("prior canonical task is absent from Taskgen evidence")?;
-            if task != &canonical.source_task || taskgen_review != review {
-                bail!("prior canonical task/review differs from Taskgen evidence");
-            }
+        let directory = HeldDirectory::capture(&path)?;
+        let (authority_file, authority_bytes) = directory.read_file(
+            Path::new("source_exclusion_authority.json"),
+            16 * 1024 * 1024,
+        )?;
+        if sha256_bytes(&authority_bytes) != pin || contains_credential(&authority_bytes) {
+            bail!("source-plan authority pin or credential scan failed");
         }
-        validate_review(review, None)?;
-        ids.push(task_id);
-    }
-    if ids.is_empty() || ids.windows(2).any(|pair| pair[0] >= pair[1]) {
-        bail!("prior canonical task IDs must be non-empty, unique, and sorted");
-    }
-    Ok((ids.clone(), selected_task_sha256(source_by_id, &ids)?))
-}
-
-fn release_descriptor<'a>(
-    release: &'a ReleaseSetView,
-    path: &str,
-) -> Result<&'a ReleaseArtifactView> {
-    let matches = release
-        .artifacts
-        .iter()
-        .filter(|artifact| artifact.path == path)
-        .collect::<Vec<_>>();
-    if matches.len() != 1 {
-        bail!("prior release must declare {path} exactly once");
-    }
-    Ok(matches[0])
-}
-
-fn evidence_artifact<'a>(
-    artifacts: &'a BTreeMap<String, EvidenceArtifact>,
-    prefix: &str,
-    run_id: &str,
-) -> Result<&'a EvidenceArtifact> {
-    artifacts
-        .get(&format!("{prefix}.{run_id}"))
-        .with_context(|| format!("missing {prefix}.{run_id}"))
-}
-
-fn evidence_parent(artifact: &EvidenceArtifact) -> &Path {
-    artifact
-        .held
-        .as_ref()
-        .and_then(|held| held.path.parent())
-        .unwrap_or_else(|| Path::new("."))
-}
-
-fn load_prior_releases(
-    args: &crate::ReviewArgs,
-    source: &SourcePopulation,
-) -> Result<Vec<PriorRelease>> {
-    let pins = parse_mappings(&args.prior_release_pin, "--prior-release-pin")?;
-    let paths = parse_mappings(&args.prior_evidence, "--prior-evidence")?;
-    if pins.is_empty() {
-        if !paths.is_empty() {
-            bail!("prior evidence requires an owner release-set pin");
+        let raw: Value = serde_json::from_slice(&authority_bytes)?;
+        let mut canonical_authority = serde_json::to_vec(&raw)?;
+        canonical_authority.push(b'\n');
+        if canonical_authority != authority_bytes {
+            bail!("source-plan authority is not exact canonical JSON");
         }
-        return Ok(Vec::new());
-    }
-    let source_by_id = source
-        .rows
-        .iter()
-        .map(|row| (row.task_id.clone(), row.task.clone()))
-        .collect::<BTreeMap<_, _>>();
-    let mut expected_names = HashSet::new();
-    let mut releases = Vec::new();
-    for (run_id, owner_pin) in pins {
-        validate_component(&run_id, "prior release ID")?;
-        if owner_pin.len() != 64
-            || !owner_pin
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-        {
-            bail!("prior release pin must be a lowercase SHA-256");
-        }
-        let current_name = format!("prior_source_receipt.{run_id}");
-        let legacy_name = format!("prior_legacy_source_receipt.{run_id}");
-        let mode = match (
-            paths.contains_key(&current_name),
-            paths.contains_key(&legacy_name),
-        ) {
-            (true, false) => PriorMode::Current,
-            (false, true) => PriorMode::PinnedExternalLegacy,
-            _ => bail!("prior release {run_id} must declare exactly one receipt mode"),
-        };
-        let prefixes: &[&str] = match mode {
-            PriorMode::Current => &[
-                "prior_release_set",
-                "prior_canonical_tasks",
-                "prior_source_receipt",
-            ],
-            PriorMode::PinnedExternalLegacy => &[
-                "prior_release_set",
-                "prior_canonical_tasks",
-                "prior_legacy_source_receipt",
-                "prior_taskgen_run",
-                "prior_taskgen_tasks",
-                "prior_taskgen_reviews",
-            ],
-        };
-        let mut artifacts = BTreeMap::new();
-        for prefix in prefixes {
-            let name = format!("{prefix}.{run_id}");
-            expected_names.insert(name.clone());
-            let path = paths
-                .get(&name)
-                .with_context(|| format!("missing mapping {name}"))?;
-            artifacts.insert(
-                name.clone(),
-                read_evidence(Path::new(path), &name, format!("prior_evidence/{name}"))?,
-            );
-        }
-        let release_artifact = evidence_artifact(&artifacts, "prior_release_set", &run_id)?;
-        if release_artifact.sha256 != owner_pin {
-            bail!("prior release-set bytes do not match owner pin for {run_id}");
-        }
-        let release: ReleaseSetView = serde_json::from_slice(&release_artifact.bytes)?;
-        if release.schema_version != "scogo.data-factory.release-set.v1"
-            || release.release_id != run_id
-        {
-            bail!("prior release set identity/schema mismatch for {run_id}");
-        }
-        let canonical_artifact = evidence_artifact(&artifacts, "prior_canonical_tasks", &run_id)?;
-        let descriptor = release_descriptor(&release, "canonical/tasks.jsonl")?;
-        if descriptor.sha256 != canonical_artifact.sha256
-            || descriptor.bytes != canonical_artifact.bytes.len()
-        {
-            bail!("prior canonical task descriptor mismatch for {run_id}");
-        }
-        let (selected_ids, selected_digest, authority_entry, origin_evidence) = match mode {
-            PriorMode::PinnedExternalLegacy => {
-                if release.scheduler_contract.is_some()
-                    || release.source_receipt_sha256.is_some()
-                    || release.source_manifest_sha256.is_some()
-                    || release.source_manifest_bytes.is_some()
-                    || release.source_artifacts.contains_key("source_receipt")
-                {
-                    bail!("legacy prior release unexpectedly declares current source binding");
-                }
-                let taskgen_run = evidence_artifact(&artifacts, "prior_taskgen_run", &run_id)?;
-                let taskgen_tasks = evidence_artifact(&artifacts, "prior_taskgen_tasks", &run_id)?;
-                let taskgen_reviews =
-                    evidence_artifact(&artifacts, "prior_taskgen_reviews", &run_id)?;
-                let manifest: TaskgenManifestView = serde_json::from_slice(&taskgen_run.bytes)?;
-                if manifest.schema_version != "scogo.taskgen.run.v3"
-                    || manifest.status != "success"
-                    || release.source_run_id != manifest.run_id
-                {
-                    bail!("legacy Taskgen run does not match prior release");
-                }
-                for (name, artifact, file) in [
-                    ("tasks", taskgen_tasks, "tasks.jsonl"),
-                    ("reviews", taskgen_reviews, "reviews.jsonl"),
-                ] {
-                    let declared = manifest
-                        .artifacts
-                        .get(name)
-                        .context("prior Taskgen manifest is incomplete")?;
-                    if declared.file != file
-                        || declared.bytes != Some(artifact.bytes.len())
-                        || declared.sha256.as_deref() != Some(&artifact.sha256)
-                        || release.source_artifacts.get(name) != Some(&artifact.sha256)
-                    {
-                        bail!("prior Taskgen {name} descriptor mismatch");
-                    }
-                }
-                if manifest
-                    .artifacts
-                    .get("run")
-                    .map(|artifact| artifact.file.as_str())
-                    != Some("run.json")
-                    || release.source_artifacts.get("run") != Some(&taskgen_run.sha256)
-                {
-                    bail!("prior Taskgen run descriptor mismatch");
-                }
-                let tasks = jsonl_rows(&taskgen_tasks.bytes, "prior Taskgen tasks")?;
-                let reviews = jsonl_rows(&taskgen_reviews.bytes, "prior Taskgen reviews")?;
-                let accepted = reviews
-                    .into_iter()
-                    .filter(|review| review["final_disposition"] == "accepted")
-                    .collect::<Vec<_>>();
-                if accepted.len() != tasks.len() {
-                    bail!("prior Taskgen accepted review count does not match tasks");
-                }
-                let mut by_id = BTreeMap::new();
-                for (index, (task, review)) in tasks.iter().zip(&accepted).enumerate() {
-                    crate::schema::validate_instance(crate::schema::SchemaKind::Task, task)?;
-                    validate_review(review, Some(index))?;
-                    let task_id = source_task_id(task)?;
-                    if source_by_id.get(&task_id) != Some(task)
-                        || by_id
-                            .insert(task_id, (task.clone(), review.clone()))
-                            .is_some()
-                    {
-                        bail!("prior Taskgen tasks are duplicate or outside the current source");
-                    }
-                }
-                let (ids, selected_digest) =
-                    validate_canonical_tasks(canonical_artifact, &source_by_id, Some(&by_id))?;
-                if descriptor.rows != Some(ids.len())
-                    || ids.iter().cloned().collect::<HashSet<_>>()
-                        != by_id.keys().cloned().collect()
-                {
-                    bail!("prior canonical/Taskgen task populations differ");
-                }
-                let receipt_artifact =
-                    evidence_artifact(&artifacts, "prior_legacy_source_receipt", &run_id)?;
-                let receipt: LegacyReceipt = serde_json::from_slice(&receipt_artifact.bytes)?;
-                validate_receipt_source(&receipt, args, Some(&taskgen_tasks.bytes), tasks.len())?;
-                let entry = json!({
-                    "evidence_mode":"pinned_external_legacy","run_id":run_id,
-                    "release_set_sha256":release_artifact.sha256,"canonical_tasks_sha256":canonical_artifact.sha256,
-                    "legacy_source_receipt_sha256":receipt_artifact.sha256,"taskgen_run_sha256":taskgen_run.sha256,
-                    "taskgen_tasks_sha256":taskgen_tasks.sha256,"taskgen_reviews_sha256":taskgen_reviews.sha256,
-                    "selected_source_task_ids":ids,
-                });
-                let origin = json!({
-                    "run_id":run_id,
-                    "workspace_path":evidence_parent(taskgen_run),
-                    "release_path":evidence_parent(release_artifact),
-                    "release_set_sha256":release_artifact.sha256,"workspace_snapshot_sha256":taskgen_run.sha256,
-                    "workspace_source_task_sha256":taskgen_tasks.sha256,"selected_source_task_ids":ids,
-                    "selected_task_sha256":selected_digest,
-                });
-                (ids, selected_digest, entry, origin)
-            }
-            PriorMode::Current => {
-                let receipt_artifact =
-                    evidence_artifact(&artifacts, "prior_source_receipt", &run_id)?;
-                let receipt: CurrentReceipt = serde_json::from_slice(&receipt_artifact.bytes)?;
-                let legacy = LegacyReceipt {
-                    schema_version: receipt.schema_version.clone(),
-                    repo_id: receipt.repo_id.clone(),
-                    repo_type: receipt.repo_type.clone(),
-                    private: receipt.private,
-                    revision: receipt.revision.clone(),
-                    source_file: receipt.source_file.clone(),
-                    selection: receipt.selection.clone(),
-                    rows: receipt.rows,
-                    subset_sha256: receipt.subset_sha256.clone(),
-                };
-                validate_receipt_source(&legacy, args, None, receipt.rows)?;
-                let (ids, selected_digest) =
-                    validate_canonical_tasks(canonical_artifact, &source_by_id, None)?;
-                if ids.iter().cloned().collect::<HashSet<_>>()
-                    != receipt.selected_source_task_ids.iter().cloned().collect()
-                    || selected_task_sha256(&source_by_id, &receipt.selected_source_task_ids)?
-                        != receipt.subset_sha256
-                    || receipt.source_file_rows != source.tasks.len()
-                    || receipt.source_file_sha256 != sha256_bytes(&source.canonical_jsonl)
-                    || receipt.source_population_sha256 != source.population_sha256
-                    || !receipt
-                        .excluded_source_task_ids
-                        .iter()
-                        .all(|id| source_by_id.contains_key(id))
-                    || receipt.exclusion_authority_sha256.len() != 64
-                    || release.source_receipt_sha256.as_deref() != Some(&receipt_artifact.sha256)
-                    || release.source_artifacts.get("source_receipt")
-                        != Some(&receipt_artifact.sha256)
-                    || release.source_artifacts.get("tasks") != Some(&receipt.subset_sha256)
-                {
-                    bail!("current prior receipt/release does not match source population");
-                }
-                let entry = json!({
-                    "evidence_mode":"current","run_id":run_id,"release_set_sha256":release_artifact.sha256,
-                    "source_receipt_sha256":receipt_artifact.sha256,"canonical_tasks_sha256":canonical_artifact.sha256,
-                    "selected_source_task_ids":ids,
-                });
-                let origin = json!({
-                    "run_id":run_id,"workspace_path":evidence_parent(release_artifact),
-                    "release_path":evidence_parent(release_artifact),
-                    "release_set_sha256":release_artifact.sha256,
-                    "workspace_snapshot_sha256":release.work_run_sha256.clone().unwrap_or_else(|| release_artifact.sha256.clone()),
-                    "workspace_source_task_sha256":selected_digest,"selected_source_task_ids":ids,
-                    "selected_task_sha256":selected_digest,
-                });
-                (ids, selected_digest, entry, origin)
-            }
-        };
-        if descriptor.rows != Some(selected_ids.len()) {
-            bail!("prior canonical task row descriptor mismatch for {run_id}");
-        }
-        releases.push(PriorRelease {
-            run_id,
-            release,
-            selected_ids,
-            selected_task_sha256: selected_digest,
-            artifacts,
-            authority_entry,
-            origin_evidence,
-        });
-    }
-    if paths.keys().cloned().collect::<HashSet<_>>() != expected_names {
-        bail!("prior evidence mappings contain missing or unpinned artifacts");
-    }
-    releases.sort_by(|left, right| left.run_id.cmp(&right.run_id));
-    Ok(releases)
-}
-
-fn derive_history(
-    run_id: &str,
-    source: &SourcePopulation,
-    releases: &[PriorRelease],
-) -> Result<(Vec<String>, EvidenceArtifact, Option<EvidenceArtifact>)> {
-    let mut excluded_ids = releases
-        .iter()
-        .flat_map(|release| release.selected_ids.iter().cloned())
-        .collect::<Vec<_>>();
-    let occurrences = excluded_ids.len();
-    excluded_ids.sort();
-    excluded_ids.dedup();
-    if occurrences != excluded_ids.len() {
-        bail!("prior completed releases overlap each other");
-    }
-    let source_by_id = source
-        .rows
-        .iter()
-        .map(|row| (row.task_id.clone(), row.task.clone()))
-        .collect::<BTreeMap<_, _>>();
-    let historical = if excluded_ids.is_empty() {
-        None
-    } else {
-        let namespace = "taskgen-phase-b-exclusions";
-        let selected_digest = selected_task_sha256(&source_by_id, &excluded_ids)?;
-        let origin_run_ids = releases
-            .iter()
-            .map(|release| &release.run_id)
-            .collect::<Vec<_>>();
-        let reservation_run_id = format!(
-            "historical-import-{}",
-            sha256_bytes(&serde_json::to_vec(&json!({
-                "source_run_id":run_id,"namespace":namespace,"origin_run_ids":origin_run_ids,
-                "selected_source_task_ids":excluded_ids,"selected_task_sha256":selected_digest,
-            }))?)
-        );
-        let source_artifacts = json!({"tasks":selected_digest});
-        let identity = json!({
-            "run_id":reservation_run_id,"campaign_id":"historical-import","source_run_id":run_id,
-            "source_artifacts":source_artifacts,"source_receipt_sha256":null,
-            "source_manifest_sha256":null,"source_manifest_bytes":null,
-            "source_population_sha256":source.population_sha256,
-            "source_population_rows":source.tasks.len(),"exclusion_evidence_sha256":null,
-            "namespace":namespace,"strategy":"historical_import","seed":null,
-            "origin_run_ids":origin_run_ids,"origin_evidence":releases.iter().map(|release| &release.origin_evidence).collect::<Vec<_>>(),
-            "requested_count":excluded_ids.len(),"selected_source_task_ids":excluded_ids,
-            "selected_task_sha256":selected_digest,
-        });
-        let reservation_id = format!(
-            "reservation_{}",
+        let authority: SourceAuthority = serde_json::from_value(raw.clone())?;
+        let mut identity = raw
+            .as_object()
+            .context("source-plan authority must be an object")?
+            .clone();
+        let claimed_id = identity.remove("authority_id");
+        let derived_id = format!(
+            "authority_{}",
             sha256_bytes(&serde_json::to_vec(&identity)?)
         );
-        let now = chrono::Utc::now().to_rfc3339();
-        let mut reservation = identity;
-        let object = reservation
-            .as_object_mut()
-            .context("reservation identity is not an object")?;
-        object.insert(
-            "schema_version".into(),
-            json!("scogo.data-factory.task-reservation.v1"),
-        );
-        object.insert("reservation_id".into(), json!(reservation_id));
-        object.insert("status".into(), json!("completed"));
-        object.insert("created_at".into(), json!(now));
-        object.insert("updated_at".into(), json!(now));
-        object.insert("work_started_at".into(), Value::Null);
-        object.insert("completed_release_id".into(), Value::Null);
-        object.insert("completed_release_path".into(), Value::Null);
-        object.insert("completed_release_set_sha256".into(), Value::Null);
-        object.insert("release_reason".into(), Value::Null);
-        let bytes = serde_json::to_vec(&reservation)?;
-        Some(EvidenceArtifact {
-            logical_name: "historical_import_reservation".into(),
-            relative_file: "historical_import_reservation.json".into(),
-            held: None,
-            sha256: sha256_bytes(&bytes),
-            bytes,
-        })
-    };
-    let authority = json!({
-        "schema_version":"scogo.data-factory.source-exclusion-authority.v1",
-        "excluded_source_task_ids":excluded_ids,
-        "historical_import_reservation_sha256":historical.as_ref().map(|artifact| &artifact.sha256),
-        "prior_completed_releases":releases.iter().map(|release| &release.authority_entry).collect::<Vec<_>>(),
-    });
-    let bytes = serde_json::to_vec(&authority)?;
-    Ok((
-        excluded_ids,
-        EvidenceArtifact {
-            logical_name: "exclusion_authority".into(),
-            relative_file: "source_exclusion_authority.json".into(),
-            held: None,
-            sha256: sha256_bytes(&bytes),
-            bytes,
-        },
-        historical,
-    ))
+        if authority.schema_version != "scogo.data-factory.source-exclusion-authority.v2"
+            || claimed_id.as_ref().and_then(Value::as_str) != Some(&derived_id)
+            || authority.authority_id != derived_id
+            || authority.repo_type != "dataset"
+            || !authority.private
+            || authority.source_file_rows != source.rows.len()
+            || authority.source_file_sha256 != sha256_bytes(&source.raw_jsonl)
+            || authority.source_population_sha256 != source.population_sha256
+        {
+            bail!("source-plan authority does not match exact raw source");
+        }
+        validate_source_metadata(
+            args.run_id.as_deref().unwrap_or_default(),
+            &authority.repo_id,
+            &authority.revision,
+            &authority.source_file,
+            args.source_selection.as_deref().unwrap_or_default(),
+        )?;
+        let source_ids = source
+            .rows
+            .iter()
+            .map(|row| row.task_id.as_str())
+            .collect::<HashSet<_>>();
+        if authority.excluded_source_task_ids
+            != authority
+                .excluded_source_task_ids
+                .iter()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+            || authority
+                .excluded_source_task_ids
+                .iter()
+                .any(|task_id| !source_ids.contains(task_id.as_str()))
+            || target > source.rows.len() - authority.excluded_source_task_ids.len()
+        {
+            bail!("source-plan exclusions or accepted target are invalid");
+        }
+        let prior_run_ids = authority
+            .prior_completed_releases
+            .iter()
+            .map(|prior| prior.run_id.as_str())
+            .collect::<Vec<_>>();
+        if prior_run_ids.windows(2).any(|pair| pair[0] >= pair[1]) {
+            bail!("source-plan prior releases must be sorted and unique");
+        }
+        let mut prior_union = HashSet::new();
+        let mut expected_files = HashSet::from(["source_exclusion_authority.json".to_string()]);
+        let mut expected_directories = HashSet::new();
+        let mut specifications = Vec::new();
+        for prior in &authority.prior_completed_releases {
+            expected_directories.insert("prior-releases".to_string());
+            expected_directories.insert(format!("prior-releases/{}", prior.run_id));
+            for task_id in &prior.selected_source_task_ids {
+                if !prior_union.insert(task_id.clone()) {
+                    bail!("source-plan prior release selections overlap");
+                }
+            }
+            for specification in prior_files(prior)? {
+                expected_files.insert(specification.1.clone());
+                specifications.push(specification);
+            }
+        }
+        if prior_union
+            != authority
+                .excluded_source_task_ids
+                .iter()
+                .cloned()
+                .collect::<HashSet<_>>()
+        {
+            bail!("source-plan prior union does not match exclusions");
+        }
+        let mut actual_files = HashSet::new();
+        let mut actual_directories = HashSet::new();
+        let mut nested_directories = Vec::new();
+        hold_plan_tree(
+            &path,
+            &path,
+            &mut actual_files,
+            &mut actual_directories,
+            &mut nested_directories,
+        )?;
+        if actual_files != expected_files || actual_directories != expected_directories {
+            bail!("source-plan tree inventory differs from authority");
+        }
+        let mut artifacts = BTreeMap::new();
+        for (logical_name, relative_file, digest) in specifications {
+            let (held, bytes) =
+                directory.read_file(Path::new(&relative_file), 1024 * 1024 * 1024)?;
+            if sha256_bytes(&bytes) != digest {
+                bail!("source-plan opaque prior artifact digest mismatch");
+            }
+            artifacts.insert(
+                logical_name.clone(),
+                EvidenceArtifact {
+                    logical_name,
+                    relative_file,
+                    held: Some(held),
+                    sha256: digest,
+                    bytes,
+                },
+            );
+        }
+        let plan = Self {
+            path,
+            directory,
+            nested_directories,
+            authority,
+            authority_artifact: EvidenceArtifact {
+                logical_name: "exclusion_authority".into(),
+                relative_file: "source_exclusion_authority.json".into(),
+                held: Some(authority_file),
+                sha256: pin.to_string(),
+                bytes: authority_bytes,
+            },
+            artifacts,
+        };
+        plan.assert_current()?;
+        Ok(plan)
+    }
+
+    fn assert_current(&self) -> Result<()> {
+        self.directory.assert_current()?;
+        for directory in &self.nested_directories {
+            directory.assert_current()?;
+        }
+        self.authority_artifact
+            .held
+            .as_ref()
+            .context("source-plan authority lost held file")?
+            .assert_current()?;
+        for artifact in self.artifacts.values() {
+            artifact
+                .held
+                .as_ref()
+                .context("source-plan prior artifact lost held file")?
+                .assert_current()?;
+        }
+        Ok(())
+    }
 }
 
 fn validate_component(value: &str, label: &str) -> Result<()> {
@@ -959,16 +629,13 @@ fn isolated_run_paths(args: &crate::ReviewArgs) -> Result<(PathBuf, PathBuf)> {
             .as_deref()
             .context("Phase-B final run dir is required")?,
     )?;
-    let evidence = parse_mappings(&args.prior_evidence, "--prior-evidence")?
-        .into_values()
-        .map(PathBuf::from);
     validate_path_isolation(
         &work,
         &final_run,
         [args.input.clone(), args.taxonomy.clone()]
             .into_iter()
             .chain(args.review_reference_dir.iter().cloned())
-            .chain(evidence),
+            .chain(args.source_plan_dir.iter().cloned()),
     )?;
     Ok((work, final_run))
 }
@@ -1352,35 +1019,17 @@ fn prepare_run(
         .context("Phase-B accepted target is required")?;
     let run_id = args.run_id.clone().context("Phase-B run ID is required")?;
     let (work_dir, final_run_dir) = isolated_run_paths(args)?;
-    let source_repo_id = args
-        .source_repo_id
-        .clone()
-        .context("Phase-B source repo ID is required")?;
-    let source_revision = args
-        .source_revision
-        .clone()
-        .context("Phase-B source revision is required")?;
-    let source_file = args
-        .source_file
-        .clone()
-        .context("Phase-B source file is required")?;
     let source_selection = args
         .source_selection
         .clone()
         .context("Phase-B source selection is required")?;
-    validate_source_metadata(
-        &run_id,
-        &source_repo_id,
-        &source_revision,
-        &source_file,
-        &source_selection,
-    )?;
-
     let source = load_source_population(&args.input, taxonomy)?;
-    let prior_releases = load_prior_releases(args, &source)?;
-    let (excluded_ids, exclusion_authority, historical_reservation) =
-        derive_history(&run_id, &source, &prior_releases)?;
-    let excluded = excluded_ids.iter().collect::<HashSet<_>>();
+    let source_plan = SourcePlan::load(args, &source, target)?;
+    let excluded = source_plan
+        .authority
+        .excluded_source_task_ids
+        .iter()
+        .collect::<HashSet<_>>();
     let eligible_rows = source
         .rows
         .iter()
@@ -1399,30 +1048,30 @@ fn prepare_run(
         None => HeldFile::capture(&args.taxonomy, 16 * 1024 * 1024)?,
     };
     let reference_snapshot = ReferenceSnapshot::capture(args.review_reference_dir.as_deref())?;
-    let prior_digests = prior_releases
-        .iter()
-        .flat_map(|release| release.artifacts.values())
+    let prior_digests = source_plan
+        .artifacts
+        .values()
         .map(|artifact| (artifact.logical_name.clone(), json!(artifact.sha256)))
         .collect::<serde_json::Map<_, _>>();
     let config = json!({
         "schema_version":"scogo.taskgen.phase-b-config.v1",
         "run_id":run_id,
         "accepted_target":target,
-        "paths":{"work_dir":work_dir,"final_run_dir":final_run_dir},
+        "paths":{"work_dir":work_dir,"final_run_dir":final_run_dir,"source_plan_dir":source_plan.path},
         "source":{
-            "repo_id":source_repo_id,
+            "repo_id":source_plan.authority.repo_id,
             "repo_type":"dataset",
             "private":true,
-            "revision":source_revision,
-            "source_file":source_file,
+            "revision":source_plan.authority.revision,
+            "source_file":source_plan.authority.source_file,
             "selection":source_selection,
             "rows":source.tasks.len(),
-            "source_file_sha256":sha256_bytes(&source.canonical_jsonl),
+            "source_file_sha256":sha256_bytes(&source.raw_jsonl),
             "source_population_sha256":source.population_sha256,
         },
         "evidence":{
-            "exclusion_authority_sha256":exclusion_authority.sha256,
-            "historical_import_reservation_sha256":historical_reservation.as_ref().map(|artifact| &artifact.sha256),
+            "source_plan_sha256":source_plan.authority_artifact.sha256,
+            "authority_id":source_plan.authority.authority_id,
             "prior":prior_digests,
         },
         "taxonomy":{
@@ -1449,16 +1098,10 @@ fn prepare_run(
         target,
         work_dir,
         final_run_dir,
-        source_repo_id,
-        source_revision,
-        source_file,
         source_selection,
         source,
         eligible_rows,
-        excluded_ids,
-        exclusion_authority,
-        historical_reservation,
-        prior_releases,
+        source_plan,
         taxonomy_held: Some(taxonomy_held),
         reference_snapshot,
         config,
@@ -1557,7 +1200,6 @@ fn load_source_population(
     let mut line = Vec::new();
     let mut rows = Vec::new();
     let mut tasks = Vec::new();
-    let mut canonical_jsonl = Vec::new();
     let mut task_ids = HashSet::new();
     let mut line_number = 0usize;
     loop {
@@ -1587,7 +1229,7 @@ fn load_source_population(
         }
         crate::schema::validate_instance(crate::schema::SchemaKind::Task, &value)
             .with_context(|| format!("schema-invalid Phase-B source row {line_number}"))?;
-        let entry: crate::TaskEntry = serde_json::from_value(value)?;
+        let entry: crate::TaskEntry = serde_json::from_value(value.clone())?;
         taxonomy.validate_task_coordinates(
             &entry.category,
             &entry.domain,
@@ -1597,13 +1239,11 @@ fn load_source_population(
                 .as_ref()
                 .context("Phase-B source row is missing coordinates")?,
         )?;
-        let task = serde_json::to_value(&entry)?;
+        let task = value;
         let task_id = source_task_id(&task)?;
         if !task_ids.insert(task_id.clone()) {
             bail!("Phase-B source contains duplicate task ID {task_id}");
         }
-        serde_json::to_writer(&mut canonical_jsonl, &task)?;
-        canonical_jsonl.push(b'\n');
         let deterministic = crate::deterministic_candidate_checks(&entry);
         rows.push(SourceRow {
             source_index: tasks.len(),
@@ -1620,7 +1260,7 @@ fn load_source_population(
     Ok(SourcePopulation {
         rows,
         tasks,
-        canonical_jsonl,
+        raw_jsonl: source_bytes,
         population_sha256,
         held: Some(held),
     })
@@ -2592,49 +2232,44 @@ where
             (
                 "source_population",
                 "source_population.jsonl",
-                prepared.source.canonical_jsonl.as_slice(),
+                prepared.source.raw_jsonl.as_slice(),
             ),
             (
                 "exclusion_authority",
-                prepared.exclusion_authority.relative_file.as_str(),
-                prepared.exclusion_authority.bytes.as_slice(),
+                prepared
+                    .source_plan
+                    .authority_artifact
+                    .relative_file
+                    .as_str(),
+                prepared.source_plan.authority_artifact.bytes.as_slice(),
             ),
         ] {
             write_synced(&temporary.join(file), bytes)?;
             artifacts.insert(name.to_string(), descriptor(file, bytes));
         }
-        if let Some(evidence) = &prepared.historical_reservation {
+        for evidence in prepared.source_plan.artifacts.values() {
             write_synced(&temporary.join(&evidence.relative_file), &evidence.bytes)?;
             artifacts.insert(
-                "historical_import_reservation".to_string(),
+                evidence.logical_name.clone(),
                 descriptor(&evidence.relative_file, &evidence.bytes),
             );
         }
-        for release in &prepared.prior_releases {
-            for evidence in release.artifacts.values() {
-                write_synced(&temporary.join(&evidence.relative_file), &evidence.bytes)?;
-                artifacts.insert(
-                    evidence.logical_name.clone(),
-                    descriptor(&evidence.relative_file, &evidence.bytes),
-                );
-            }
-        }
         let receipt = json!({
             "schema_version":"scogo.private-hf-subset-receipt.v1",
-            "repo_id":prepared.source_repo_id,
+            "repo_id":prepared.source_plan.authority.repo_id,
             "repo_type":"dataset",
             "private":true,
-            "revision":prepared.source_revision,
-            "source_file":prepared.source_file,
+            "revision":prepared.source_plan.authority.revision,
+            "source_file":prepared.source_plan.authority.source_file,
             "selection":prepared.source_selection,
             "rows":prepared.target,
             "subset_sha256":sha256_bytes(&tasks_bytes),
             "selected_source_task_ids":selected_ids,
             "source_file_rows":prepared.source.rows.len(),
-            "source_file_sha256":sha256_bytes(&prepared.source.canonical_jsonl),
+            "source_file_sha256":sha256_bytes(&prepared.source.raw_jsonl),
             "source_population_sha256":prepared.source.population_sha256,
-            "excluded_source_task_ids":prepared.excluded_ids,
-            "exclusion_authority_sha256":prepared.exclusion_authority.sha256,
+            "excluded_source_task_ids":prepared.source_plan.authority.excluded_source_task_ids,
+            "exclusion_authority_sha256":prepared.source_plan.authority_artifact.sha256,
         });
         let mut receipt_bytes = serde_json::to_vec_pretty(&receipt)?;
         receipt_bytes.push(b'\n');
@@ -2743,15 +2378,7 @@ fn verify_run_directory(
     .into_iter()
     .map(str::to_string)
     .collect::<HashSet<_>>();
-    if prepared.historical_reservation.is_some() {
-        expected_names.insert("historical_import_reservation".to_string());
-    }
-    expected_names.extend(
-        prepared
-            .prior_releases
-            .iter()
-            .flat_map(|release| release.artifacts.keys().cloned()),
-    );
+    expected_names.extend(prepared.source_plan.artifacts.keys().cloned());
     if artifacts.keys().cloned().collect::<HashSet<_>>() != expected_names {
         bail!("sealed Phase-B artifact set is incomplete or contains extras");
     }
@@ -2812,40 +2439,31 @@ fn verify_run_directory(
     {
         bail!("sealed Phase-B task/review count is inconsistent");
     }
-    let receipt: CurrentReceipt = serde_json::from_slice(&payloads["source_receipt"])?;
+    let receipt: FinalReceipt = serde_json::from_slice(&payloads["source_receipt"])?;
     if receipt.schema_version != "scogo.private-hf-subset-receipt.v1"
-        || receipt.repo_id != prepared.source_repo_id
+        || receipt.repo_id != prepared.source_plan.authority.repo_id
         || receipt.repo_type != "dataset"
         || !receipt.private
-        || receipt.revision != prepared.source_revision
-        || receipt.source_file != prepared.source_file
+        || receipt.revision != prepared.source_plan.authority.revision
+        || receipt.source_file != prepared.source_plan.authority.source_file
         || receipt.selection != prepared.source_selection
         || receipt.rows != prepared.target
         || receipt.selected_source_task_ids != selected_ids
-        || receipt.excluded_source_task_ids != prepared.excluded_ids
+        || receipt.excluded_source_task_ids
+            != prepared.source_plan.authority.excluded_source_task_ids
         || receipt.subset_sha256 != sha256_bytes(&payloads["tasks"])
         || receipt.source_population_sha256 != prepared.source.population_sha256
         || receipt.source_file_rows != prepared.source.rows.len()
-        || receipt.source_file_sha256 != sha256_bytes(&prepared.source.canonical_jsonl)
-        || receipt.exclusion_authority_sha256 != prepared.exclusion_authority.sha256
-        || payloads["source_population"] != prepared.source.canonical_jsonl
-        || payloads["exclusion_authority"] != prepared.exclusion_authority.bytes
+        || receipt.source_file_sha256 != sha256_bytes(&prepared.source.raw_jsonl)
+        || receipt.exclusion_authority_sha256 != prepared.source_plan.authority_artifact.sha256
+        || payloads["source_population"] != prepared.source.raw_jsonl
+        || payloads["exclusion_authority"] != prepared.source_plan.authority_artifact.bytes
     {
         bail!("sealed Phase-B receipt does not match source selection");
     }
-    if payloads.get("historical_import_reservation")
-        != prepared
-            .historical_reservation
-            .as_ref()
-            .map(|artifact| &artifact.bytes)
-    {
-        bail!("sealed Phase-B historical reservation differs from derived evidence");
-    }
-    for release in &prepared.prior_releases {
-        for artifact in release.artifacts.values() {
-            if payloads.get(&artifact.logical_name) != Some(&artifact.bytes) {
-                bail!("sealed Phase-B prior evidence differs from held validated bytes");
-            }
+    for artifact in prepared.source_plan.artifacts.values() {
+        if payloads.get(&artifact.logical_name) != Some(&artifact.bytes) {
+            bail!("sealed Phase-B prior evidence differs from held source-plan bytes");
         }
     }
     for held in &held_files {
@@ -2899,7 +2517,6 @@ pub(crate) async fn run(args: crate::ReviewArgs) -> Result<()> {
         bail!("bounded Phase-B review does not support --gold-labels");
     }
     let (work_dir, _) = isolated_run_paths(&args)?;
-    let _work_lock = WorkLock::acquire(&work_dir)?;
     let taxonomy_snapshot = HeldFile::capture(&args.taxonomy, 16 * 1024 * 1024)?;
     let taxonomy_text =
         std::str::from_utf8(&taxonomy_snapshot.1).context("Phase-B taxonomy is not UTF-8")?;
@@ -2918,6 +2535,23 @@ pub(crate) async fn run(args: crate::ReviewArgs) -> Result<()> {
     };
     let prepared = prepare_run(&args, &taxonomy, &system_prompt, Some(taxonomy_snapshot))?;
     prepared.assert_inputs_unchanged()?;
+    if args.preflight_only {
+        println!(
+            "{}",
+            serde_json::to_string(&json!({
+                "schema_version":"scogo.taskgen.phase-b-preflight.v1",
+                "status":"ready",
+                "authority_id":prepared.source_plan.authority.authority_id,
+                "source_plan_sha256":prepared.source_plan.authority_artifact.sha256,
+                "source_rows":prepared.source.rows.len(),
+                "excluded_rows":prepared.source_plan.authority.excluded_source_task_ids.len(),
+                "eligible_rows":prepared.eligible_rows.len(),
+                "accepted_target":prepared.target,
+            }))?
+        );
+        return Ok(());
+    }
+    let _work_lock = WorkLock::acquire(&work_dir)?;
     let mut journal = open_work(&prepared, args.resume)?;
     if journal.snapshot.seal_prepared_manifest_sha256.is_some() {
         finish_prepared_seal(&prepared, &mut journal)?;
@@ -3027,6 +2661,139 @@ mod tests {
         serde_json::from_str(include_str!("../tests/fixtures/canonical/valid-task.json")).unwrap()
     }
 
+    fn write_empty_plan(root: &Path, source: &Path) -> (PathBuf, String) {
+        let source_bytes = std::fs::read(source).unwrap();
+        let tasks = source_bytes
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+            .map(|line| serde_json::from_slice(line).unwrap())
+            .collect::<Vec<Value>>();
+        let body = json!({
+            "schema_version":"scogo.data-factory.source-exclusion-authority.v2",
+            "repo_id":"ScogoAI/netops-prompt-seed","repo_type":"dataset","private":true,
+            "revision":"0123456789abcdef0123456789abcdef01234567",
+            "source_file":"part-3/tasks.jsonl","source_file_rows":tasks.len(),
+            "source_file_sha256":sha256_bytes(&source_bytes),
+            "source_population_sha256":source_population_sha256(&tasks).unwrap(),
+            "excluded_source_task_ids":[],"prior_completed_releases":[]
+        });
+        let mut authority = body.as_object().unwrap().clone();
+        authority.insert(
+            "authority_id".into(),
+            json!(format!(
+                "authority_{}",
+                sha256_bytes(&serde_json::to_vec(&body).unwrap())
+            )),
+        );
+        let mut bytes = serde_json::to_vec(&authority).unwrap();
+        bytes.push(b'\n');
+        let plan = root.join("plan");
+        std::fs::create_dir(&plan).unwrap();
+        std::fs::write(plan.join("source_exclusion_authority.json"), &bytes).unwrap();
+        (plan, sha256_bytes(&bytes))
+    }
+
+    fn write_current_compatible_plan(root: &Path) -> (PathBuf, PathBuf, String) {
+        let mut prior = golden_task();
+        prior["prompt"] = json!("prior compatible current-plan task");
+        let mut unused = golden_task();
+        unused["prompt"] = json!("unused compatible current-plan task");
+        let prior_id = source_task_id(&prior).unwrap();
+        let source = root.join("current-source.jsonl");
+        let source_bytes = jsonl([prior.clone(), unused]).unwrap();
+        std::fs::write(&source, &source_bytes).unwrap();
+        let mut review = test_review(
+            &SourceRow {
+                source_index: 0,
+                task_id: prior_id.clone(),
+                task: prior.clone(),
+                deterministic_hard_failures: vec![],
+            },
+            ReviewStageOutcome::Accept,
+        );
+        review.record["final_disposition"] = json!("accepted");
+        let canonical = json!({
+            "schema_version":"scogo.data-factory.source-task.v1","source_task_id":prior_id,
+            "split_group_id":prior_id,"split":"train","prompt":prior["prompt"],
+            "domain":prior["domain"],"subdomain":prior["subdomain"],
+            "difficulty":prior["difficulty"].to_string(),"coordinates":prior["coordinates"],
+            "source_schema_version":"scogo.taskgen.task.v2","source_task":prior,
+            "source_review":review.record
+        });
+        let canonical_bytes = jsonl([canonical]).unwrap();
+        let selected_bytes = jsonl([prior.clone()]).unwrap();
+        let plan = root.join("current-plan");
+        let prior_dir = plan.join("prior-releases/current-release");
+        std::fs::create_dir_all(&prior_dir).unwrap();
+        std::fs::write(prior_dir.join("canonical_tasks.jsonl"), &canonical_bytes).unwrap();
+        let receipt = json!({
+            "schema_version":"scogo.private-hf-subset-receipt.v1",
+            "repo_id":"ScogoAI/netops-prompt-seed","repo_type":"dataset","private":true,
+            "revision":"0123456789abcdef0123456789abcdef01234567",
+            "source_file":"part-3/tasks.jsonl","selection":"prior-current","rows":1,
+            "subset_sha256":sha256_bytes(&selected_bytes),"selected_source_task_ids":[prior_id],
+            "source_file_rows":2,"source_file_sha256":sha256_bytes(&source_bytes),
+            "source_population_sha256":source_population_sha256(&[prior.clone(),
+                serde_json::from_slice(source_bytes.split(|byte| *byte == b'\n').nth(1).unwrap()).unwrap()]).unwrap(),
+            "excluded_source_task_ids":[],"exclusion_authority_sha256":"e".repeat(64)
+        });
+        let mut receipt_bytes = serde_json::to_vec(&receipt).unwrap();
+        receipt_bytes.push(b'\n');
+        std::fs::write(prior_dir.join("source_receipt.json"), &receipt_bytes).unwrap();
+        let receipt_sha = sha256_bytes(&receipt_bytes);
+        let release = json!({
+            "schema_version":"scogo.data-factory.release-set.v1","release_id":"current-release",
+            "campaign_id":"current-campaign","campaign_sha256":"a".repeat(64),
+            "source_run_id":"prior-source","source_artifacts":{
+                "tasks":sha256_bytes(&selected_bytes),"source_receipt":receipt_sha,"run":"f".repeat(64)},
+            "source_receipt_sha256":receipt_sha,"source_manifest_sha256":"f".repeat(64),
+            "source_manifest_bytes":1,"rubric_version":"scogo.itops-rubric.v1","providers":{},
+            "claim_status":"development_only","split_counts":{"train":1,"validation":0,"evaluation":0},
+            "projection_counts":{},"artifacts":[{"path":"canonical/tasks.jsonl",
+                "sha256":sha256_bytes(&canonical_bytes),"bytes":canonical_bytes.len(),"rows":1}],
+            "created_at":"2026-09-01T00:00:00Z"
+        });
+        let mut release_bytes = serde_json::to_vec(&release).unwrap();
+        release_bytes.push(b'\n');
+        std::fs::write(prior_dir.join("release_set.json"), &release_bytes).unwrap();
+        let tasks = source_bytes
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+            .map(|line| serde_json::from_slice(line).unwrap())
+            .collect::<Vec<Value>>();
+        let body = json!({
+            "schema_version":"scogo.data-factory.source-exclusion-authority.v2",
+            "repo_id":"ScogoAI/netops-prompt-seed","repo_type":"dataset","private":true,
+            "revision":"0123456789abcdef0123456789abcdef01234567","source_file":"part-3/tasks.jsonl",
+            "source_file_rows":2,"source_file_sha256":sha256_bytes(&source_bytes),
+            "source_population_sha256":source_population_sha256(&tasks).unwrap(),
+            "excluded_source_task_ids":[prior_id],"prior_completed_releases":[{
+                "evidence_mode":"current","run_id":"current-release",
+                "release_set_sha256":sha256_bytes(&release_bytes),"source_receipt_sha256":receipt_sha,
+                "canonical_tasks_sha256":sha256_bytes(&canonical_bytes),
+                "legacy_source_receipt_sha256":null,"taskgen_run_sha256":null,
+                "taskgen_tasks_sha256":null,"taskgen_reviews_sha256":null,
+                "selected_source_task_ids":[prior_id]
+            }]
+        });
+        let mut authority = body.as_object().unwrap().clone();
+        authority.insert(
+            "authority_id".into(),
+            json!(format!(
+                "authority_{}",
+                sha256_bytes(&serde_json::to_vec(&body).unwrap())
+            )),
+        );
+        let mut authority_bytes = serde_json::to_vec(&authority).unwrap();
+        authority_bytes.push(b'\n');
+        std::fs::write(
+            plan.join("source_exclusion_authority.json"),
+            &authority_bytes,
+        )
+        .unwrap();
+        (source, plan, sha256_bytes(&authority_bytes))
+    }
+
     fn test_source_row(source_index: usize) -> SourceRow {
         let mut task = golden_task();
         task["prompt"] = json!(format!("Phase-B test prompt {source_index}"));
@@ -3124,80 +2891,7 @@ mod tests {
         assert!(error.to_string().contains("duplicate task ID"), "{error:#}");
     }
 
-    #[test]
-    fn immutable_resume_rejects_changed_source_before_provider_setup() {
-        let temporary = tempfile::tempdir().unwrap();
-        let source = temporary.path().join("source.jsonl");
-        let work = temporary.path().join("work");
-        let final_run = temporary.path().join("final");
-        std::fs::write(&source, format!("{}\n", golden_task())).unwrap();
-        let parse = |resume: bool| {
-            let mut argv = vec![
-                "taskgen".to_string(),
-                "review".into(),
-                "--input".into(),
-                source.display().to_string(),
-                "--taxonomy".into(),
-                "docs/netops-taxonomy.yaml".into(),
-                "--accepted-target".into(),
-                "1".into(),
-                "--run-id".into(),
-                "phase-b-test".into(),
-                "--work-dir".into(),
-                work.display().to_string(),
-                "--final-run-dir".into(),
-                final_run.display().to_string(),
-                "--source-repo-id".into(),
-                "ScogoAI/netops-prompt-seed".into(),
-                "--source-revision".into(),
-                "0123456789abcdef0123456789abcdef01234567".into(),
-                "--source-file".into(),
-                "part-3/tasks.jsonl".into(),
-                "--source-selection".into(),
-                "unused-phase-b-test".into(),
-            ];
-            if resume {
-                argv.push("--resume".into());
-            }
-            let cli = crate::Cli::try_parse_from(argv).unwrap();
-            let crate::Command::Review(args) = cli.command else {
-                panic!("expected review command")
-            };
-            *args
-        };
-        let taxonomy =
-            crate::taxonomy::TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml"))
-                .unwrap();
-        let first = prepare_run(&parse(false), &taxonomy, "review prompt", None).unwrap();
-        let _journal = open_work(&first, false).unwrap();
-
-        let mut changed = golden_task();
-        changed["prompt"] = serde_json::json!("Changed source prompt");
-        std::fs::write(&source, format!("{changed}\n")).unwrap();
-        let changed = prepare_run(&parse(true), &taxonomy, "review prompt", None).unwrap();
-        let error = open_work(&changed, true).unwrap_err();
-        assert!(
-            error.to_string().contains("immutable config changed"),
-            "{error:#}"
-        );
-
-        std::fs::write(&source, format!("{}\n", golden_task())).unwrap();
-        let mut changed_destination =
-            prepare_run(&parse(true), &taxonomy, "review prompt", None).unwrap();
-        changed_destination.final_run_dir = temporary.path().join("different-final");
-        let error = open_work(&changed_destination, true).unwrap_err();
-        assert!(
-            error.to_string().contains("immutable config changed"),
-            "{error:#}"
-        );
-    }
-
-    #[test]
-    fn resume_recovers_an_empty_work_directory_from_initialization_crash() {
-        let temporary = tempfile::tempdir().unwrap();
-        let source = temporary.path().join("source.jsonl");
-        let work = temporary.path().join("work");
-        std::fs::write(&source, format!("{}\n", golden_task())).unwrap();
+    fn phase_b_args(source: &Path, plan: &Path, pin: &str, root: &Path) -> crate::ReviewArgs {
         let cli = crate::Cli::try_parse_from(vec![
             "taskgen".to_string(),
             "review".into(),
@@ -3208,214 +2902,95 @@ mod tests {
             "--accepted-target".into(),
             "1".into(),
             "--run-id".into(),
-            "init-crash".into(),
+            "source-plan-test".into(),
             "--work-dir".into(),
-            work.display().to_string(),
+            root.join("work").display().to_string(),
             "--final-run-dir".into(),
-            temporary.path().join("final").display().to_string(),
-            "--source-repo-id".into(),
-            "ScogoAI/netops-prompt-seed".into(),
-            "--source-revision".into(),
-            "0123456789abcdef0123456789abcdef01234567".into(),
-            "--source-file".into(),
-            "part-3/tasks.jsonl".into(),
+            root.join("final").display().to_string(),
+            "--source-plan-dir".into(),
+            plan.display().to_string(),
+            "--source-plan-sha256".into(),
+            pin.into(),
             "--source-selection".into(),
-            "init-crash".into(),
-            "--resume".into(),
+            "source-plan-test".into(),
         ])
         .unwrap();
         let crate::Command::Review(args) = cli.command else {
             panic!("expected review")
         };
+        *args
+    }
+
+    #[test]
+    fn source_plan_rejects_pin_id_unknown_field_tree_and_symlink_tamper() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("source.jsonl");
+        std::fs::write(&source, format!("{}\n", golden_task())).unwrap();
+        let (plan, pin) = write_empty_plan(temporary.path(), &source);
         let taxonomy =
             crate::taxonomy::TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml"))
                 .unwrap();
-        let prepared = prepare_run(&args, &taxonomy, "review prompt", None).unwrap();
-        std::fs::create_dir(&prepared.work_dir).unwrap();
+        let source_population = load_source_population(&source, &taxonomy).unwrap();
+        let args = phase_b_args(&source, &plan, &pin, temporary.path());
+        SourcePlan::load(&args, &source_population, 1).unwrap();
+        let mut wrong_pin = args.clone();
+        wrong_pin.source_plan_sha256 = Some("0".repeat(64));
+        assert!(SourcePlan::load(&wrong_pin, &source_population, 1).is_err());
 
-        let journal = open_work(&prepared, true).unwrap();
-        assert_eq!(journal.snapshot.rows.len(), 0);
-        assert!(prepared.work_dir.join("config.json").is_file());
-        assert!(prepared.work_dir.join("stage.journal.jsonl").is_file());
-        drop(journal);
-        std::fs::remove_file(prepared.work_dir.join("stage.journal.jsonl")).unwrap();
-        let journal = open_work(&prepared, true).unwrap();
-        assert_eq!(journal.snapshot.rows.len(), 0);
+        let authority_path = plan.join("source_exclusion_authority.json");
+        let original = std::fs::read(&authority_path).unwrap();
+        let mut authority: Value = serde_json::from_slice(&original).unwrap();
+        authority["unexpected"] = json!(true);
+        let mut identity = authority.as_object().unwrap().clone();
+        identity.remove("authority_id");
+        authority["authority_id"] = json!(format!(
+            "authority_{}",
+            sha256_bytes(&serde_json::to_vec(&identity).unwrap())
+        ));
+        let mut bytes = serde_json::to_vec(&authority).unwrap();
+        bytes.push(b'\n');
+        std::fs::write(&authority_path, &bytes).unwrap();
+        let unknown_args = phase_b_args(&source, &plan, &sha256_bytes(&bytes), temporary.path());
+        assert!(SourcePlan::load(&unknown_args, &source_population, 1).is_err());
+        std::fs::write(&authority_path, &original).unwrap();
+
+        std::fs::write(plan.join("extra"), b"extra").unwrap();
+        assert!(SourcePlan::load(&args, &source_population, 1).is_err());
+        std::fs::remove_file(plan.join("extra")).unwrap();
+        std::fs::create_dir(plan.join("extra-dir")).unwrap();
+        assert!(SourcePlan::load(&args, &source_population, 1).is_err());
+        std::fs::remove_dir(plan.join("extra-dir")).unwrap();
+        #[cfg(unix)]
+        {
+            let target = plan.join("authority-target");
+            std::fs::rename(&authority_path, &target).unwrap();
+            std::os::unix::fs::symlink(&target, &authority_path).unwrap();
+            assert!(SourcePlan::load(&args, &source_population, 1).is_err());
+        }
     }
 
     #[tokio::test]
-    async fn pinned_legacy_evidence_requires_all_six_exact_payloads() {
+    async fn preflight_only_creates_no_work_lock_or_provider_state() {
         let temporary = tempfile::tempdir().unwrap();
-        let mut prior_tasks = [golden_task(), golden_task()];
-        prior_tasks[0]["prompt"] = json!("Previously accepted source prompt one");
-        prior_tasks[1]["prompt"] = json!("Previously accepted source prompt two");
-        let mut current_task = golden_task();
-        current_task["prompt"] = json!("New unused source prompt");
-        let prior_ids = prior_tasks
-            .iter()
-            .map(|task| source_task_id(task).unwrap())
-            .collect::<Vec<_>>();
         let source = temporary.path().join("source.jsonl");
-        std::fs::write(
-            &source,
-            format!("{}\n{}\n{current_task}\n", prior_tasks[0], prior_tasks[1]),
-        )
-        .unwrap();
-        let decision: Value = serde_json::from_str(include_str!(
-            "../tests/fixtures/canonical/valid-review-v3.json"
-        ))
-        .unwrap();
-        let reviews = prior_ids
-            .iter()
-            .enumerate()
-            .map(|(index, task_id)| {
-                json!({
-                    "schema_version":"scogo.taskgen.review-record.v3",
-                    "candidate_id":task_id,
-                    "sequence":index + 1,
-                    "review_model":"legacy-reviewer",
-                    "review_input_tokens":10,
-                    "review_output_tokens":5,
-                    "decision_normalization":{
-                        "summary_truncated":false,"retry_guidance_truncated":false,
-                        "hard_failure_aliases_normalized":0,"claim_ids_repaired":0,
-                        "response_format":"json_schema"
-                    },
-                    "decision":decision,
-                    "references":[],"adjudication":null,"final_disposition":"accepted"
-                })
-            })
-            .collect::<Vec<_>>();
-        let taskgen_tasks_path = temporary.path().join("prior-taskgen-tasks.jsonl");
-        let taskgen_reviews_path = temporary.path().join("prior-taskgen-reviews.jsonl");
-        std::fs::write(
-            &taskgen_tasks_path,
-            jsonl(prior_tasks.iter().cloned()).unwrap(),
-        )
-        .unwrap();
-        std::fs::write(&taskgen_reviews_path, jsonl(reviews.clone()).unwrap()).unwrap();
-        let taskgen_manifest_path = temporary.path().join("prior-taskgen-run.json");
-        let taskgen_manifest = json!({
-            "schema_version":"scogo.taskgen.run.v3","run_id":"legacy-taskgen-run","status":"success",
-            "artifacts":{
-                "tasks":descriptor("tasks.jsonl",&std::fs::read(&taskgen_tasks_path).unwrap()),
-                "reviews":descriptor("reviews.jsonl",&std::fs::read(&taskgen_reviews_path).unwrap()),
-                "run":{"file":"run.json"}
-            }
-        });
-        std::fs::write(
-            &taskgen_manifest_path,
-            serde_json::to_vec(&taskgen_manifest).unwrap(),
-        )
-        .unwrap();
-        let legacy_receipt_path = temporary.path().join("legacy-source-receipt.json");
-        std::fs::write(
-            &legacy_receipt_path,
-            serde_json::to_vec(&json!({
-                "schema_version":"scogo.private-hf-subset-receipt.v1",
-                "repo_id":"ScogoAI/netops-prompt-seed","repo_type":"dataset","private":true,
-                "revision":"0123456789abcdef0123456789abcdef01234567",
-                "source_file":"part-3/tasks.jsonl","selection":"legacy-first-two",
-                "rows":2,"subset_sha256":sha256_bytes(&std::fs::read(&taskgen_tasks_path).unwrap())
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-        let mut canonical_pairs = prior_tasks.iter().cloned().zip(reviews).collect::<Vec<_>>();
-        canonical_pairs.sort_by_key(|(task, _)| source_task_id(task).unwrap());
-        let canonical = canonical_pairs.iter().map(|(task, review)| {
-            let task_id = source_task_id(task).unwrap();
-            json!({
-                "schema_version":"scogo.data-factory.source-task.v1","source_task_id":task_id,
-                "split_group_id":task_id,"split":"train","prompt":task["prompt"],
-                "domain":task["domain"],"subdomain":task["subdomain"],
-                "difficulty":task["difficulty"].to_string(),"coordinates":task["coordinates"],
-                "source_schema_version":"scogo.taskgen.task.v2","source_task":task,"source_review":review
-            })
-        }).collect::<Vec<_>>();
-        let canonical_path = temporary.path().join("prior-canonical-tasks.jsonl");
-        std::fs::write(&canonical_path, jsonl(canonical).unwrap()).unwrap();
-        let release_path = temporary.path().join("prior-release-set.json");
-        let taskgen_digests = (
-            sha256_bytes(&std::fs::read(&taskgen_manifest_path).unwrap()),
-            sha256_bytes(&std::fs::read(&taskgen_tasks_path).unwrap()),
-            sha256_bytes(&std::fs::read(&taskgen_reviews_path).unwrap()),
-        );
-        let canonical_bytes = std::fs::read(&canonical_path).unwrap();
-        std::fs::write(&release_path, serde_json::to_vec(&json!({
-            "schema_version":"scogo.data-factory.release-set.v1","release_id":"legacy-release",
-            "campaign_id":"legacy-campaign","campaign_sha256":"a".repeat(64),
-            "source_run_id":"legacy-taskgen-run",
-            "source_artifacts":{"run":taskgen_digests.0,"tasks":taskgen_digests.1,"reviews":taskgen_digests.2},
-            "rubric_version":"scogo.itops-rubric.v1","providers":{},"claim_status":"development_only",
-            "split_counts":{"train":2,"validation":0,"evaluation":0},"projection_counts":{},
-            "artifacts":[{"path":"canonical/tasks.jsonl","sha256":sha256_bytes(&canonical_bytes),
-                "bytes":canonical_bytes.len(),"rows":2}],"created_at":"2026-09-01T00:00:00Z"
-        })).unwrap()).unwrap();
-        let release_pin = sha256_bytes(&std::fs::read(&release_path).unwrap());
-        let evidence = [
-            ("prior_release_set.legacy-release", release_path),
-            ("prior_canonical_tasks.legacy-release", canonical_path),
-            (
-                "prior_legacy_source_receipt.legacy-release",
-                legacy_receipt_path,
-            ),
-            ("prior_taskgen_run.legacy-release", taskgen_manifest_path),
-            ("prior_taskgen_tasks.legacy-release", taskgen_tasks_path),
-            ("prior_taskgen_reviews.legacy-release", taskgen_reviews_path),
-        ];
-        let mut argv = vec![
-            "taskgen".to_string(),
-            "review".into(),
-            "--input".into(),
-            source.display().to_string(),
-            "--taxonomy".into(),
-            "docs/netops-taxonomy.yaml".into(),
-            "--accepted-target".into(),
-            "1".into(),
-            "--run-id".into(),
-            "legacy-evidence-test".into(),
-            "--work-dir".into(),
-            temporary.path().join("work").display().to_string(),
-            "--final-run-dir".into(),
-            temporary.path().join("final").display().to_string(),
-            "--source-repo-id".into(),
-            "ScogoAI/netops-prompt-seed".into(),
-            "--source-revision".into(),
-            "0123456789abcdef0123456789abcdef01234567".into(),
-            "--source-file".into(),
-            "part-3/tasks.jsonl".into(),
-            "--source-selection".into(),
-            "unused-legacy-test".into(),
-            "--prior-release-pin".into(),
-            format!("legacy-release={release_pin}"),
-        ];
-        for (name, path) in &evidence {
-            argv.extend([
-                "--prior-evidence".into(),
-                format!("{name}={}", path.display()),
-            ]);
-        }
-        let cli = crate::Cli::try_parse_from(argv).unwrap();
-        let crate::Command::Review(args) = cli.command else {
-            panic!("expected review")
-        };
-        let taxonomy =
-            crate::taxonomy::TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml"))
-                .unwrap();
-        let prepared = prepare_run(&args, &taxonomy, "review prompt", None).unwrap();
-        assert_eq!(prepared.prior_releases[0].artifacts.len(), 6);
-        assert_eq!(prepared.eligible_rows.len(), 1);
-        assert_eq!(prepared.excluded_ids.len(), 2);
-        assert!(prepared.historical_reservation.is_some());
+        std::fs::write(&source, format!("{}\n", golden_task())).unwrap();
+        let (plan, pin) = write_empty_plan(temporary.path(), &source);
+        let mut args = phase_b_args(&source, &plan, &pin, temporary.path());
+        args.preflight_only = true;
 
-        for (_, path) in evidence {
-            let original = std::fs::read(&path).unwrap();
-            std::fs::write(&path, b"tampered\n").unwrap();
-            assert!(prepare_run(&args, &taxonomy, "review prompt", None).is_err());
-            std::fs::write(path, original).unwrap();
-        }
+        run(args).await.unwrap();
 
+        assert!(!temporary.path().join("work").exists());
+        assert!(!temporary.path().join("final").exists());
+        assert!(!temporary.path().join(".work.phase-b.lock").exists());
+    }
+
+    #[tokio::test]
+    async fn actual_legacy_source_plan_seals_for_data_factory_consumer() {
+        let plan = Path::new("/private/tmp/scogo-source-plan-actual-BapSactX/plan");
+        if !plan.is_dir() {
+            return;
+        }
         #[derive(Clone)]
         struct Accept;
         #[async_trait::async_trait]
@@ -3431,6 +3006,89 @@ mod tests {
                 panic!("adjudication is not expected")
             }
         }
+        let source = Path::new(
+            "/Users/ksingh/git/scogo/work/experiments/taskgen/dataset/scogoai-enterprise-netops/part-2/tasks.jsonl",
+        );
+        let temporary = tempfile::tempdir().unwrap();
+        let args = phase_b_args(
+            source,
+            plan,
+            "b7576f4a2eba8a844c567cc065bbccc55f884b782848d245fafecd71daca2a94",
+            temporary.path(),
+        );
+        let taxonomy =
+            crate::taxonomy::TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml"))
+                .unwrap();
+        let prepared = prepare_run(&args, &taxonomy, "review prompt", None).unwrap();
+        assert_eq!(prepared.source.rows.len(), 4_010);
+        assert_eq!(prepared.eligible_rows.len(), 4_000);
+        let result = run_admission(
+            prepared.eligible_rows.clone(),
+            1,
+            1,
+            open_work(&prepared, false).unwrap(),
+            Arc::new(Accept),
+        )
+        .await
+        .unwrap();
+        let (mut journal, _) = StageJournal::resume(
+            &prepared.work_dir.join("stage.journal.jsonl"),
+            &prepared.config_sha256,
+        )
+        .unwrap();
+        seal_run(
+            &prepared,
+            &result.snapshot,
+            &mut journal,
+            || Ok(()),
+            || Ok(()),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(prepared.final_run_dir.join("source_population.jsonl")).unwrap(),
+            std::fs::read(source).unwrap()
+        );
+        let data_factory = Path::new(
+            "/Users/ksingh/git/scogo/work/experiments/scogo-data-factory/.worktree/data-factory-phase-b-100-smoke",
+        );
+        if data_factory.join(".venv/bin/python").is_file() {
+            let status = std::process::Command::new(data_factory.join(".venv/bin/python"))
+                .env("PYTHONPATH", data_factory.join("src"))
+                .arg("-c")
+                .arg("from pathlib import Path; import sys; from scogo_ai_data_factory.taskgen import load_taskgen_run; p=Path(sys.argv[1]); r=load_taskgen_run(p, source_receipt=p/'source_receipt.json', require_source_receipt=True); assert len(r.tasks)==1; assert len(r.exclusion_authority.excluded_source_task_ids)==10")
+                .arg(std::fs::canonicalize(&prepared.final_run_dir).unwrap())
+                .status()
+                .unwrap();
+            assert!(
+                status.success(),
+                "Data Factory rejected actual legacy source plan seal"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn current_source_plan_seals_for_data_factory_consumer() {
+        #[derive(Clone)]
+        struct Accept;
+        #[async_trait::async_trait]
+        impl PhaseBReviewer for Accept {
+            async fn review(&self, row: &SourceRow) -> Result<ReviewStageResult> {
+                Ok(test_review(row, ReviewStageOutcome::Accept))
+            }
+            async fn adjudicate(
+                &self,
+                _row: &SourceRow,
+                _review: &ReviewStageResult,
+            ) -> Result<AdjudicationStageResult> {
+                panic!("adjudication is not expected")
+            }
+        }
+        let temporary = tempfile::tempdir().unwrap();
+        let (source, plan, pin) = write_current_compatible_plan(temporary.path());
+        let args = phase_b_args(&source, &plan, &pin, temporary.path());
+        let taxonomy =
+            crate::taxonomy::TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml"))
+                .unwrap();
         let prepared = prepare_run(&args, &taxonomy, "review prompt", None).unwrap();
         let result = run_admission(
             prepared.eligible_rows.clone(),
@@ -3461,70 +3119,94 @@ mod tests {
             let status = std::process::Command::new(data_factory.join(".venv/bin/python"))
                 .env("PYTHONPATH", data_factory.join("src"))
                 .arg("-c")
-                .arg("from pathlib import Path; import sys; from scogo_ai_data_factory.taskgen import load_taskgen_run; p=Path(sys.argv[1]); r=load_taskgen_run(p, source_receipt=p/'source_receipt.json', require_source_receipt=True); assert len(r.tasks)==1; assert r.exclusion_authority.prior_completed_releases[0].evidence_mode=='pinned_external_legacy'")
+                .arg("from pathlib import Path; import sys; from scogo_ai_data_factory.taskgen import load_taskgen_run; p=Path(sys.argv[1]); r=load_taskgen_run(p, source_receipt=p/'source_receipt.json', require_source_receipt=True); assert len(r.tasks)==1; assert r.exclusion_authority.prior_completed_releases[0].evidence_mode=='current'")
                 .arg(std::fs::canonicalize(&prepared.final_run_dir).unwrap())
                 .status()
                 .unwrap();
             assert!(
                 status.success(),
-                "Data Factory rejected derived legacy evidence"
+                "Data Factory rejected current source-plan seal"
             );
         }
+        std::fs::write(
+            plan.join("prior-releases/current-release/source_receipt.json"),
+            b"tampered\n",
+        )
+        .unwrap();
+        assert!(SourcePlan::load(&args, &prepared.source, 1).is_err());
     }
 
     #[test]
-    fn current_prior_evidence_derives_history_from_three_cross_bound_artifacts() {
+    fn immutable_resume_rejects_changed_source_before_provider_setup() {
         let temporary = tempfile::tempdir().unwrap();
-        let mut prior_task = golden_task();
-        prior_task["prompt"] = json!("Current-mode prior task");
-        let mut new_task = golden_task();
-        new_task["prompt"] = json!("Current-mode unused task");
-        let prior_id = source_task_id(&prior_task).unwrap();
         let source = temporary.path().join("source.jsonl");
-        let source_bytes = jsonl([prior_task.clone(), new_task]).unwrap();
-        std::fs::write(&source, &source_bytes).unwrap();
-        let decision: Value = serde_json::from_str(include_str!(
-            "../tests/fixtures/canonical/valid-review-v3.json"
-        ))
-        .unwrap();
-        let review = json!({
-            "schema_version":"scogo.taskgen.review-record.v3","candidate_id":"prior-current",
-            "sequence":1,"decision":decision,"adjudication":null,"final_disposition":"accepted"
-        });
-        let canonical = json!({
-            "schema_version":"scogo.data-factory.source-task.v1","source_task_id":prior_id,
-            "split_group_id":prior_id,"split":"train","prompt":prior_task["prompt"],
-            "domain":prior_task["domain"],"subdomain":prior_task["subdomain"],
-            "difficulty":prior_task["difficulty"].to_string(),"coordinates":prior_task["coordinates"],
-            "source_schema_version":"scogo.taskgen.task.v2","source_task":prior_task,"source_review":review
-        });
-        let canonical_path = temporary.path().join("current-canonical.jsonl");
-        let canonical_bytes = jsonl([canonical]).unwrap();
-        std::fs::write(&canonical_path, &canonical_bytes).unwrap();
-        let selected_bytes = jsonl([prior_task]).unwrap();
-        let receipt_path = temporary.path().join("current-receipt.json");
-        std::fs::write(&receipt_path, serde_json::to_vec(&json!({
-            "schema_version":"scogo.private-hf-subset-receipt.v1",
-            "repo_id":"ScogoAI/netops-prompt-seed","repo_type":"dataset","private":true,
-            "revision":"0123456789abcdef0123456789abcdef01234567",
-            "source_file":"part-3/tasks.jsonl","selection":"prior-current","rows":1,
-            "subset_sha256":sha256_bytes(&selected_bytes),"selected_source_task_ids":[prior_id],
-            "source_file_rows":2,"source_file_sha256":sha256_bytes(&source_bytes),
-            "source_population_sha256":source_population_sha256(&jsonl_rows(&source_bytes,"source").unwrap()).unwrap(),
-            "excluded_source_task_ids":[],"exclusion_authority_sha256":"e".repeat(64)
-        })).unwrap()).unwrap();
-        let receipt_digest = sha256_bytes(&std::fs::read(&receipt_path).unwrap());
-        let release_path = temporary.path().join("current-release.json");
-        std::fs::write(&release_path, serde_json::to_vec(&json!({
-            "schema_version":"scogo.data-factory.release-set.v1","release_id":"current-release",
-            "source_run_id":"prior-source","source_artifacts":{
-                "tasks":sha256_bytes(&selected_bytes),"source_receipt":receipt_digest,"run":"f".repeat(64)},
-            "source_receipt_sha256":receipt_digest,"source_manifest_sha256":"f".repeat(64),
-            "source_manifest_bytes":1,"artifacts":[{"path":"canonical/tasks.jsonl",
-                "sha256":sha256_bytes(&canonical_bytes),"bytes":canonical_bytes.len(),"rows":1}]
-        })).unwrap()).unwrap();
-        let release_pin = sha256_bytes(&std::fs::read(&release_path).unwrap());
-        let argv = vec![
+        let work = temporary.path().join("work");
+        let final_run = temporary.path().join("final");
+        std::fs::write(&source, format!("{}\n", golden_task())).unwrap();
+        let (plan, plan_sha256) = write_empty_plan(temporary.path(), &source);
+        let parse = |resume: bool| {
+            let mut argv = vec![
+                "taskgen".to_string(),
+                "review".into(),
+                "--input".into(),
+                source.display().to_string(),
+                "--taxonomy".into(),
+                "docs/netops-taxonomy.yaml".into(),
+                "--accepted-target".into(),
+                "1".into(),
+                "--run-id".into(),
+                "phase-b-test".into(),
+                "--work-dir".into(),
+                work.display().to_string(),
+                "--final-run-dir".into(),
+                final_run.display().to_string(),
+                "--source-plan-dir".into(),
+                plan.display().to_string(),
+                "--source-plan-sha256".into(),
+                plan_sha256.clone(),
+                "--source-selection".into(),
+                "unused-phase-b-test".into(),
+            ];
+            if resume {
+                argv.push("--resume".into());
+            }
+            let cli = crate::Cli::try_parse_from(argv).unwrap();
+            let crate::Command::Review(args) = cli.command else {
+                panic!("expected review command")
+            };
+            *args
+        };
+        let taxonomy =
+            crate::taxonomy::TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml"))
+                .unwrap();
+        let first = prepare_run(&parse(false), &taxonomy, "review prompt", None).unwrap();
+        let _journal = open_work(&first, false).unwrap();
+
+        let mut changed = golden_task();
+        changed["prompt"] = serde_json::json!("Changed source prompt");
+        std::fs::write(&source, format!("{changed}\n")).unwrap();
+        let error = prepare_run(&parse(true), &taxonomy, "review prompt", None).unwrap_err();
+        assert!(error.to_string().contains("raw source"), "{error:#}");
+
+        std::fs::write(&source, format!("{}\n", golden_task())).unwrap();
+        let mut changed_destination =
+            prepare_run(&parse(true), &taxonomy, "review prompt", None).unwrap();
+        changed_destination.final_run_dir = temporary.path().join("different-final");
+        let error = open_work(&changed_destination, true).unwrap_err();
+        assert!(
+            error.to_string().contains("immutable config changed"),
+            "{error:#}"
+        );
+    }
+
+    #[test]
+    fn resume_recovers_an_empty_work_directory_from_initialization_crash() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("source.jsonl");
+        let work = temporary.path().join("work");
+        std::fs::write(&source, format!("{}\n", golden_task())).unwrap();
+        let (plan, plan_sha256) = write_empty_plan(temporary.path(), &source);
+        let cli = crate::Cli::try_parse_from(vec![
             "taskgen".to_string(),
             "review".into(),
             "--input".into(),
@@ -3534,38 +3216,20 @@ mod tests {
             "--accepted-target".into(),
             "1".into(),
             "--run-id".into(),
-            "current-evidence-test".into(),
+            "init-crash".into(),
             "--work-dir".into(),
-            temporary.path().join("work").display().to_string(),
+            work.display().to_string(),
             "--final-run-dir".into(),
             temporary.path().join("final").display().to_string(),
-            "--source-repo-id".into(),
-            "ScogoAI/netops-prompt-seed".into(),
-            "--source-revision".into(),
-            "0123456789abcdef0123456789abcdef01234567".into(),
-            "--source-file".into(),
-            "part-3/tasks.jsonl".into(),
+            "--source-plan-dir".into(),
+            plan.display().to_string(),
+            "--source-plan-sha256".into(),
+            plan_sha256,
             "--source-selection".into(),
-            "unused-current".into(),
-            "--prior-release-pin".into(),
-            format!("current-release={release_pin}"),
-            "--prior-evidence".into(),
-            format!(
-                "prior_release_set.current-release={}",
-                release_path.display()
-            ),
-            "--prior-evidence".into(),
-            format!(
-                "prior_canonical_tasks.current-release={}",
-                canonical_path.display()
-            ),
-            "--prior-evidence".into(),
-            format!(
-                "prior_source_receipt.current-release={}",
-                receipt_path.display()
-            ),
-        ];
-        let cli = crate::Cli::try_parse_from(argv).unwrap();
+            "init-crash".into(),
+            "--resume".into(),
+        ])
+        .unwrap();
         let crate::Command::Review(args) = cli.command else {
             panic!("expected review")
         };
@@ -3573,12 +3237,16 @@ mod tests {
             crate::taxonomy::TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml"))
                 .unwrap();
         let prepared = prepare_run(&args, &taxonomy, "review prompt", None).unwrap();
-        assert_eq!(prepared.excluded_ids, vec![prior_id]);
-        assert_eq!(prepared.prior_releases.len(), 1);
-        assert_eq!(
-            prepared.prior_releases[0].authority_entry["evidence_mode"],
-            "current"
-        );
+        std::fs::create_dir(&prepared.work_dir).unwrap();
+
+        let journal = open_work(&prepared, true).unwrap();
+        assert_eq!(journal.snapshot.rows.len(), 0);
+        assert!(prepared.work_dir.join("config.json").is_file());
+        assert!(prepared.work_dir.join("stage.journal.jsonl").is_file());
+        drop(journal);
+        std::fs::remove_file(prepared.work_dir.join("stage.journal.jsonl")).unwrap();
+        let journal = open_work(&prepared, true).unwrap();
+        assert_eq!(journal.snapshot.rows.len(), 0);
     }
 
     #[test]
@@ -4069,46 +3737,75 @@ mod tests {
         let task = golden_task();
         let task_id = source_task_id(&task).unwrap();
         let source_jsonl = format!("{task}\n").into_bytes();
-        let authority_bytes = serde_json::to_vec(&serde_json::json!({
-            "schema_version":"scogo.data-factory.source-exclusion-authority.v1",
+        let authority_body = json!({
+            "schema_version":"scogo.data-factory.source-exclusion-authority.v2",
+            "repo_id":"ScogoAI/netops-prompt-seed","repo_type":"dataset","private":true,
+            "revision":"0123456789abcdef0123456789abcdef01234567",
+            "source_file":"part-3/tasks.jsonl","source_file_rows":1,
+            "source_file_sha256":sha256_bytes(&source_jsonl),
+            "source_population_sha256":source_population_sha256(std::slice::from_ref(&task)).unwrap(),
             "excluded_source_task_ids":[],
-            "historical_import_reservation_sha256":null,
             "prior_completed_releases":[]
-        }))
+        });
+        let mut authority = authority_body.as_object().unwrap().clone();
+        authority.insert(
+            "authority_id".into(),
+            json!(format!(
+                "authority_{}",
+                sha256_bytes(&serde_json::to_vec(&authority_body).unwrap())
+            )),
+        );
+        let mut authority_bytes = serde_json::to_vec(&authority).unwrap();
+        authority_bytes.push(b'\n');
+        let plan_path = temporary.path().join("plan");
+        std::fs::create_dir(&plan_path).unwrap();
+        std::fs::write(
+            plan_path.join("source_exclusion_authority.json"),
+            &authority_bytes,
+        )
         .unwrap();
+        let plan_directory = HeldDirectory::capture(&plan_path).unwrap();
+        let (authority_file, _) = plan_directory
+            .read_file(
+                Path::new("source_exclusion_authority.json"),
+                16 * 1024 * 1024,
+            )
+            .unwrap();
+        let source_row = SourceRow {
+            source_index: 0,
+            task_id: task_id.clone(),
+            task: task.clone(),
+            deterministic_hard_failures: Vec::new(),
+        };
         let config = serde_json::json!({"run_id":"phase-b-seal-test"});
         let prepared = PreparedRun {
             run_id: "phase-b-seal-test".into(),
             target: 1,
             work_dir: temporary.path().join("work"),
             final_run_dir: temporary.path().join("final"),
-            source_repo_id: "ScogoAI/netops-prompt-seed".into(),
-            source_revision: "0123456789abcdef0123456789abcdef01234567".into(),
-            source_file: "part-3/tasks.jsonl".into(),
             source_selection: "unused-phase-b-test".into(),
             source: SourcePopulation {
-                rows: vec![],
+                rows: vec![source_row.clone()],
                 tasks: vec![task.clone()],
-                canonical_jsonl: source_jsonl,
+                raw_jsonl: source_jsonl,
                 population_sha256: source_population_sha256(std::slice::from_ref(&task)).unwrap(),
                 held: None,
             },
-            eligible_rows: vec![SourceRow {
-                source_index: 0,
-                task_id: task_id.clone(),
-                task,
-                deterministic_hard_failures: Vec::new(),
-            }],
-            excluded_ids: vec![],
-            exclusion_authority: EvidenceArtifact {
-                logical_name: "exclusion_authority".into(),
-                relative_file: "source_exclusion_authority.json".into(),
-                held: None,
-                sha256: sha256_bytes(&authority_bytes),
-                bytes: authority_bytes,
+            eligible_rows: vec![source_row],
+            source_plan: SourcePlan {
+                path: plan_path,
+                directory: plan_directory,
+                nested_directories: vec![],
+                authority: serde_json::from_slice(&authority_bytes).unwrap(),
+                authority_artifact: EvidenceArtifact {
+                    logical_name: "exclusion_authority".into(),
+                    relative_file: "source_exclusion_authority.json".into(),
+                    held: Some(authority_file),
+                    sha256: sha256_bytes(&authority_bytes),
+                    bytes: authority_bytes,
+                },
+                artifacts: BTreeMap::new(),
             },
-            historical_reservation: None,
-            prior_releases: vec![],
             taxonomy_held: None,
             reference_snapshot: ReferenceSnapshot::capture(None).unwrap(),
             config_sha256: sha256_bytes(&serde_json::to_vec(&config).unwrap()),

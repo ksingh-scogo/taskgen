@@ -619,21 +619,22 @@ taskgen review \
   --run-id netops-phase-b-100 \
   --work-dir work/netops-phase-b-100 \
   --final-run-dir runs/netops-phase-b-100 \
-  --source-repo-id ScogoAI/netops-prompt-seed \
-  --source-revision 0123456789abcdef0123456789abcdef01234567 \
-  --source-file part-3/tasks.jsonl \
+  --source-plan-dir plans/netops-phase-b-100 \
+  --source-plan-sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   --source-selection unused-phase-b-100 \
   --api-key "$TASKGEN_REVIEW_API_KEY" \
   --model strong/reviewer
 ```
 
-No hand-built exclusion authority or historical reservation is accepted. With no prior releases, Taskgen derives the required empty authority. To exclude prior work, repeat `--prior-release-pin RUN_ID=RELEASE_SET_SHA256` for each owner-approved release and pass its exact evidence with `--prior-evidence NAME=PATH`. A `pinned_external_legacy` release requires `prior_release_set.<run-id>`, `prior_canonical_tasks.<run-id>`, `prior_legacy_source_receipt.<run-id>`, `prior_taskgen_run.<run-id>`, `prior_taskgen_tasks.<run-id>`, and `prior_taskgen_reviews.<run-id>`. A current Phase-B release requires `prior_release_set.<run-id>`, `prior_canonical_tasks.<run-id>`, and `prior_source_receipt.<run-id>`. Taskgen deeply cross-validates the pinned release, receipt, Taskgen descriptors/rows/reviews, canonical tasks, source identity, and population before deriving both `source_exclusion_authority.json` and `historical_import_reservation.json`.
+The source plan is produced provider-free by `scogo-data-factory selection plan`. Data Factory owns validation of prior releases, canonical tasks, receipts, prior Taskgen runs, reservations, and workspace provenance. Taskgen does not reinterpret those artifacts. It verifies the exact SHA-pinned v2 authority, authority ID, raw source file hash/rows/population, exclusions and prior union, exact plan inventory, and every declared opaque artifact digest, then copies those held bytes unchanged into the sealed run.
+
+Run the same command with `--preflight-only` before supplying provider credentials. It prints a secret-free JSON summary containing the authority ID/pin and source/excluded/eligible/target counts. Preflight conflicts with `--resume` and creates no work directory, lock, final run, or provider.
 
 The work directory contains an immutable credential-free `config.json` and fsynced hash-chained `stage.journal.jsonl`. A nonblocking process lock allows only one invocation to own that work directory. Resume only with the same canonical work/final paths and the same inputs; changed source, evidence, taxonomy, target, prompt, model, endpoint, reference corpus, or concurrency settings are rejected before provider setup. API keys and keyfile contents are deliberately excluded from the fingerprint so credentials can rotate. Source, taxonomy, prior evidence, the reference corpus, and final artifacts are held through no-follow file handles and rechecked at stage boundaries.
 
 Taskgen admits at most `target - accepted` concurrent rows. A genuine deterministic or model rejection opens one slot for the next unused source row. The first provider or transport failure stops all new/replacement admission; already-started calls may settle durably, and the failed row remains pending rather than becoming a quality rejection. A remote review or adjudication response received immediately before the corresponding journal fsync is an honest at-least-once crash window: same-ID resume may repeat that one nonterminal remote call. Durable completed accept/reject reviews are materialized locally without another provider call, and only durable `needs_verification` reviews resume at adjudication.
 
-A successful run publishes only at exactly the accepted target with no pending work. Taskgen writes the complete temporary run, journals its `seal_prepared` manifest digest, then atomically renames without overwrite and journals `sealed`; post-rename recovery accepts only that prepared digest. The final run includes `tasks.jsonl`, `reviews.jsonl`, `candidates.jsonl`, `rejected.jsonl`, the complete `source_population.jsonl`, `source_receipt.json`, derived exclusion/history evidence, prior evidence, and a last-written `run.json`. Repeating the same successful invocation with `--resume` verifies these artifacts without constructing a provider or making API calls. The unkeyed local hash chain detects tears, reordering, conflicts, and ordinary corruption; malicious same-user rewriting of both the work journal and its chain is outside this threat model unless an external signature/attestation is added.
+A successful run publishes only at exactly the accepted target with no pending work. Taskgen writes the complete temporary run, journals its `seal_prepared` manifest digest, then atomically renames without overwrite and journals `sealed`; post-rename recovery accepts only that prepared digest. The final run includes `tasks.jsonl`, `reviews.jsonl`, `candidates.jsonl`, `rejected.jsonl`, the byte-identical raw `source_population.jsonl`, `source_receipt.json`, the exact plan authority/prior evidence, and a last-written `run.json`. Repeating the same successful invocation with `--resume` verifies these artifacts without constructing a provider or making API calls. The unkeyed local hash chain detects tears, reordering, conflicts, and ordinary corruption; malicious same-user rewriting of both the work journal and its chain is outside this threat model unless an external signature/attestation is added.
 
 ### Calibrate a reviewer against human labels
 
