@@ -1325,7 +1325,7 @@ fn open_work(prepared: &PreparedRun, resume: bool) -> Result<StageJournal> {
     let journal_path = prepared.work_dir.join("stage.journal.jsonl");
     if resume {
         if !prepared.work_dir.is_dir() {
-            if sibling_work_directory(prepared, "initializing")?.exists() {
+            if path_entry_exists(&sibling_work_directory(prepared, "initializing")?)? {
                 return initialize_work_files(prepared);
             }
             bail!("Phase-B resume work directory does not exist");
@@ -1360,7 +1360,7 @@ fn open_work(prepared: &PreparedRun, resume: bool) -> Result<StageJournal> {
         return StageJournal::resume(&journal_path, &prepared.config_sha256)
             .map(|(journal, _)| journal);
     }
-    if prepared.work_dir.exists() || prepared.final_run_dir.exists() {
+    if path_entry_exists(&prepared.work_dir)? || path_entry_exists(&prepared.final_run_dir)? {
         bail!("Phase-B fresh run requires absent work and final directories");
     }
     let parent = prepared.work_dir.parent().unwrap_or_else(|| Path::new("."));
@@ -2339,7 +2339,7 @@ where
     if snapshot.accepted != prepared.target || snapshot.pending() != 0 {
         bail!("Phase-B seal requires exactly the accepted target and no pending rows");
     }
-    if prepared.final_run_dir.exists() {
+    if path_entry_exists(&prepared.final_run_dir)? {
         bail!("Phase-B final run already exists; refusing overwrite");
     }
     let parent = prepared
@@ -2693,7 +2693,7 @@ fn finish_prepared_seal(prepared: &PreparedRun, journal: &mut StageJournal) -> R
         .parent()
         .unwrap_or_else(|| Path::new("."));
     let temporary = parent.join(temporary_name);
-    if prepared.final_run_dir.exists() {
+    if path_entry_exists(&prepared.final_run_dir)? {
         verify_sealed_run(prepared, Some(&digest))?;
     } else {
         verify_run_directory(prepared, &temporary, Some(&digest))?;
@@ -2763,7 +2763,7 @@ pub(crate) async fn run(args: crate::ReviewArgs) -> Result<()> {
         );
         return Ok(());
     }
-    if prepared.final_run_dir.exists() {
+    if path_entry_exists(&prepared.final_run_dir)? {
         bail!("Phase-B final run exists without a matching seal-prepared journal anchor");
     }
 
@@ -3612,6 +3612,40 @@ mod tests {
         assert!(prepared.work_dir.join("stage.journal.jsonl").is_file());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn fresh_run_rejects_dangling_work_or_final_leaf_before_work_initialization() {
+        for dangling_work in [true, false] {
+            let temporary = tempfile::tempdir().unwrap();
+            let source = temporary.path().join("source.jsonl");
+            std::fs::write(&source, format!("{}\n", golden_task())).unwrap();
+            let (plan, pin) = write_empty_plan(temporary.path(), &source);
+            let args = phase_b_args(&source, &plan, &pin, temporary.path());
+            let taxonomy =
+                crate::taxonomy::TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml"))
+                    .unwrap();
+            let prepared = prepare_run(&args, &taxonomy, "review prompt", None).unwrap();
+            let occupied = if dangling_work {
+                &prepared.work_dir
+            } else {
+                &prepared.final_run_dir
+            };
+            std::os::unix::fs::symlink(temporary.path().join("missing"), occupied).unwrap();
+
+            let error = open_work(&prepared, false).unwrap_err();
+            assert!(
+                error.to_string().contains("fresh run requires absent"),
+                "{error:#}"
+            );
+            assert!(!prepared.work_dir.join("config.json").exists());
+            assert!(
+                !sibling_work_directory(&prepared, "initializing")
+                    .unwrap()
+                    .exists()
+            );
+        }
+    }
+
     #[test]
     fn journal_recovers_a_torn_tail_and_rejects_terminal_conflicts() {
         let temporary = tempfile::tempdir().unwrap();
@@ -4330,6 +4364,43 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn prepared_resume_rejects_dangling_final_leaf_before_no_replace_rename() {
+        let (_temporary, prepared, snapshot) = seal_fixture();
+        let (mut journal, _) = StageJournal::resume(
+            &prepared.work_dir.join("stage.journal.jsonl"),
+            &prepared.config_sha256,
+        )
+        .unwrap();
+        seal_run(
+            &prepared,
+            &snapshot,
+            &mut journal,
+            || Ok(()),
+            || bail!("simulated post-rename crash"),
+        )
+        .unwrap_err();
+        let prepared_directory = prepared
+            .final_run_dir
+            .parent()
+            .unwrap()
+            .join(journal.snapshot.seal_temporary_name.as_deref().unwrap());
+        std::fs::rename(&prepared.final_run_dir, &prepared_directory).unwrap();
+        std::os::unix::fs::symlink("missing-final", &prepared.final_run_dir).unwrap();
+
+        let error = finish_prepared_seal(&prepared, &mut journal).unwrap_err();
+        assert!(!error.to_string().contains("File exists"), "{error:#}");
+        assert!(prepared_directory.is_dir());
+        assert!(
+            std::fs::symlink_metadata(&prepared.final_run_dir)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(journal.snapshot.sealed_manifest_sha256.is_none());
+    }
+
     #[test]
     fn seal_never_overwrites_an_existing_final_directory() {
         let (_temporary, prepared, snapshot) = seal_fixture();
@@ -4345,6 +4416,38 @@ mod tests {
         assert_eq!(
             std::fs::read(prepared.final_run_dir.join("owner-marker")).unwrap(),
             b"keep"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn seal_rejects_dangling_final_leaf_before_prepared_state() {
+        let (_temporary, prepared, snapshot) = seal_fixture();
+        std::os::unix::fs::symlink("missing-final", &prepared.final_run_dir).unwrap();
+        let (mut journal, _) = StageJournal::resume(
+            &prepared.work_dir.join("stage.journal.jsonl"),
+            &prepared.config_sha256,
+        )
+        .unwrap();
+
+        let error = seal_run(&prepared, &snapshot, &mut journal, || Ok(()), || Ok(())).unwrap_err();
+        assert!(error.to_string().contains("already exists"), "{error:#}");
+        assert!(journal.snapshot.seal_prepared_manifest_sha256.is_none());
+        assert!(
+            !prepared
+                .final_run_dir
+                .parent()
+                .unwrap()
+                .join(format!(
+                    ".{}.prepared-{}",
+                    prepared
+                        .final_run_dir
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy(),
+                    &prepared.config_sha256[..16]
+                ))
+                .exists()
         );
     }
 
