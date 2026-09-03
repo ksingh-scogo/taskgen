@@ -1247,6 +1247,14 @@ fn sync_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn path_entry_exists(path: &Path) -> Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
 fn sibling_work_directory(prepared: &PreparedRun, state: &str) -> Result<PathBuf> {
     let parent = prepared
         .work_dir
@@ -2727,6 +2735,9 @@ pub(crate) async fn run(args: crate::ReviewArgs) -> Result<()> {
     let prepared = prepare_run(&args, &taxonomy, &system_prompt, Some(taxonomy_snapshot))?;
     prepared.assert_inputs_unchanged()?;
     if args.preflight_only {
+        if path_entry_exists(&prepared.work_dir)? || path_entry_exists(&prepared.final_run_dir)? {
+            bail!("Phase-B fresh preflight requires absent work and final destinations");
+        }
         println!(
             "{}",
             serde_json::to_string(&json!({
@@ -3250,6 +3261,62 @@ mod tests {
             assert!(!temporary.path().join("final").exists());
             assert!(!temporary.path().join(".work.phase-b.lock").exists());
         }
+    }
+
+    #[tokio::test]
+    async fn fresh_preflight_rejects_existing_work_or_final_destination() {
+        for existing_work in [true, false] {
+            let temporary = tempfile::tempdir().unwrap();
+            let source = temporary.path().join("source.jsonl");
+            std::fs::write(&source, format!("{}\n", golden_task())).unwrap();
+            let (plan, pin) = write_empty_plan(temporary.path(), &source);
+            let mut args = phase_b_args(&source, &plan, &pin, temporary.path());
+            args.preflight_only = true;
+            let occupied = if existing_work {
+                temporary.path().join("work")
+            } else {
+                temporary.path().join("final")
+            };
+            std::fs::create_dir(&occupied).unwrap();
+
+            let error = run(args).await.unwrap_err();
+            assert!(
+                error.to_string().contains("absent work and final"),
+                "{error:#}"
+            );
+            assert!(occupied.is_dir());
+            assert!(!temporary.path().join(".work.phase-b.lock").exists());
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn fresh_preflight_rejects_destination_symlink_but_allows_intermediate_symlink() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("source.jsonl");
+        std::fs::write(&source, format!("{}\n", golden_task())).unwrap();
+        let (plan, pin) = write_empty_plan(temporary.path(), &source);
+
+        let destination_link = temporary.path().join("work-link");
+        std::os::unix::fs::symlink(temporary.path().join("missing"), &destination_link).unwrap();
+        let mut occupied_args = phase_b_args(&source, &plan, &pin, temporary.path());
+        occupied_args.preflight_only = true;
+        occupied_args.work_dir = Some(destination_link);
+        assert!(run(occupied_args).await.is_err());
+        assert!(!temporary.path().join(".work-link.phase-b.lock").exists());
+
+        let real_parent = temporary.path().join("real-parent");
+        let parent_link = temporary.path().join("parent-link");
+        std::fs::create_dir(&real_parent).unwrap();
+        std::os::unix::fs::symlink(&real_parent, &parent_link).unwrap();
+        let mut intermediate_args = phase_b_args(&source, &plan, &pin, temporary.path());
+        intermediate_args.preflight_only = true;
+        intermediate_args.work_dir = Some(parent_link.join("work"));
+        intermediate_args.final_run_dir = Some(parent_link.join("final"));
+        run(intermediate_args).await.unwrap();
+        assert!(!real_parent.join("work").exists());
+        assert!(!real_parent.join("final").exists());
+        assert!(!real_parent.join(".work.phase-b.lock").exists());
     }
 
     #[tokio::test]
