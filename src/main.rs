@@ -25,6 +25,7 @@ pub mod artifacts;
 pub mod atif;
 pub mod calibration;
 pub mod dedup;
+mod phase_b;
 pub mod provider;
 pub mod references;
 pub mod review;
@@ -294,8 +295,51 @@ struct ReviewArgs {
     #[arg(long)]
     adjudication_keyfile: Option<PathBuf>,
 
-    #[arg(long)]
+    #[arg(long, conflicts_with = "accepted_target")]
     gold_labels: Option<PathBuf>,
+
+    /// Exact number of accepted source rows required by bounded Phase-B review.
+    #[arg(
+        long,
+        value_parser = parse_positive_usize,
+        conflicts_with = "run_dir",
+        requires_all = [
+            "run_id",
+            "work_dir",
+            "final_run_dir",
+            "source_plan_dir",
+            "source_plan_sha256",
+            "source_selection"
+        ]
+    )]
+    accepted_target: Option<usize>,
+
+    #[arg(long, requires = "accepted_target")]
+    run_id: Option<String>,
+
+    #[arg(long, requires = "accepted_target")]
+    work_dir: Option<PathBuf>,
+
+    #[arg(long, requires = "accepted_target")]
+    final_run_dir: Option<PathBuf>,
+
+    #[arg(long, requires = "accepted_target", conflicts_with = "preflight_only")]
+    resume: bool,
+
+    #[arg(long, requires = "accepted_target")]
+    /// Immutable provider-free source plan produced by Data Factory.
+    source_plan_dir: Option<PathBuf>,
+
+    #[arg(long, requires = "accepted_target")]
+    /// Exact SHA-256 of source_exclusion_authority.json in the source plan.
+    source_plan_sha256: Option<String>,
+
+    #[arg(long, requires = "accepted_target", conflicts_with = "resume")]
+    /// Validate source, plan, capacity, and configuration without creating work or providers.
+    preflight_only: bool,
+
+    #[arg(long, requires = "accepted_target")]
+    source_selection: Option<String>,
 }
 
 #[derive(ClapArgs, Debug)]
@@ -2653,6 +2697,9 @@ fn review_log_config(
 }
 
 async fn run_review(args: ReviewArgs) -> Result<()> {
+    if args.accepted_target.is_some() {
+        return phase_b::run(args).await;
+    }
     let started_at = chrono::Utc::now();
     let started_clock = std::time::Instant::now();
     let taxonomy = taxonomy::TaxonomyCatalog::from_path(&args.taxonomy)?;
@@ -5584,6 +5631,113 @@ mod tests {
     }
 
     #[test]
+    fn phase_b_review_flags_are_all_or_none() {
+        let parsed = Cli::try_parse_from([
+            "taskgen",
+            "review",
+            "--input",
+            "source.jsonl",
+            "--taxonomy",
+            "docs/netops-taxonomy.yaml",
+            "--accepted-target",
+            "100",
+            "--run-id",
+            "netops-phase-b-100",
+            "--work-dir",
+            "work/netops-phase-b-100",
+            "--final-run-dir",
+            "runs/netops-phase-b-100",
+            "--source-plan-dir",
+            "plans/netops-phase-b-100",
+            "--source-plan-sha256",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--source-selection",
+            "unused-phase-b-100",
+            "--preflight-only",
+        ])
+        .unwrap();
+        let Command::Review(args) = parsed.command else {
+            panic!("expected review command");
+        };
+        assert_eq!(args.accepted_target, Some(100));
+        assert_eq!(args.run_id.as_deref(), Some("netops-phase-b-100"));
+        assert_eq!(
+            args.source_plan_dir.as_deref(),
+            Some(Path::new("plans/netops-phase-b-100"))
+        );
+        assert!(args.preflight_only);
+
+        let partial = Cli::try_parse_from([
+            "taskgen",
+            "review",
+            "--input",
+            "source.jsonl",
+            "--taxonomy",
+            "docs/netops-taxonomy.yaml",
+            "--accepted-target",
+            "100",
+        ]);
+        assert!(
+            partial.is_err(),
+            "partial Phase-B arguments must be rejected"
+        );
+
+        let legacy = Cli::try_parse_from([
+            "taskgen",
+            "review",
+            "--input",
+            "source.jsonl",
+            "--taxonomy",
+            "docs/netops-taxonomy.yaml",
+        ]);
+        assert!(
+            legacy.is_ok(),
+            "ordinary standalone review must remain valid"
+        );
+
+        let calibration = Cli::try_parse_from([
+            "taskgen",
+            "review",
+            "--input",
+            "source.jsonl",
+            "--taxonomy",
+            "docs/netops-taxonomy.yaml",
+            "--accepted-target",
+            "1",
+            "--run-id",
+            "phase-b",
+            "--work-dir",
+            "work/phase-b",
+            "--final-run-dir",
+            "runs/phase-b",
+            "--source-plan-dir",
+            "plans/phase-b",
+            "--source-plan-sha256",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--source-selection",
+            "phase-b",
+            "--gold-labels",
+            "gold.jsonl",
+        ]);
+        assert!(calibration.is_err(), "Phase-B must reject --gold-labels");
+
+        let retired = Cli::try_parse_from([
+            "taskgen",
+            "review",
+            "--input",
+            "source.jsonl",
+            "--taxonomy",
+            "docs/netops-taxonomy.yaml",
+            "--source-repo-id",
+            "ScogoAI/old",
+        ]);
+        assert!(
+            retired.is_err(),
+            "retired raw provenance flags must be rejected"
+        );
+    }
+
+    #[test]
     fn generation_connect_timeout_has_a_short_default_and_override() {
         let default = Cli::try_parse_from(["taskgen", "generate", "--api-key", "x"]).unwrap();
         let Command::Generate(default) = default.command else {
@@ -7055,6 +7209,15 @@ mod tests {
             adjudication_api_key: None,
             adjudication_keyfile: None,
             gold_labels: Some(PathBuf::from("tests/fixtures/review-gold.jsonl")),
+            accepted_target: None,
+            run_id: None,
+            work_dir: None,
+            final_run_dir: None,
+            resume: false,
+            source_plan_dir: None,
+            source_plan_sha256: None,
+            preflight_only: false,
+            source_selection: None,
         })
         .await
         .unwrap();
@@ -7096,6 +7259,161 @@ mod tests {
             assert!(log.contains(event), "review run log missing {event}: {log}");
         }
         assert!(!log.contains("test-key"), "{log}");
+    }
+
+    #[tokio::test]
+    async fn successful_phase_b_resume_verifies_without_provider_credentials_or_calls() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+        #[derive(Clone)]
+        struct CountingAccept {
+            calls: Arc<AtomicUsize>,
+        }
+        impl Respond for CountingAccept {
+            fn respond(&self, _request: &Request) -> ResponseTemplate {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices":[{"message":{"content":include_str!(
+                        "../tests/fixtures/canonical/valid-review-v3.json"
+                    )}}],
+                    "usage":{"prompt_tokens":10,"completion_tokens":5}
+                }))
+            }
+        }
+
+        let server = MockServer::start().await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(CountingAccept {
+                calls: calls.clone(),
+            })
+            .mount(&server)
+            .await;
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("source.jsonl");
+        let source_task: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/canonical/valid-task.json"))
+                .unwrap();
+        std::fs::write(&source, format!("  {source_task}\r\n")).unwrap();
+        let source_bytes = std::fs::read(&source).unwrap();
+        let authority_body = serde_json::json!({
+            "schema_version":"scogo.data-factory.source-exclusion-authority.v2",
+            "repo_id":"ScogoAI/netops-prompt-seed","repo_type":"dataset","private":true,
+            "revision":"0123456789abcdef0123456789abcdef01234567",
+            "source_file":"part-3/tasks.jsonl","source_file_rows":1,
+            "source_file_sha256":format!("{:x}",Sha256::digest(&source_bytes)),
+            "source_population_sha256":phase_b::source_population_sha256(std::slice::from_ref(&source_task)).unwrap(),
+            "excluded_source_task_ids":[],"prior_completed_releases":[]
+        });
+        let mut authority = authority_body.as_object().unwrap().clone();
+        authority.insert(
+            "authority_id".into(),
+            serde_json::json!(format!(
+                "authority_{:x}",
+                Sha256::digest(serde_json::to_vec(&authority_body).unwrap())
+            )),
+        );
+        let mut authority_bytes = serde_json::to_vec(&authority).unwrap();
+        authority_bytes.push(b'\n');
+        let plan = temporary.path().join("plan");
+        std::fs::create_dir(&plan).unwrap();
+        std::fs::write(
+            plan.join("source_exclusion_authority.json"),
+            &authority_bytes,
+        )
+        .unwrap();
+        let plan_sha256 = format!("{:x}", Sha256::digest(&authority_bytes));
+        let work = temporary.path().join("work");
+        let final_run = temporary.path().join("final");
+        let arguments = |resume: bool, with_key: bool| {
+            let mut args = vec![
+                "taskgen".to_string(),
+                "review".into(),
+                "--input".into(),
+                source.display().to_string(),
+                "--taxonomy".into(),
+                "docs/netops-taxonomy.yaml".into(),
+                "--api-base".into(),
+                format!("{}/v1", server.uri()),
+                "--model".into(),
+                "same-model".into(),
+                "--accepted-target".into(),
+                "1".into(),
+                "--run-id".into(),
+                "phase-b-rerun".into(),
+                "--work-dir".into(),
+                work.display().to_string(),
+                "--final-run-dir".into(),
+                final_run.display().to_string(),
+                "--source-plan-dir".into(),
+                plan.display().to_string(),
+                "--source-plan-sha256".into(),
+                plan_sha256.clone(),
+                "--source-selection".into(),
+                "unused-phase-b-rerun".into(),
+                "--review-workers".into(),
+                "1".into(),
+            ];
+            if with_key {
+                args.extend(["--api-key".into(), "test-key".into()]);
+            }
+            if resume {
+                args.push("--resume".into());
+            }
+            let cli = Cli::try_parse_from(args).unwrap();
+            let Command::Review(args) = cli.command else {
+                panic!("expected review")
+            };
+            *args
+        };
+        run_review(arguments(false, true)).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        run_review(arguments(true, false)).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(final_run.join("source_receipt.json").is_file());
+        assert_eq!(
+            std::fs::read(final_run.join("source_population.jsonl")).unwrap(),
+            source_bytes
+        );
+        for root in [&work, &final_run] {
+            let mut paths = vec![root.to_path_buf()];
+            while let Some(path) = paths.pop() {
+                for entry in std::fs::read_dir(path).unwrap() {
+                    let path = entry.unwrap().path();
+                    if path.is_dir() {
+                        paths.push(path);
+                    } else {
+                        assert!(
+                            !std::fs::read_to_string(&path)
+                                .unwrap_or_default()
+                                .contains("test-key"),
+                            "credential persisted in {}",
+                            path.display()
+                        );
+                    }
+                }
+            }
+        }
+
+        let data_factory = Path::new(
+            "/Users/ksingh/git/scogo/work/experiments/scogo-data-factory/.worktree/data-factory-phase-b-100-smoke",
+        );
+        if data_factory.join(".venv/bin/python").is_file() {
+            let status = std::process::Command::new(data_factory.join(".venv/bin/python"))
+                .env("PYTHONPATH", data_factory.join("src"))
+                .arg("-c")
+                .arg("from pathlib import Path; import sys; from scogo_ai_data_factory.taskgen import load_taskgen_run; p=Path(sys.argv[1]); r=load_taskgen_run(p, source_receipt=p/'source_receipt.json', require_source_receipt=True); assert len(r.tasks)==1")
+                .arg(std::fs::canonicalize(&final_run).unwrap())
+                .status()
+                .unwrap();
+            assert!(
+                status.success(),
+                "Data Factory rejected sealed Phase-B fixture"
+            );
+        }
     }
 
     #[tokio::test]

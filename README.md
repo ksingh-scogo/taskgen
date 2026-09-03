@@ -607,6 +607,35 @@ taskgen review \
 
 The review run writes accepted rows to `tasks.jsonl`, all decisions to `reviews.jsonl`, rejections/errors to `rejected.jsonl`, calibration/telemetry to `run.json`, and live progress to `run.log`. It validates input schema and taxonomy coordinates before making review calls. It does not regenerate, repair, or deduplicate candidates.
 
+### Bounded Phase-B source review
+
+Phase-B mode turns `review` into a resumable exact-target gate over one complete, ordered private-HF source file. The Phase-B options are all-or-none: ordinary standalone review is unchanged when `--accepted-target` is absent.
+
+```bash
+taskgen review \
+  --input data/full-source-population.jsonl \
+  --taxonomy docs/netops-taxonomy.yaml \
+  --accepted-target 100 \
+  --run-id netops-phase-b-100 \
+  --work-dir work/netops-phase-b-100 \
+  --final-run-dir runs/netops-phase-b-100 \
+  --source-plan-dir plans/netops-phase-b-100 \
+  --source-plan-sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  --source-selection unused-phase-b-100 \
+  --api-key "$TASKGEN_REVIEW_API_KEY" \
+  --model strong/reviewer
+```
+
+The source plan is produced provider-free by `scogo-data-factory selection plan`. Data Factory owns validation of prior releases, canonical tasks, receipts, prior Taskgen runs, reservations, and workspace provenance. Taskgen does not reinterpret those artifacts. It verifies the exact SHA-pinned v2 authority, authority ID, raw source file hash/rows/population, exclusions and prior union, exact plan inventory, and every declared opaque artifact digest, then copies those held bytes unchanged into the sealed run.
+
+Run the same command with `--preflight-only` before supplying provider credentials. It validates the effective review and adjudication endpoint configuration, requires both fresh work and final destinations to be absent, then prints a secret-free JSON summary containing the authority ID/pin and source/excluded/eligible/target counts. Preflight conflicts with `--resume` and creates no work directory, lock, final run, provider, or network request.
+
+The work directory contains an immutable credential-free `config.json` and fsynced hash-chained `stage.journal.jsonl`; both are built in a temporary sibling and atomically published together so a torn config is never exposed as initialized work. The work-state wrapper records `started_at` outside the deterministic config hash, preserves it across same-ID resume, and the sealed manifest records a separate completion time at seal. A nonblocking process lock allows only one invocation to own that work directory. Resume only with the same canonical work/final paths and the same inputs; changed source, evidence, taxonomy, target, prompt, model, endpoint, reference corpus, or concurrency settings are rejected before provider setup. API keys and keyfile contents are deliberately excluded from the fingerprint so credentials can rotate. Source, taxonomy, prior evidence, the reference corpus, and final artifacts must be regular files, are held through no-follow handles, and are rechecked at stage boundaries.
+
+Taskgen admits at most `target - accepted` concurrent rows. A genuine deterministic or model rejection opens one slot for the next unused source row. The first provider or transport failure stops all new/replacement admission; already-started calls may settle durably, and the failed row remains pending rather than becoming a quality rejection. A remote review or adjudication response received immediately before the corresponding journal fsync is an honest at-least-once crash window: same-ID resume may repeat that one nonterminal remote call. Durable completed accept/reject reviews are materialized locally without another provider call, and only durable `needs_verification` reviews resume at adjudication.
+
+A successful run publishes only at exactly the accepted target with no pending work. Taskgen safely rebuilds an unanchored deterministic prepared sibling after a pre-anchor crash, writes the complete temporary run, fsyncs its parent, journals its `seal_prepared` manifest digest, then atomically renames without overwrite and journals `sealed`; post-rename recovery accepts only that prepared digest. Final verification requires the physical file/directory tree to match the manifest exactly, so undeclared files, directories, symlinks, and special files fail verification. The final run includes `tasks.jsonl`, `reviews.jsonl`, `candidates.jsonl`, `rejected.jsonl`, the byte-identical raw `source_population.jsonl`, `source_receipt.json`, the exact plan authority/prior evidence, and a last-written `run.json`. Repeating the same successful invocation with `--resume` verifies these artifacts without constructing a provider or making API calls. The unkeyed local hash chain detects tears, reordering, conflicts, and ordinary corruption; malicious same-user rewriting of both the work journal and its chain is outside this threat model unless an external signature/attestation is added.
+
 ### Calibrate a reviewer against human labels
 
 Create a JSONL file with one label per candidate:
