@@ -1291,10 +1291,12 @@ fn initialize_work_files(prepared: &PreparedRun) -> Result<StageJournal> {
     std::fs::create_dir(&initializing)?;
     sync_directory(parent)?;
     let result = (|| -> Result<StageJournal> {
+        let started_at = chrono::Utc::now().to_rfc3339();
         let mut config_bytes = serde_json::to_vec_pretty(&json!({
             "schema_version":"scogo.taskgen.phase-b-work.v1",
             "config_sha256":prepared.config_sha256,
             "config":prepared.config,
+            "started_at":started_at,
         }))?;
         config_bytes.push(b'\n');
         write_synced(&initializing.join("config.json"), &config_bytes)?;
@@ -1312,6 +1314,30 @@ fn initialize_work_files(prepared: &PreparedRun) -> Result<StageJournal> {
         let _ = remove_unanchored_directory(&initializing, parent);
     }
     result
+}
+
+fn validate_work_state(prepared: &PreparedRun, stored: &Value) -> Result<String> {
+    if stored.get("schema_version").and_then(Value::as_str) != Some("scogo.taskgen.phase-b-work.v1")
+        || stored.get("config_sha256").and_then(Value::as_str)
+            != Some(prepared.config_sha256.as_str())
+        || stored.get("config") != Some(&prepared.config)
+    {
+        bail!("Phase-B immutable config changed; resume refused before provider setup");
+    }
+    let started_at = stored
+        .get("started_at")
+        .and_then(Value::as_str)
+        .context("Phase-B work state has no durable started_at")?;
+    chrono::DateTime::parse_from_rfc3339(started_at)
+        .context("Phase-B work started_at is invalid")?;
+    Ok(started_at.to_string())
+}
+
+fn load_work_started_at(prepared: &PreparedRun) -> Result<String> {
+    let stored: Value =
+        serde_json::from_slice(&std::fs::read(prepared.work_dir.join("config.json"))?)
+            .context("Phase-B work config is invalid JSON")?;
+    validate_work_state(prepared, &stored)
 }
 
 fn open_work(prepared: &PreparedRun, resume: bool) -> Result<StageJournal> {
@@ -1340,14 +1366,7 @@ fn open_work(prepared: &PreparedRun, resume: bool) -> Result<StageJournal> {
         }
         let stored: Value = serde_json::from_slice(&std::fs::read(&config_path)?)
             .context("Phase-B work config is invalid JSON")?;
-        if stored.get("schema_version").and_then(Value::as_str)
-            != Some("scogo.taskgen.phase-b-work.v1")
-            || stored.get("config_sha256").and_then(Value::as_str)
-                != Some(prepared.config_sha256.as_str())
-            || stored.get("config") != Some(&prepared.config)
-        {
-            bail!("Phase-B immutable config changed; resume refused before provider setup");
-        }
+        validate_work_state(prepared, &stored)?;
         if !journal_path.exists() {
             let names = std::fs::read_dir(&prepared.work_dir)?
                 .map(|entry| entry.map(|entry| entry.file_name()))
@@ -2336,6 +2355,8 @@ where
     G: FnOnce() -> Result<()>,
 {
     prepared.assert_inputs_unchanged()?;
+    let started_at = load_work_started_at(prepared)?;
+    let parsed_started_at = chrono::DateTime::parse_from_rfc3339(&started_at)?;
     if snapshot.accepted != prepared.target || snapshot.pending() != 0 {
         bail!("Phase-B seal requires exactly the accepted target and no pending rows");
     }
@@ -2464,14 +2485,17 @@ where
         artifacts.insert("run".to_string(), json!({"file":"run.json"}));
         sync_directory(&temporary)?;
         before_manifest()?;
-        let now = chrono::Utc::now().to_rfc3339();
+        let completed_at = chrono::Utc::now();
+        if completed_at < parsed_started_at {
+            bail!("Phase-B seal time precedes durable work initialization");
+        }
         let manifest = json!({
             "schema_version":"scogo.taskgen.run.v3",
             "command_version":env!("CARGO_PKG_VERSION"),
             "run_id":prepared.run_id,
             "status":"success",
-            "started_at":now,
-            "completed_at":now,
+            "started_at":started_at,
+            "completed_at":completed_at.to_rfc3339(),
             "input_records":prepared.source.rows.len(),
             "reviewed_records":snapshot.rows.values().filter(|row| row.review.is_some()).count(),
             "accepted_records":prepared.target,
@@ -2538,11 +2562,22 @@ fn verify_run_directory(
     }
     let manifest: Value = serde_json::from_slice(&manifest_bytes)
         .context("sealed Phase-B manifest is invalid JSON")?;
+    let started_at = chrono::DateTime::parse_from_rfc3339(
+        manifest["started_at"]
+            .as_str()
+            .context("sealed Phase-B manifest has no started_at")?,
+    )?;
+    let completed_at = chrono::DateTime::parse_from_rfc3339(
+        manifest["completed_at"]
+            .as_str()
+            .context("sealed Phase-B manifest has no completed_at")?,
+    )?;
     if manifest["schema_version"] != "scogo.taskgen.run.v3"
         || manifest["status"] != "success"
         || manifest["run_id"] != prepared.run_id
         || manifest["phase_b"]["config_sha256"] != prepared.config_sha256
         || manifest["accepted_records"] != prepared.target
+        || completed_at < started_at
     {
         bail!("sealed Phase-B manifest conflicts with immutable config");
     }
@@ -3612,6 +3647,82 @@ mod tests {
         assert!(prepared.work_dir.join("stage.journal.jsonl").is_file());
     }
 
+    #[test]
+    fn manifest_uses_persisted_initialization_start_and_separate_seal_time() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("source.jsonl");
+        std::fs::write(&source, format!("{}\n", golden_task())).unwrap();
+        let (plan, pin) = write_empty_plan(temporary.path(), &source);
+        let args = phase_b_args(&source, &plan, &pin, temporary.path());
+        let taxonomy =
+            crate::taxonomy::TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml"))
+                .unwrap();
+        let first = prepare_run(&args, &taxonomy, "review prompt", None).unwrap();
+        let initial_config_sha256 = first.config_sha256.clone();
+        let journal = open_work(&first, false).unwrap();
+        let initial_work: Value =
+            serde_json::from_slice(&std::fs::read(first.work_dir.join("config.json")).unwrap())
+                .unwrap();
+        let started_at = initial_work["started_at"]
+            .as_str()
+            .expect("fresh durable work initialization must record started_at")
+            .to_string();
+        let parsed_started_at = chrono::DateTime::parse_from_rfc3339(&started_at).unwrap();
+        drop(journal);
+
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let resumed = prepare_run(&args, &taxonomy, "review prompt", None).unwrap();
+        assert_eq!(resumed.config_sha256, initial_config_sha256);
+        let resumed_work: Value =
+            serde_json::from_slice(&std::fs::read(resumed.work_dir.join("config.json")).unwrap())
+                .unwrap();
+        assert_eq!(resumed_work["started_at"], started_at);
+        assert_eq!(resumed_work["config"], resumed.config);
+        let mut journal = open_work(&resumed, true).unwrap();
+
+        let row = resumed.eligible_rows[0].clone();
+        journal
+            .append(
+                &row.task_id,
+                row.source_index,
+                JournalStage::Admitted,
+                json!({"task":row.task}),
+            )
+            .unwrap();
+        let completed_review = test_review(&row, ReviewStageOutcome::Accept);
+        journal
+            .append(
+                &row.task_id,
+                row.source_index,
+                JournalStage::ReviewCompleted,
+                serde_json::to_value(&completed_review).unwrap(),
+            )
+            .unwrap();
+        let mut accepted_review = completed_review;
+        accepted_review.record["final_disposition"] = json!("accepted");
+        journal
+            .append(
+                &row.task_id,
+                row.source_index,
+                JournalStage::Accepted,
+                json!({"review":accepted_review,"rejection":null}),
+            )
+            .unwrap();
+        let snapshot = journal.snapshot.clone();
+        let seal_lower_bound = chrono::Utc::now();
+        seal_run(&resumed, &snapshot, &mut journal, || Ok(()), || Ok(())).unwrap();
+
+        let manifest: Value =
+            serde_json::from_slice(&std::fs::read(resumed.final_run_dir.join("run.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest["started_at"], started_at);
+        let completed_at =
+            chrono::DateTime::parse_from_rfc3339(manifest["completed_at"].as_str().unwrap())
+                .unwrap();
+        assert!(completed_at >= parsed_started_at);
+        assert!(completed_at >= seal_lower_bound);
+    }
+
     #[cfg(unix)]
     #[test]
     fn fresh_run_rejects_dangling_work_or_final_leaf_before_work_initialization() {
@@ -4243,6 +4354,15 @@ mod tests {
             config,
         };
         std::fs::create_dir(&prepared.work_dir).unwrap();
+        let mut work_state = serde_json::to_vec_pretty(&json!({
+            "schema_version":"scogo.taskgen.phase-b-work.v1",
+            "config_sha256":prepared.config_sha256,
+            "config":prepared.config,
+            "started_at":chrono::Utc::now().to_rfc3339(),
+        }))
+        .unwrap();
+        work_state.push(b'\n');
+        std::fs::write(prepared.work_dir.join("config.json"), work_state).unwrap();
         let mut journal = StageJournal::create(
             &prepared.work_dir.join("stage.journal.jsonl"),
             &prepared.config_sha256,
