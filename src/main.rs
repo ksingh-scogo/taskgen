@@ -435,6 +435,15 @@ fn parse_positive_usize(value: &str) -> std::result::Result<usize, String> {
     Ok(parsed)
 }
 
+fn validate_nonnegative_finite(value: Option<f64>, name: &str) -> Result<()> {
+    if let Some(value) = value
+        && (!value.is_finite() || value < 0.0)
+    {
+        bail!("{name} must be a finite, non-negative number");
+    }
+    Ok(())
+}
+
 #[derive(ClapArgs, Debug, Clone)]
 struct GenerateArgs {
     #[arg(long, default_value = "https://api.openai.com/v1")]
@@ -592,6 +601,14 @@ struct GenerateArgs {
 
     #[arg(long)]
     review_output_price: Option<f64>,
+
+    /// Input price per million tokens for an explicitly selected adjudication model.
+    #[arg(long)]
+    adjudication_input_price: Option<f64>,
+
+    /// Output price per million tokens for an explicitly selected adjudication model.
+    #[arg(long)]
+    adjudication_output_price: Option<f64>,
 
     #[arg(long)]
     budget: Option<f64>,
@@ -3290,6 +3307,32 @@ fn review_cost(stats: &AtomicStats, input_price: Option<f64>, output_price: Opti
             / 1_000_000.0
 }
 
+fn adjudication_cost(
+    stats: &AtomicStats,
+    input_price: Option<f64>,
+    output_price: Option<f64>,
+) -> f64 {
+    input_price.unwrap_or(0.0) * stats.adjudication_input_tokens.load(Ordering::Relaxed) as f64
+        / 1_000_000.0
+        + output_price.unwrap_or(0.0)
+            * stats.adjudication_output_tokens.load(Ordering::Relaxed) as f64
+            / 1_000_000.0
+}
+
+fn adjudication_prices(args: &GenerateArgs) -> (Option<f64>, Option<f64>) {
+    if args.adjudication_model.is_some() || args.adjudication_api_base.is_some() {
+        (
+            args.adjudication_input_price,
+            args.adjudication_output_price,
+        )
+    } else {
+        (
+            args.review_input_price.or(args.input_price),
+            args.review_output_price.or(args.output_price),
+        )
+    }
+}
+
 struct GenerationReportContext<'a> {
     run_id: &'a str,
     started_at: chrono::DateTime<chrono::Utc>,
@@ -3680,6 +3723,12 @@ fn generation_run_report(
     });
 
     let summary = generation_operator_summary(context, &outcome);
+    let (adjudication_input_price, adjudication_output_price) = adjudication_prices(context.args);
+    let adjudication_priced_cost = adjudication_cost(
+        outcome.stats,
+        adjudication_input_price,
+        adjudication_output_price,
+    );
     let report = serde_json::json!({
         "schema_version": "scogo.taskgen.run.v3",
         "command_version": env!("CARGO_PKG_VERSION"),
@@ -3757,6 +3806,7 @@ fn generation_run_report(
             "endpoint_origin": context.adjudication_provider.api_base.origin().ascii_serialization(),
             "input_tokens": outcome.stats.adjudication_input_tokens.load(Ordering::Relaxed),
             "output_tokens": outcome.stats.adjudication_output_tokens.load(Ordering::Relaxed),
+            "priced_cost": adjudication_priced_cost,
         },
         "timing": {
             "wall_clock_ms": outcome.elapsed.as_millis().min(u64::MAX as u128) as u64,
@@ -3994,6 +4044,8 @@ fn generation_log_config(
         "output_price": args.output_price,
         "review_input_price": args.review_input_price,
         "review_output_price": args.review_output_price,
+        "adjudication_input_price": args.adjudication_input_price,
+        "adjudication_output_price": args.adjudication_output_price,
         "budget": args.budget,
         "multilingual": args.multilingual,
     })
@@ -4003,6 +4055,20 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
     let started_at = chrono::Utc::now();
     let started_clock = std::time::Instant::now();
     println!("Generation started: {}", started_at.to_rfc3339());
+    for (value, name) in [
+        (args.input_price, "--input-price"),
+        (args.output_price, "--output-price"),
+        (args.review_input_price, "--review-input-price"),
+        (args.review_output_price, "--review-output-price"),
+        (args.adjudication_input_price, "--adjudication-input-price"),
+        (
+            args.adjudication_output_price,
+            "--adjudication-output-price",
+        ),
+        (args.budget, "--budget"),
+    ] {
+        validate_nonnegative_finite(value, name)?;
+    }
     let taxonomy = match args.taxonomy.as_deref() {
         Some(path) => taxonomy::TaxonomyCatalog::from_path(path)?,
         None => taxonomy::TaxonomyCatalog::embedded_itops()?,
@@ -4072,6 +4138,16 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
             credentials: adjudication_credentials,
         },
     )?;
+    if args.budget.is_some()
+        && !args.skip_review
+        && (args.adjudication_model.is_some() || args.adjudication_api_base.is_some())
+        && (args.adjudication_input_price.is_none() || args.adjudication_output_price.is_none())
+    {
+        bail!(
+            "--budget with an explicit adjudication provider requires both --adjudication-input-price and --adjudication-output-price"
+        );
+    }
+
     let reference_store = Arc::new(match args.review_reference_dir.as_deref() {
         Some(path) => references::ReferenceStore::load(path)?,
         None => references::ReferenceStore::empty(),
@@ -4317,12 +4393,14 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         && !cancel.load(Ordering::Relaxed)
     {
         if let Some(limit) = args.budget {
-            let spent = generation_cost(&stats, args.input_price, args.output_price)
+            let mut spent = generation_cost(&stats, args.input_price, args.output_price)
                 + review_cost(
                     &stats,
                     args.review_input_price.or(args.input_price),
                     args.review_output_price.or(args.output_price),
                 );
+            let (adjudication_input_price, adjudication_output_price) = adjudication_prices(&args);
+            spent += adjudication_cost(&stats, adjudication_input_price, adjudication_output_price);
             if spent >= limit {
                 execution_error = Some("budget exhausted before exact acceptance".into());
                 logger.warn(
@@ -6000,17 +6078,24 @@ mod tests {
 
     #[test]
     fn parses_generation_output_budget_override() {
-        assert!(
-            Cli::try_parse_from([
-                "taskgen",
-                "generate",
-                "--api-key",
-                "test-key",
-                "--max-output-tokens",
-                "3072",
-            ])
-            .is_ok()
-        );
+        let cli = Cli::try_parse_from([
+            "taskgen",
+            "generate",
+            "--api-key",
+            "test-key",
+            "--max-output-tokens",
+            "3072",
+            "--adjudication-input-price",
+            "0.25",
+            "--adjudication-output-price",
+            "1.00",
+        ])
+        .unwrap();
+        let Command::Generate(args) = cli.command else {
+            panic!("expected generate command");
+        };
+        assert_eq!(args.adjudication_input_price, Some(0.25));
+        assert_eq!(args.adjudication_output_price, Some(1.0));
     }
 
     #[test]
@@ -6359,6 +6444,33 @@ mod tests {
         assert_eq!(generation_cost(&stats, None, Some(2.0)), 4.0);
         assert_eq!(review_cost(&stats, Some(0.5), None), 1.5);
         assert_eq!(review_cost(&stats, None, Some(0.25)), 1.0);
+    }
+
+    #[test]
+    fn budget_spend_includes_adjudication_tokens() {
+        let stats = AtomicStats::new();
+        stats
+            .adjudication_input_tokens
+            .store(1_000_000, Ordering::Relaxed);
+        stats
+            .adjudication_output_tokens
+            .store(500_000, Ordering::Relaxed);
+
+        let spend = generation_cost(&stats, Some(3.0), Some(15.0))
+            + review_cost(&stats, Some(3.0), Some(15.0))
+            + adjudication_cost(&stats, Some(3.0), Some(15.0));
+        assert!(
+            spend >= 10.5,
+            "budget spend must include adjudication tokens; calculated {spend}"
+        );
+    }
+
+    #[test]
+    fn pricing_values_must_be_finite_and_nonnegative() {
+        assert!(validate_nonnegative_finite(Some(0.0), "--budget").is_ok());
+        assert!(validate_nonnegative_finite(Some(f64::NAN), "--budget").is_err());
+        assert!(validate_nonnegative_finite(Some(f64::INFINITY), "--budget").is_err());
+        assert!(validate_nonnegative_finite(Some(-0.01), "--budget").is_err());
     }
 
     #[test]
@@ -7153,6 +7265,166 @@ mod tests {
         assert_eq!(report["regeneration"]["repair_generations"], 1);
         assert_eq!(report["regeneration"]["replacement_generations"], 0);
         assert!(report["regeneration"]["total_ms"].as_u64().is_some());
+    }
+
+    #[tokio::test]
+    async fn budget_gate_accounts_for_inherited_adjudication_spend() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+        #[derive(Clone)]
+        struct AlwaysNeedsVerification {
+            generations: Arc<AtomicUsize>,
+            reviews: Arc<AtomicUsize>,
+            adjudications: Arc<AtomicUsize>,
+        }
+
+        impl Respond for AlwaysNeedsVerification {
+            fn respond(&self, request: &Request) -> ResponseTemplate {
+                let body = String::from_utf8_lossy(&request.body);
+                let content = if body.contains("Adjudicate only the listed claims") {
+                    self.adjudications.fetch_add(1, Ordering::SeqCst);
+                    serde_json::json!({
+                        "schema_version":"scogo.taskgen.prompt-adjudication.v1",
+                        "claims":[{"claim_id":"claim-1","verdict":"unsupported","rationale":"The supplied evidence does not support the claim.","citations":[]}],
+                        "outcome":"reject",
+                        "summary":"The claim is unsupported."
+                    }).to_string()
+                } else if body.contains("Review this prompt seed") {
+                    self.reviews.fetch_add(1, Ordering::SeqCst);
+                    serde_json::json!({
+                        "schema_version":"scogo.taskgen.prompt-review.v3",
+                        "outcome":"needs_verification",
+                        "checks":{
+                            "coordinate_realization":{"status":"pass","rationale":"Coordinates are material.","evidence_paths":["$.candidate.prompt"]},
+                            "internal_consistency":{"status":"pass","rationale":"The observations are consistent.","evidence_paths":["$.candidate.prompt"]},
+                            "operational_quality":{"status":"pass","rationale":"The task requires investigation.","evidence_paths":["$.candidate.prompt"]},
+                            "safety":{"status":"pass","rationale":"It is read-only first.","evidence_paths":["$.candidate.prompt"]},
+                            "technical_authenticity":{"status":"unknown","rationale":"Confirm the supplied claim.","evidence_paths":["$.candidate.prompt"]}
+                        },
+                        "hard_failures":[],
+                        "claims_requiring_verification":[{"claim_id":"claim-1","claim":"The supplied route table establishes the next hop.","candidate_evidence_paths":["$.candidate.prompt"],"reference_query":"route table next hop"}],
+                        "summary":"One supplied technical claim requires adjudication.",
+                        "retry_guidance":""
+                    }).to_string()
+                } else {
+                    let number = self.generations.fetch_add(1, Ordering::SeqCst) + 1;
+                    format!(
+                        "Candidate {number}: the supplied route table and flow telemetry disagree after maintenance. Investigate with read-only evidence before proposing a bounded change."
+                    )
+                };
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices":[{"finish_reason":"stop","message":{"content":content}}],
+                    "usage":{"prompt_tokens":20,"completion_tokens":12}
+                }))
+            }
+        }
+
+        let server = MockServer::start().await;
+        let generations = Arc::new(AtomicUsize::new(0));
+        let reviews = Arc::new(AtomicUsize::new(0));
+        let adjudications = Arc::new(AtomicUsize::new(0));
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(AlwaysNeedsVerification {
+                generations: generations.clone(),
+                reviews: reviews.clone(),
+                adjudications: adjudications.clone(),
+            })
+            .mount(&server)
+            .await;
+
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("budget-adjudication");
+        let cli = Cli::try_parse_from([
+            "taskgen",
+            "generate",
+            "--api-base",
+            &format!("{}/v1", server.uri()),
+            "--api-key",
+            "test-key",
+            "--model",
+            "test-model",
+            "--taxonomy",
+            "docs/netops-taxonomy.yaml",
+            "--count",
+            "1",
+            "--workers",
+            "1",
+            "--review-workers",
+            "1",
+            "--seed",
+            "99",
+            "--dedup-mode",
+            "lexical",
+            "--max-candidates",
+            "3",
+            "--input-price",
+            "3.0",
+            "--output-price",
+            "15.0",
+            "--review-input-price",
+            "3.0",
+            "--review-output-price",
+            "15.0",
+            "--budget",
+            "0.0012",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+        ])
+        .unwrap();
+        let Command::Generate(args) = cli.command else {
+            panic!("expected generate command");
+        };
+
+        let error = run_generate(*args).await.unwrap_err();
+        assert!(error.to_string().contains("budget exhausted"), "{error:#}");
+        assert_eq!(generations.load(Ordering::SeqCst), 2);
+        assert_eq!(reviews.load(Ordering::SeqCst), 2);
+        assert_eq!(adjudications.load(Ordering::SeqCst), 2);
+        let paths = artifacts::PublishedPaths::for_run_dir(&run_dir);
+        let report: Value =
+            serde_json::from_str(&std::fs::read_to_string(paths.run).unwrap()).unwrap();
+        assert_eq!(report["candidate_attempts"], 2);
+        assert!(report["adjudication"]["priced_cost"].as_f64().unwrap() > 0.0);
+    }
+
+    #[tokio::test]
+    async fn budget_gate_rejects_unpriced_explicit_adjudication_provider() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("unpriced-adjudication");
+        let cli = Cli::try_parse_from([
+            "taskgen",
+            "generate",
+            "--api-key",
+            "test-key",
+            "--model",
+            "test-model",
+            "--adjudication-model",
+            "distinct-adjudicator",
+            "--taxonomy",
+            "docs/netops-taxonomy.yaml",
+            "--count",
+            "1",
+            "--dedup-mode",
+            "lexical",
+            "--budget",
+            "1.0",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+        ])
+        .unwrap();
+        let Command::Generate(args) = cli.command else {
+            panic!("expected generate command");
+        };
+        let error = run_generate(*args).await.unwrap_err();
+        assert!(
+            error.to_string().contains(
+                "requires both --adjudication-input-price and --adjudication-output-price"
+            )
+        );
+        assert!(!run_dir.exists());
     }
 
     #[tokio::test]

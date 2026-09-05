@@ -2,7 +2,11 @@
 
 `taskgen` creates reviewed, schema-valid, deduplicated prompt seeds for teacher-model SFT datasets through any OpenAI-compatible Chat Completions API.
 
+For the downstream Data Factory and Model Trainer contracts, use the [canonical Scogo fine-tuning platform portal](https://github.com/scogo-ai/scogo-data-factory/tree/main/docs/fine-tuning-platform).
+
 It owns the prompt text, taxonomy coordinates, deterministic validation, local deduplication, model review, and final publication. It does **not** connect to live infrastructure, invent approvals, or generate completed teacher trajectories. The later trajectory pipeline is described in [`docs/netops-data-contract.md`](docs/netops-data-contract.md).
+
+For the complete Taskgen → Data Factory → Trainer workflow, see the [Scogo fine-tuning platform portal](https://github.com/scogo-ai/scogo-data-factory/tree/gpt-6-astra/docs/fine-tuning-platform).
 
 ## Start here: create your first dataset
 
@@ -446,6 +450,8 @@ taskgen generate \
 
 Prices are currency units per one million tokens. `--budget` is useful only when price flags are supplied; Taskgen checks priced spend before scheduling each new top-up wave. Proxy lines must use `host:port` or `host:port:user:pass`; blank lines and `#` comments are ignored. By default, proxies are used round-robin, while `--rotating-proxy` chooses one random sticky proxy for the run. Keyfiles take precedence over single-key flags or their environment variables.
 
+When `--adjudication-model` or `--adjudication-api-base` selects a separate adjudication provider, also pass `--adjudication-input-price` and `--adjudication-output-price`; the run refuses an otherwise unpriced budget cap.
+
 #### Discover and rotate through OpenRouter free models
 
 ```bash
@@ -482,7 +488,7 @@ Schema, coordinate, safety, and dedup checks still run, but `reviews.jsonl` is e
 | Dedup | `--dedup-mode`, `--jaccard-threshold`, `--semantic-threshold`, `--dedup-ngram`, `--semantic-model`, `--semantic-model-cache` | `lexical` or `semantic` local uniqueness checks; semantic is the default |
 | Run management | `--run-dir`, `--append-from` | Optional artifact-directory override and source dataset extension |
 | Network | `--proxies`, `--rotating-proxy`, `--free-models` | Proxy and OpenRouter discovery controls |
-| Cost | `--input-price`, `--output-price`, `--review-input-price`, `--review-output-price`, `--budget` | Per-million-token prices and a total run cap |
+| Cost | `--input-price`, `--output-price`, `--review-input-price`, `--review-output-price`, `--adjudication-input-price`, `--adjudication-output-price`, `--budget` | Per-million-token prices and a total run cap |
 
 Defaults worth knowing:
 
