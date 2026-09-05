@@ -175,26 +175,7 @@ fn sha256_bytes(bytes: &[u8]) -> String {
 }
 
 fn contains_credential(bytes: &[u8]) -> bool {
-    let text = String::from_utf8_lossy(bytes).to_ascii_lowercase();
-    [("hf_", 8), ("sk-", 8), ("bearer ", 20)]
-        .into_iter()
-        .any(|(prefix, minimum)| {
-            text.match_indices(prefix).any(|(index, _)| {
-                if prefix == "sk-"
-                    && index > 0
-                    && text.as_bytes()[index - 1].is_ascii_alphanumeric()
-                {
-                    return false;
-                }
-                text[index + prefix.len()..]
-                    .bytes()
-                    .take_while(|byte| {
-                        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.')
-                    })
-                    .count()
-                    >= minimum
-            })
-        })
+    crate::references::contains_credential(bytes)
 }
 
 fn valid_sha256(value: &str) -> bool {
@@ -1111,6 +1092,12 @@ impl ReferenceSnapshot {
         let mut digest_rows = Vec::new();
         for path in paths {
             let (file, bytes) = HeldFile::capture(&path, 64 * 1024 * 1024)?;
+            if crate::references::contains_credential(&bytes) {
+                bail!(
+                    "Phase-B reference contains credential-like content: {}",
+                    path.display()
+                );
+            }
             let relative = path
                 .strip_prefix(root.context("reference root disappeared")?)?
                 .to_string_lossy()

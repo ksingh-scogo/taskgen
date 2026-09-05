@@ -46,6 +46,23 @@
           }
         }
       }
+    },
+    {
+      "if": {"properties": {"outcome": {"const": "reject"}}},
+      "then": {
+        "not": {
+          "properties": {
+            "claims": {
+              "items": {
+                "properties": {
+                  "verdict": {"const": "supported"},
+                  "citations": {"minItems": 1}
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

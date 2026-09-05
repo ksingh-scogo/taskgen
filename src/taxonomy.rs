@@ -914,6 +914,11 @@ impl TaxonomyCatalog {
             "platform_neutral" if !coordinates.platforms.is_empty() => {
                 bail!("platform_neutral coordinates must not select platforms")
             }
+            "platform_neutral" if coordinates.presentation == "cli_ssh_session" => {
+                bail!(
+                    "platform_neutral coordinates must not use the 'cli_ssh_session' presentation"
+                )
+            }
             "single_platform" if coordinates.platforms.len() != 1 => {
                 bail!("single_platform coordinates must select exactly one platform")
             }
@@ -2048,5 +2053,46 @@ categories:
             )
             .unwrap_err();
         assert!(error.to_string().contains("platforms are not allowed"));
+    }
+
+    #[test]
+    fn coordinate_validator_rejects_platform_neutral_cli_ssh_session() {
+        let catalog = TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml")).unwrap();
+        let eligibility = catalog
+            .resolved_subdomain_eligibility("enterprise_netops", "layer2_switching", "vlans")
+            .unwrap();
+        assert!(
+            eligibility
+                .platform_scopes
+                .contains(&"platform_neutral".into())
+        );
+        assert!(
+            eligibility
+                .presentations
+                .contains(&"cli_ssh_session".into())
+        );
+        let coordinates = TaskCoordinates {
+            taxonomy_id: catalog.id().to_string(),
+            category_id: "enterprise_netops".into(),
+            task_family: eligibility.task_families[0].clone(),
+            environment: eligibility.environments[0].clone(),
+            platform_scope: "platform_neutral".into(),
+            platforms: Vec::new(),
+            incident_mechanism: eligibility.incident_mechanisms[0].clone(),
+            evidence_condition: eligibility.evidence_conditions[0].clone(),
+            evidence_bundle: eligibility.evidence_bundles[0].clone(),
+            action_risk: eligibility.action_risks[0].clone(),
+            presentation: "cli_ssh_session".into(),
+        };
+        assert!(
+            catalog
+                .validate_task_coordinates(
+                    "enterprise_netops",
+                    "layer2_switching",
+                    "vlans",
+                    &coordinates,
+                )
+                .is_err()
+        );
     }
 }

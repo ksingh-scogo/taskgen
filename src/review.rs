@@ -194,6 +194,13 @@ impl AdjudicationDecision {
         {
             bail!("accept adjudication contains an unsupported, unverified, or uncited claim");
         }
+        if decision.outcome == AdjudicationOutcome::Reject
+            && decision.claims.iter().all(|claim| {
+                claim.verdict == ClaimVerdict::Supported && !claim.citations.is_empty()
+            })
+        {
+            bail!("reject adjudication must contain an unsupported, unverified, or uncited claim");
+        }
         Ok(decision)
     }
 }
@@ -216,6 +223,13 @@ impl ReviewDecision {
     }
 
     fn parse_and_validate_with_metadata(raw: &str) -> Result<(Self, ReviewNormalization)> {
+        Self::parse_and_validate_with_format(raw, StructuredOutputFormat::PromptOnly)
+    }
+
+    fn parse_and_validate_with_format(
+        raw: &str,
+        response_format: StructuredOutputFormat,
+    ) -> Result<(Self, ReviewNormalization)> {
         let trimmed = raw.trim();
         let json_text = if trimmed.starts_with("```") {
             let start = trimmed
@@ -228,14 +242,7 @@ impl ReviewDecision {
         } else {
             trimmed
         };
-        Self::parse_and_validate_with_format(json_text, StructuredOutputFormat::PromptOnly)
-    }
-
-    fn parse_and_validate_with_format(
-        raw: &str,
-        response_format: StructuredOutputFormat,
-    ) -> Result<(Self, ReviewNormalization)> {
-        let mut value: Value = serde_json::from_str(raw).context("invalid review JSON")?;
+        let mut value: Value = serde_json::from_str(json_text).context("invalid review JSON")?;
         let (hard_failure_aliases_normalized, claim_ids_repaired) =
             normalize_review_contract(&mut value);
         let normalization = ReviewNormalization {
@@ -600,6 +607,7 @@ async fn request_structured_with_format(
             && response_format != StructuredOutputFormat::PromptOnly
             && looks_like_unsupported_response_format(&raw)
         {
+            telemetry.record_error(elapsed_millis(started.elapsed()));
             return Err(ReviewAttemptError::UnsupportedResponseFormat {
                 message: format!(
                     "{operation} provider rejected {}: {}",
@@ -1123,6 +1131,17 @@ mod tests {
     }
 
     #[test]
+    fn live_path_strips_json_code_fence_before_validation() {
+        let raw_review = include_str!("../tests/fixtures/canonical/valid-review-v3.json");
+        let fenced_review = format!("```json\n{raw_review}\n```");
+        ReviewDecision::parse_and_validate_with_format(
+            &fenced_review,
+            StructuredOutputFormat::PromptOnly,
+        )
+        .expect("live PromptOnly parsing must accept fenced JSON");
+    }
+
+    #[test]
     fn clips_overlong_explanatory_fields_before_schema_validation() {
         let raw = serde_json::json!({
             "schema_version": "scogo.taskgen.prompt-review.v3",
@@ -1235,6 +1254,24 @@ mod tests {
         let mut invalid: Value = serde_json::from_str(valid).unwrap();
         invalid["claims"][0]["verdict"] = json!("unverified");
         assert!(AdjudicationDecision::parse_and_validate(&invalid.to_string()).is_err());
+    }
+
+    #[test]
+    fn adjudication_reject_with_all_supported_cited_claims_is_rejected() {
+        let valid = include_str!("../tests/fixtures/canonical/valid-adjudication-v1.json");
+        let mut contradictory: Value = serde_json::from_str(valid).unwrap();
+        contradictory["outcome"] = json!("reject");
+        assert!(AdjudicationDecision::parse_and_validate(&contradictory.to_string()).is_err());
+    }
+
+    #[test]
+    fn adjudication_reject_with_unsupported_claim_remains_valid() {
+        let valid = include_str!("../tests/fixtures/canonical/valid-adjudication-v1.json");
+        let mut legitimate: Value = serde_json::from_str(valid).unwrap();
+        legitimate["outcome"] = json!("reject");
+        legitimate["claims"][0]["verdict"] = json!("unsupported");
+        let decision = AdjudicationDecision::parse_and_validate(&legitimate.to_string()).unwrap();
+        assert_eq!(decision.outcome, AdjudicationOutcome::Reject);
     }
 
     #[test]
@@ -1442,11 +1479,12 @@ mod tests {
             ])
             .unwrap(),
         };
+        let telemetry = Arc::new(crate::telemetry::RequestTelemetry::default());
         let reviewer = ReviewClient::new(
             provider,
             reqwest::Client::new(),
             512,
-            Arc::new(crate::telemetry::RequestTelemetry::default()),
+            telemetry.clone(),
             None,
         )
         .unwrap();
@@ -1465,5 +1503,8 @@ mod tests {
         assert_eq!(result.decision.outcome, ReviewOutcome::Accept);
         assert_eq!(result.normalization.response_format, "json_object");
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+        let snapshot = telemetry.snapshot();
+        assert_eq!(snapshot.requests, 2);
+        assert_eq!(snapshot.errors, 1);
     }
 }
