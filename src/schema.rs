@@ -113,4 +113,44 @@ mod tests {
         );
         assert!(validate_instance(SchemaKind::Task, &task).is_err());
     }
+
+    #[test]
+    fn adjudication_reject_with_all_supported_claims_should_be_rejected() {
+        let mut v = fixture(include_str!(
+            "../tests/fixtures/canonical/valid-adjudication-v1.json"
+        ));
+        v["outcome"] = serde_json::json!("reject");
+        let res = validate_instance(SchemaKind::PromptAdjudication, &v);
+        assert!(
+            res.is_err(),
+            "BUG: adjudication outcome=reject with all claims 'supported'+cited passed schema validation: {:?}",
+            res
+        );
+    }
+
+    #[test]
+    fn adjudication_reject_with_mixed_verdict_claims_is_valid() {
+        let mut v = fixture(include_str!(
+            "../tests/fixtures/canonical/valid-adjudication-v1.json"
+        ));
+        v["outcome"] = serde_json::json!("reject");
+        v["claims"][0]["verdict"] = serde_json::json!("unsupported");
+        v["claims"].as_array_mut().unwrap().push(serde_json::json!({
+            "claim_id": "claim-2",
+            "verdict": "supported",
+            "rationale": "A second claim is directly entailed by the cited evidence.",
+            "citations": ["candidate:$.prompt"]
+        }));
+        assert!(validate_instance(SchemaKind::PromptAdjudication, &v).is_ok());
+    }
+
+    #[test]
+    fn adjudication_reject_with_supported_uncited_claim_is_valid() {
+        let mut v = fixture(include_str!(
+            "../tests/fixtures/canonical/valid-adjudication-v1.json"
+        ));
+        v["outcome"] = serde_json::json!("reject");
+        v["claims"][0]["citations"] = serde_json::json!([]);
+        assert!(validate_instance(SchemaKind::PromptAdjudication, &v).is_ok());
+    }
 }

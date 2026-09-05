@@ -194,6 +194,13 @@ impl AdjudicationDecision {
         {
             bail!("accept adjudication contains an unsupported, unverified, or uncited claim");
         }
+        if decision.outcome == AdjudicationOutcome::Reject
+            && decision.claims.iter().all(|claim| {
+                claim.verdict == ClaimVerdict::Supported && !claim.citations.is_empty()
+            })
+        {
+            bail!("reject adjudication must contain an unsupported, unverified, or uncited claim");
+        }
         Ok(decision)
     }
 }
@@ -1235,6 +1242,30 @@ mod tests {
         let mut invalid: Value = serde_json::from_str(valid).unwrap();
         invalid["claims"][0]["verdict"] = json!("unverified");
         assert!(AdjudicationDecision::parse_and_validate(&invalid.to_string()).is_err());
+    }
+
+    #[test]
+    fn adjudication_reject_with_all_supported_cited_claims_is_rejected() {
+        let valid = include_str!("../tests/fixtures/canonical/valid-adjudication-v1.json");
+        let mut contradictory: Value = serde_json::from_str(valid).unwrap();
+        contradictory["outcome"] = json!("reject");
+        let res = AdjudicationDecision::parse_and_validate(&contradictory.to_string());
+        assert!(
+            res.is_err(),
+            "contradictory reject (all claims supported + cited) passed validation: {:?}",
+            res
+        );
+    }
+
+    #[test]
+    fn adjudication_reject_with_one_unsupported_claim_is_accepted() {
+        let valid = include_str!("../tests/fixtures/canonical/valid-adjudication-v1.json");
+        let mut legit: Value = serde_json::from_str(valid).unwrap();
+        legit["outcome"] = json!("reject");
+        legit["claims"][0]["verdict"] = json!("unsupported");
+        let decision = AdjudicationDecision::parse_and_validate(&legit.to_string()).unwrap();
+        assert_eq!(decision.outcome, AdjudicationOutcome::Reject);
+        assert_eq!(decision.claims[0].verdict, ClaimVerdict::Unsupported);
     }
 
     #[test]

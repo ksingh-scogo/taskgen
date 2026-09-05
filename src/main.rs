@@ -7583,4 +7583,75 @@ mod tests {
                 .contains("exhausted")
         );
     }
+
+    const NEEDS_VERIFICATION_REVIEW: &str = r#"{
+        "schema_version":"scogo.taskgen.prompt-review.v3","outcome":"needs_verification",
+        "checks":{"coordinate_realization":{"status":"pass","rationale":"r","evidence_paths":["$.prompt"]},
+                  "internal_consistency":{"status":"unknown","rationale":"adjudicate","evidence_paths":["$.prompt"]},
+                  "operational_quality":{"status":"pass","rationale":"r","evidence_paths":["$.prompt"]},
+                  "safety":{"status":"pass","rationale":"r","evidence_paths":["$.prompt"]},
+                  "technical_authenticity":{"status":"pass","rationale":"r","evidence_paths":["$.prompt"]}},
+        "hard_failures":[],
+        "claims_requiring_verification":[{"claim_id":"claim-1","claim":"next hop 10.0.0.1","candidate_evidence_paths":["$.prompt"],"reference_query":"bgp next hop"}],
+        "summary":"Requires adjudication.","retry_guidance":""}"#;
+
+    fn needs_verification_evaluation(
+        adjudication: Option<review::AdjudicationResult>,
+    ) -> CandidateEvaluation {
+        let review_decision =
+            review::ReviewDecision::parse_and_validate(NEEDS_VERIFICATION_REVIEW).unwrap();
+        assert_eq!(
+            review_decision.outcome,
+            review::ReviewOutcome::NeedsVerification
+        );
+        CandidateEvaluation {
+            review: review::ReviewResult {
+                decision: review_decision,
+                normalization: review::ReviewNormalization {
+                    summary_truncated: false,
+                    retry_guidance_truncated: false,
+                    hard_failure_aliases_normalized: 0,
+                    claim_ids_repaired: 0,
+                    response_format: "prompt_only".into(),
+                },
+                model: "stub-reviewer".into(),
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+            adjudication,
+            references: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn decision_gate_routes_needs_verification_by_adjudication_outcome() {
+        let accept = include_str!("../tests/fixtures/canonical/valid-adjudication-v1.json");
+        let accept_adj = review::AdjudicationDecision::parse_and_validate(accept).unwrap();
+        assert_eq!(accept_adj.outcome, review::AdjudicationOutcome::Accept);
+        assert!(
+            needs_verification_evaluation(Some(review::AdjudicationResult {
+                decision: accept_adj,
+                model: "stub-adjudicator".into(),
+                input_tokens: 0,
+                output_tokens: 0,
+            }))
+            .accepted()
+        );
+
+        let mut reject: serde_json::Value = serde_json::from_str(accept).unwrap();
+        reject["outcome"] = serde_json::json!("reject");
+        reject["claims"][0]["verdict"] = serde_json::json!("unsupported");
+        let reject_adj =
+            review::AdjudicationDecision::parse_and_validate(&reject.to_string()).unwrap();
+        assert_eq!(reject_adj.outcome, review::AdjudicationOutcome::Reject);
+        assert!(
+            !needs_verification_evaluation(Some(review::AdjudicationResult {
+                decision: reject_adj,
+                model: "stub-adjudicator".into(),
+                input_tokens: 0,
+                output_tokens: 0,
+            }))
+            .accepted()
+        );
+    }
 }
