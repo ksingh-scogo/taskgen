@@ -1111,6 +1111,12 @@ impl ReferenceSnapshot {
         let mut digest_rows = Vec::new();
         for path in paths {
             let (file, bytes) = HeldFile::capture(&path, 64 * 1024 * 1024)?;
+            if crate::references::contains_credential(&bytes) {
+                bail!(
+                    "Phase-B reference contains credential-like content: {}",
+                    path.display()
+                );
+            }
             let relative = path
                 .strip_prefix(root.context("reference root disappeared")?)?
                 .to_string_lossy()
