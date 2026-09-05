@@ -216,6 +216,13 @@ impl ReviewDecision {
     }
 
     fn parse_and_validate_with_metadata(raw: &str) -> Result<(Self, ReviewNormalization)> {
+        Self::parse_and_validate_with_format(raw, StructuredOutputFormat::PromptOnly)
+    }
+
+    fn parse_and_validate_with_format(
+        raw: &str,
+        response_format: StructuredOutputFormat,
+    ) -> Result<(Self, ReviewNormalization)> {
         let trimmed = raw.trim();
         let json_text = if trimmed.starts_with("```") {
             let start = trimmed
@@ -228,14 +235,7 @@ impl ReviewDecision {
         } else {
             trimmed
         };
-        Self::parse_and_validate_with_format(json_text, StructuredOutputFormat::PromptOnly)
-    }
-
-    fn parse_and_validate_with_format(
-        raw: &str,
-        response_format: StructuredOutputFormat,
-    ) -> Result<(Self, ReviewNormalization)> {
-        let mut value: Value = serde_json::from_str(raw).context("invalid review JSON")?;
+        let mut value: Value = serde_json::from_str(json_text).context("invalid review JSON")?;
         let (hard_failure_aliases_normalized, claim_ids_repaired) =
             normalize_review_contract(&mut value);
         let normalization = ReviewNormalization {
@@ -1123,6 +1123,19 @@ mod tests {
     }
 
     #[test]
+    fn live_path_strips_json_code_fence_before_validation() {
+        let raw_review = include_str!("../tests/fixtures/canonical/valid-review-v3.json");
+        let fenced_review = format!("```json\n{raw_review}\n```");
+        ReviewDecision::parse_and_validate_with_format(
+            &fenced_review,
+            StructuredOutputFormat::PromptOnly,
+        )
+        .expect(
+            "live path (parse_and_validate_with_format) must strip fenced PromptOnly review JSON",
+        );
+    }
+
+    #[test]
     fn clips_overlong_explanatory_fields_before_schema_validation() {
         let raw = serde_json::json!({
             "schema_version": "scogo.taskgen.prompt-review.v3",
@@ -1465,5 +1478,92 @@ mod tests {
         assert_eq!(result.decision.outcome, ReviewOutcome::Accept);
         assert_eq!(result.normalization.response_format, "json_object");
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn reviewer_prompt_only_fenced_output_succeeds_end_to_end() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+        #[derive(Clone)]
+        struct PromptOnlyFenced {
+            calls: Arc<AtomicUsize>,
+        }
+
+        impl Respond for PromptOnlyFenced {
+            fn respond(&self, request: &Request) -> ResponseTemplate {
+                let _ = self.calls.fetch_add(1, Ordering::SeqCst);
+                let body: Value = serde_json::from_slice(&request.body).unwrap();
+                assert_eq!(body["stream"], false);
+                if body["response_format"]["type"] == "json_schema" {
+                    return ResponseTemplate::new(400).set_body_json(json!({
+                        "error": {"message": "response_format json_schema is unsupported"}
+                    }));
+                }
+                if body["response_format"]["type"] == "json_object" {
+                    return ResponseTemplate::new(400).set_body_json(json!({
+                        "error": {"message": "response_format json_object is unsupported"}
+                    }));
+                }
+                // PromptOnly request (no response_format key): wrap the fixture in a fence,
+                // mirroring models that violate the "no fences" instruction in the prompt.
+                let decision = include_str!("../tests/fixtures/canonical/valid-review-v3.json");
+                let fenced = format!("```json\n{decision}\n```");
+                ResponseTemplate::new(200).set_body_json(json!({
+                    "choices": [{"message": {"content": fenced}}],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 5}
+                }))
+            }
+        }
+
+        let server = MockServer::start().await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(PromptOnlyFenced {
+                calls: calls.clone(),
+            })
+            .mount(&server)
+            .await;
+        let telemetry = Arc::new(crate::telemetry::RequestTelemetry::default());
+        let provider = ProviderConfig {
+            api_base: crate::provider::normalize_api_base(&format!("{}/v1", server.uri())).unwrap(),
+            model: "openrouter/reviewer-model".into(),
+            credentials: crate::provider::CredentialPool::new(vec![
+                crate::provider::SecretString::new("test-key"),
+            ])
+            .unwrap(),
+        };
+        let reviewer = ReviewClient::new(
+            provider,
+            reqwest::Client::new(),
+            512,
+            telemetry.clone(),
+            None,
+        )
+        .unwrap();
+
+        let result = reviewer
+            .review(ReviewRequest {
+                candidate: json!({"prompt":"Investigate read-only evidence."}),
+                taxonomy_id: "test-taxonomy".into(),
+                taxonomy_kind: "compositional".into(),
+                system_prompt: "Return exactly one JSON object.".into(),
+                deterministic_checks: None,
+            })
+            .await
+            .expect("fenced PromptOnly review must now succeed end-to-end");
+
+        assert_eq!(result.decision.outcome, ReviewOutcome::Accept);
+        assert_eq!(result.normalization.response_format, "prompt_only");
+        let snapshot = telemetry.snapshot();
+        assert_eq!(snapshot.requests, 1);
+        assert_eq!(snapshot.retries, 0);
+        assert_eq!(snapshot.errors, 0);
+        assert_eq!(snapshot.rate_limits, 0);
+        // 1 retry_structured attempt × 3 negotiated formats = 3 wiremock calls,
+        // and no retry because fences are stripped before JSON parsing.
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
     }
 }
