@@ -600,6 +600,7 @@ async fn request_structured_with_format(
             && response_format != StructuredOutputFormat::PromptOnly
             && looks_like_unsupported_response_format(&raw)
         {
+            telemetry.record_error(elapsed_millis(started.elapsed()));
             return Err(ReviewAttemptError::UnsupportedResponseFormat {
                 message: format!(
                     "{operation} provider rejected {}: {}",
@@ -1465,5 +1466,188 @@ mod tests {
         assert_eq!(result.decision.outcome, ReviewOutcome::Accept);
         assert_eq!(result.normalization.response_format, "json_object");
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    // Regression tests for telemetry accounting on the structured-output
+    // format-fallback path. A rejected 400/422 probe is a completed HTTP
+    // attempt and must be recorded by the same `record_error` call every
+    // other non-2xx branch uses; before the fix the `UnsupportedResponseFormat`
+    // early return skipped recording, undercounting `requests`, `errors`, and
+    // `total_ms`.
+
+    #[tokio::test]
+    async fn reviewer_records_rejected_format_probe_in_telemetry_on_fallback() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Duration;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+        #[derive(Clone)]
+        struct RejectJsonSchemaThenSucceed {
+            calls: Arc<AtomicUsize>,
+        }
+
+        impl Respond for RejectJsonSchemaThenSucceed {
+            fn respond(&self, request: &Request) -> ResponseTemplate {
+                let call = self.calls.fetch_add(1, Ordering::SeqCst);
+                let body: Value = serde_json::from_slice(&request.body).unwrap();
+                assert_eq!(body["stream"], false);
+                if call == 0 {
+                    assert_eq!(body["response_format"]["type"], "json_schema");
+                    return ResponseTemplate::new(400)
+                        .set_body_json(json!({
+                            "error": {"message": "response_format json_schema is unsupported"}
+                        }))
+                        .set_delay(Duration::from_millis(120));
+                }
+                assert_eq!(body["response_format"]["type"], "json_object");
+                ResponseTemplate::new(200).set_body_json(json!({
+                    "choices": [{"message": {"content": include_str!(
+                        "../tests/fixtures/canonical/valid-review-v3.json"
+                    )}}],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 5}
+                }))
+            }
+        }
+
+        let server = MockServer::start().await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(RejectJsonSchemaThenSucceed {
+                calls: calls.clone(),
+            })
+            .mount(&server)
+            .await;
+        let telemetry = Arc::new(crate::telemetry::RequestTelemetry::default());
+        let provider = ProviderConfig {
+            api_base: crate::provider::normalize_api_base(&format!("{}/v1", server.uri())).unwrap(),
+            model: "openrouter/reviewer-model".into(),
+            credentials: crate::provider::CredentialPool::new(vec![
+                crate::provider::SecretString::new("test-key"),
+            ])
+            .unwrap(),
+        };
+        let reviewer = ReviewClient::new(
+            provider,
+            reqwest::Client::new(),
+            512,
+            telemetry.clone(),
+            None,
+        )
+        .unwrap();
+
+        let result = reviewer
+            .review(ReviewRequest {
+                candidate: json!({"prompt":"Investigate read-only evidence."}),
+                taxonomy_id: "test-taxonomy".into(),
+                taxonomy_kind: "compositional".into(),
+                system_prompt: "Return exactly one JSON object.".into(),
+                deterministic_checks: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result.decision.outcome, ReviewOutcome::Accept);
+        assert_eq!(result.normalization.response_format, "json_object");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        let snapshot = telemetry.snapshot();
+        assert_eq!(snapshot.requests, 2);
+        assert_eq!(snapshot.errors, 1);
+        assert_eq!(snapshot.retries, 0);
+        assert!(
+            snapshot.total_ms >= 100,
+            "rejected probe latency must be recorded in total_ms, got {}",
+            snapshot.total_ms
+        );
+    }
+
+    #[tokio::test]
+    async fn reviewer_records_all_rejected_formats_on_hard_failure() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+        #[derive(Clone)]
+        struct RejectEveryFormat {
+            calls: Arc<AtomicUsize>,
+        }
+
+        impl Respond for RejectEveryFormat {
+            fn respond(&self, request: &Request) -> ResponseTemplate {
+                let call = self.calls.fetch_add(1, Ordering::SeqCst);
+                let body: Value = serde_json::from_slice(&request.body).unwrap();
+                assert_eq!(body["stream"], false);
+                let kind = match body.get("response_format").and_then(|v| v.get("type")) {
+                    Some(t) => t.as_str().unwrap_or("").to_string(),
+                    None => "prompt_only".to_string(),
+                };
+                // Every probe is rejected with a 400 carrying an
+                // "unsupported"-style body. The two non-PromptOnly probes take
+                // the UnsupportedResponseFormat branch; the PromptOnly probe
+                // is gated out of that branch and falls through to the generic
+                // non-2xx recorder, but still counts as a recorded error.
+                assert_eq!(
+                    call,
+                    match kind.as_str() {
+                        "json_schema" => 0,
+                        "json_object" => 1,
+                        _ => 2,
+                    }
+                );
+                ResponseTemplate::new(400).set_body_json(json!({
+                    "error": {"message": "response_format is not supported"}
+                }))
+            }
+        }
+
+        let server = MockServer::start().await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(RejectEveryFormat {
+                calls: calls.clone(),
+            })
+            .mount(&server)
+            .await;
+        let telemetry = Arc::new(crate::telemetry::RequestTelemetry::default());
+        let provider = ProviderConfig {
+            api_base: crate::provider::normalize_api_base(&format!("{}/v1", server.uri())).unwrap(),
+            model: "openrouter/reviewer-model".into(),
+            credentials: crate::provider::CredentialPool::new(vec![
+                crate::provider::SecretString::new("test-key"),
+            ])
+            .unwrap(),
+        };
+        let reviewer = ReviewClient::new(
+            provider,
+            reqwest::Client::new(),
+            512,
+            telemetry.clone(),
+            None,
+        )
+        .unwrap();
+
+        let result = reviewer
+            .review(ReviewRequest {
+                candidate: json!({"prompt":"Investigate read-only evidence."}),
+                taxonomy_id: "test-taxonomy".into(),
+                taxonomy_kind: "compositional".into(),
+                system_prompt: "Return exactly one JSON object.".into(),
+                deterministic_checks: None,
+            })
+            .await;
+
+        assert!(
+            result.is_err(),
+            "review should fail when every format is rejected"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        let snapshot = telemetry.snapshot();
+        assert_eq!(snapshot.requests, 3);
+        assert_eq!(snapshot.errors, 3);
+        assert_eq!(snapshot.retries, 0);
     }
 }
