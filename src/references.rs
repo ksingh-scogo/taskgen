@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 pub(crate) fn contains_credential(bytes: &[u8]) -> bool {
     let text = String::from_utf8_lossy(bytes).to_ascii_lowercase();
-    [("hf_", 8), ("sk-", 8), ("bearer ", 20)]
+    [("hf_", 30), ("sk-", 20), ("bearer ", 20)]
         .into_iter()
         .any(|(prefix, minimum)| {
             text.match_indices(prefix).any(|(index, _)| {
@@ -26,6 +26,39 @@ pub(crate) fn contains_credential(bytes: &[u8]) -> bool {
                     >= minimum
             })
         })
+}
+
+fn reject_symlinked_ancestors(path: &Path, label: &str) -> Result<()> {
+    let mut current = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    loop {
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                bail!(
+                    "{label} path or ancestor is a symlink: {}",
+                    current.display()
+                )
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("failed to inspect {label} path: {}", current.display())
+                });
+            }
+        }
+        let Some(parent) = current.parent() else {
+            break;
+        };
+        if parent == current {
+            break;
+        }
+        current = parent.to_path_buf();
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +85,10 @@ impl ReferenceStore {
     }
 
     pub fn load(root: &Path) -> Result<Self> {
+        // Standalone review references are a trusted, stable local input. These
+        // checks reject ordinary symlink/link-count hazards; Phase-B callers
+        // use ReferenceSnapshot for held descriptor-backed inputs.
+        reject_symlinked_ancestors(root, "review reference")?;
         let root_metadata = fs::symlink_metadata(root).with_context(|| {
             format!(
                 "failed to inspect review reference directory: {}",
@@ -69,6 +106,19 @@ impl ReferenceStore {
         paths.sort();
         let mut documents = Vec::with_capacity(paths.len());
         for path in paths {
+            let metadata = fs::symlink_metadata(&path).with_context(|| {
+                format!("failed to inspect review reference: {}", path.display())
+            })?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                if metadata.nlink() != 1 {
+                    bail!(
+                        "review reference must be a single-link regular file: {}",
+                        path.display()
+                    );
+                }
+            }
             let bytes = fs::read(&path)
                 .with_context(|| format!("failed to read review reference: {}", path.display()))?;
             if contains_credential(&bytes) {
@@ -236,5 +286,61 @@ mod tests {
 
         let error = ReferenceStore::load(temp.path()).unwrap_err();
         assert!(error.to_string().contains("credential"), "{error:#}");
+    }
+
+    #[test]
+    fn reference_store_allows_public_huggingface_identifiers() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("huggingface.md"),
+            "Use hf_hub_download and hf_publication metadata when preparing the reference.",
+        )
+        .unwrap();
+
+        ReferenceStore::load(temp.path())
+            .expect("public Hugging Face helper names are not credentials");
+    }
+
+    #[test]
+    fn reference_store_rejects_huggingface_token_shape() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("secret.md"),
+            format!("token hf_{}", "a".repeat(34)),
+        )
+        .unwrap();
+
+        let error = ReferenceStore::load(temp.path()).unwrap_err();
+        assert!(error.to_string().contains("credential"), "{error:#}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reference_store_rejects_hardlinked_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let outside = temp.path().join("outside.md");
+        let root = temp.path().join("references");
+        std::fs::write(&outside, "reference text").unwrap();
+        std::fs::create_dir(&root).unwrap();
+        std::fs::hard_link(&outside, root.join("linked.md")).unwrap();
+
+        let error = ReferenceStore::load(&root).unwrap_err();
+        assert!(error.to_string().contains("single-link"), "{error:#}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reference_store_rejects_symlinked_ancestor() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let real_parent = temp.path().join("real-parent");
+        let linked_parent = temp.path().join("linked-parent");
+        let root = linked_parent.join("references");
+        std::fs::create_dir_all(real_parent.join("references")).unwrap();
+        symlink(&real_parent, &linked_parent).unwrap();
+
+        let error = ReferenceStore::load(&root).unwrap_err();
+        assert!(error.to_string().contains("ancestor"), "{error:#}");
     }
 }

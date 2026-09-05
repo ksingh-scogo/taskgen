@@ -175,26 +175,7 @@ fn sha256_bytes(bytes: &[u8]) -> String {
 }
 
 fn contains_credential(bytes: &[u8]) -> bool {
-    let text = String::from_utf8_lossy(bytes).to_ascii_lowercase();
-    [("hf_", 8), ("sk-", 8), ("bearer ", 20)]
-        .into_iter()
-        .any(|(prefix, minimum)| {
-            text.match_indices(prefix).any(|(index, _)| {
-                if prefix == "sk-"
-                    && index > 0
-                    && text.as_bytes()[index - 1].is_ascii_alphanumeric()
-                {
-                    return false;
-                }
-                text[index + prefix.len()..]
-                    .bytes()
-                    .take_while(|byte| {
-                        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.')
-                    })
-                    .count()
-                    >= minimum
-            })
-        })
+    crate::references::contains_credential(bytes)
 }
 
 fn valid_sha256(value: &str) -> bool {
