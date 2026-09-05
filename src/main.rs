@@ -3290,6 +3290,18 @@ fn review_cost(stats: &AtomicStats, input_price: Option<f64>, output_price: Opti
             / 1_000_000.0
 }
 
+fn adjudication_cost(
+    stats: &AtomicStats,
+    input_price: Option<f64>,
+    output_price: Option<f64>,
+) -> f64 {
+    input_price.unwrap_or(0.0) * stats.adjudication_input_tokens.load(Ordering::Relaxed) as f64
+        / 1_000_000.0
+        + output_price.unwrap_or(0.0)
+            * stats.adjudication_output_tokens.load(Ordering::Relaxed) as f64
+            / 1_000_000.0
+}
+
 struct GenerationReportContext<'a> {
     run_id: &'a str,
     started_at: chrono::DateTime<chrono::Utc>,
@@ -3757,6 +3769,15 @@ fn generation_run_report(
             "endpoint_origin": context.adjudication_provider.api_base.origin().ascii_serialization(),
             "input_tokens": outcome.stats.adjudication_input_tokens.load(Ordering::Relaxed),
             "output_tokens": outcome.stats.adjudication_output_tokens.load(Ordering::Relaxed),
+            "priced_cost": if context.args.adjudication_model.is_some() {
+                0.0
+            } else {
+                adjudication_cost(
+                    outcome.stats,
+                    context.args.review_input_price.or(context.args.input_price),
+                    context.args.review_output_price.or(context.args.output_price),
+                )
+            },
         },
         "timing": {
             "wall_clock_ms": outcome.elapsed.as_millis().min(u64::MAX as u128) as u64,
@@ -4317,12 +4338,19 @@ async fn run_generate(args: GenerateArgs) -> Result<()> {
         && !cancel.load(Ordering::Relaxed)
     {
         if let Some(limit) = args.budget {
-            let spent = generation_cost(&stats, args.input_price, args.output_price)
+            let mut spent = generation_cost(&stats, args.input_price, args.output_price)
                 + review_cost(
                     &stats,
                     args.review_input_price.or(args.input_price),
                     args.review_output_price.or(args.output_price),
                 );
+            if !explicit_adjudication_model {
+                spent += adjudication_cost(
+                    &stats,
+                    args.review_input_price.or(args.input_price),
+                    args.review_output_price.or(args.output_price),
+                );
+            }
             if spent >= limit {
                 execution_error = Some("budget exhausted before exact acceptance".into());
                 logger.warn(
@@ -6362,6 +6390,62 @@ mod tests {
     }
 
     #[test]
+    fn adjudication_cost_prices_adjudication_token_components() {
+        let stats = AtomicStats::new();
+        stats
+            .adjudication_input_tokens
+            .store(1_000_000, Ordering::Relaxed);
+        stats
+            .adjudication_output_tokens
+            .store(500_000, Ordering::Relaxed);
+
+        assert_eq!(adjudication_cost(&stats, Some(3.0), None), 3.0);
+        assert_eq!(adjudication_cost(&stats, None, Some(15.0)), 7.5);
+        assert_eq!(adjudication_cost(&stats, Some(3.0), Some(15.0)), 10.5);
+        assert_eq!(adjudication_cost(&stats, None, None), 0.0);
+
+        let total = generation_cost(&stats, Some(3.0), Some(15.0))
+            + review_cost(&stats, Some(3.0), Some(15.0))
+            + adjudication_cost(&stats, Some(3.0), Some(15.0));
+        assert!(
+            total >= 10.5,
+            "budget gate spend={total} must include adjudication tokens (>= 10.5)"
+        );
+    }
+
+    #[test]
+    fn adjudication_cost_is_independent_of_generation_and_review_counters() {
+        let stats = AtomicStats::new();
+        stats.input_tokens.store(1_000_000, Ordering::Relaxed);
+        stats.output_tokens.store(1_000_000, Ordering::Relaxed);
+        stats
+            .review_input_tokens
+            .store(1_000_000, Ordering::Relaxed);
+        stats
+            .review_output_tokens
+            .store(1_000_000, Ordering::Relaxed);
+        stats
+            .adjudication_input_tokens
+            .store(2_000_000, Ordering::Relaxed);
+        stats
+            .adjudication_output_tokens
+            .store(4_000_000, Ordering::Relaxed);
+
+        let adjudication = adjudication_cost(&stats, Some(1.0), Some(1.0));
+        assert_eq!(adjudication, 6.0);
+        assert_eq!(
+            generation_cost(&stats, Some(1.0), Some(1.0)),
+            2.0,
+            "generation_cost must read only generation counters"
+        );
+        assert_eq!(
+            review_cost(&stats, Some(1.0), Some(1.0)),
+            2.0,
+            "review_cost must read only review counters"
+        );
+    }
+
+    #[test]
     fn operator_summary_renders_tokens_timing_and_regeneration() {
         let requests = telemetry::RequestTelemetrySnapshot {
             requests: 3,
@@ -7153,6 +7237,329 @@ mod tests {
         assert_eq!(report["regeneration"]["repair_generations"], 1);
         assert_eq!(report["regeneration"]["replacement_generations"], 0);
         assert!(report["regeneration"]["total_ms"].as_u64().is_some());
+    }
+
+    #[tokio::test]
+    async fn budget_gate_prices_adjudication_tokens_into_run_cap_default_path() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+        #[derive(Clone)]
+        struct AlwaysAdjudicateRejectResponder {
+            generations: Arc<AtomicUsize>,
+            reviews: Arc<AtomicUsize>,
+            adjudications: Arc<AtomicUsize>,
+        }
+
+        impl Respond for AlwaysAdjudicateRejectResponder {
+            fn respond(&self, request: &Request) -> ResponseTemplate {
+                let body = String::from_utf8_lossy(&request.body);
+                let content = if body.contains("Adjudicate only the listed claims") {
+                    self.adjudications.fetch_add(1, Ordering::SeqCst);
+                    serde_json::json!({
+                        "schema_version":"scogo.taskgen.prompt-adjudication.v1",
+                        "claims":[{"claim_id":"claim-1","verdict":"unsupported","rationale":"Not supported by supplied evidence.","citations":[]}],
+                        "outcome":"reject","summary":"Claim unsupported."
+                    })
+                    .to_string()
+                } else if body.contains("Review this prompt seed") {
+                    self.reviews.fetch_add(1, Ordering::SeqCst);
+                    serde_json::json!({
+                        "schema_version":"scogo.taskgen.prompt-review.v3",
+                        "outcome":"needs_verification",
+                        "checks":{
+                            "coordinate_realization":{"status":"pass","rationale":"Coordinates are material.","evidence_paths":["$.candidate.prompt"]},
+                            "internal_consistency":{"status":"pass","rationale":"Consistent.","evidence_paths":["$.candidate.prompt"]},
+                            "operational_quality":{"status":"pass","rationale":"Requires investigation.","evidence_paths":["$.candidate.prompt"]},
+                            "safety":{"status":"pass","rationale":"Read-only first.","evidence_paths":["$.candidate.prompt"]},
+                            "technical_authenticity":{"status":"unknown","rationale":"Verify the supplied claim.","evidence_paths":["$.candidate.prompt"]}
+                        },
+                        "hard_failures":[],
+                        "claims_requiring_verification":[{"claim_id":"claim-1","claim":"The supplied route table establishes the next hop.","candidate_evidence_paths":["$.candidate.prompt"],"reference_query":"route table next hop"}],
+                        "summary":"One claim requires verification.","retry_guidance":""
+                    })
+                    .to_string()
+                } else {
+                    let number = self.generations.fetch_add(1, Ordering::SeqCst) + 1;
+                    format!(
+                        "Candidate {number}: the supplied route table and flow telemetry disagree after a maintenance window. Investigate with read-only evidence, separate observations from hypotheses, and require approval before any bounded change."
+                    )
+                };
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices":[{"finish_reason":"stop","message":{"content":content}}],
+                    "usage":{"prompt_tokens":20,"completion_tokens":12}
+                }))
+            }
+        }
+
+        let server = MockServer::start().await;
+        let generations = Arc::new(AtomicUsize::new(0));
+        let reviews = Arc::new(AtomicUsize::new(0));
+        let adjudications = Arc::new(AtomicUsize::new(0));
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(AlwaysAdjudicateRejectResponder {
+                generations: generations.clone(),
+                reviews: reviews.clone(),
+                adjudications: adjudications.clone(),
+            })
+            .mount(&server)
+            .await;
+
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("budget-adj-default");
+        let cli = Cli::try_parse_from([
+            "taskgen",
+            "generate",
+            "--api-base",
+            &format!("{}/v1", server.uri()),
+            "--api-key",
+            "test-key",
+            "--model",
+            "test-model",
+            "--taxonomy",
+            "docs/netops-taxonomy.yaml",
+            "--count",
+            "1",
+            "--workers",
+            "1",
+            "--review-workers",
+            "1",
+            "--seed",
+            "99",
+            "--dedup-mode",
+            "lexical",
+            "--max-candidates",
+            "3",
+            "--input-price",
+            "3.0",
+            "--output-price",
+            "15.0",
+            "--review-input-price",
+            "3.0",
+            "--review-output-price",
+            "15.0",
+            "--budget",
+            "0.0012",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+        ])
+        .unwrap();
+        let Command::Generate(args) = cli.command else {
+            panic!("expected generate command");
+        };
+
+        let error = run_generate(*args).await.unwrap_err();
+        assert!(
+            error.to_string().contains("budget exhausted"),
+            "expected the budget gate to trip on adjudication spend, got: {error:#}"
+        );
+
+        let paths = artifacts::PublishedPaths::for_run_dir(&run_dir);
+        let report: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(paths.run).unwrap()).unwrap();
+        assert_eq!(report["status"], "failed");
+        assert!(
+            report["terminal_error"]
+                .as_str()
+                .unwrap()
+                .contains("budget exhausted"),
+            "terminal_error must be budget exhaustion: {}",
+            report["terminal_error"]
+        );
+        assert_eq!(report["candidate_attempts"], 2);
+        assert_eq!(report["accepted_new_records"], 0);
+        assert_eq!(adjudications.load(Ordering::SeqCst), 2);
+        assert_eq!(generations.load(Ordering::SeqCst), 2);
+        assert_eq!(reviews.load(Ordering::SeqCst), 2);
+
+        let gen_in = report["generation"]["input_tokens"].as_u64().unwrap() as f64;
+        let gen_out = report["generation"]["output_tokens"].as_u64().unwrap() as f64;
+        let rev_in = report["review"]["input_tokens"].as_u64().unwrap() as f64;
+        let rev_out = report["review"]["output_tokens"].as_u64().unwrap() as f64;
+        let adj_in = report["adjudication"]["input_tokens"].as_u64().unwrap() as f64;
+        let adj_out = report["adjudication"]["output_tokens"].as_u64().unwrap() as f64;
+        assert!(
+            adj_in > 0.0 && adj_out > 0.0,
+            "adjudication tokens must be nonzero"
+        );
+
+        let gen_review = (gen_in * 3.0 + gen_out * 15.0) / 1_000_000.0
+            + (rev_in * 3.0 + rev_out * 15.0) / 1_000_000.0;
+        let adjudication = (adj_in * 3.0 + adj_out * 15.0) / 1_000_000.0;
+        let budget = 0.0012_f64;
+        assert!(
+            gen_review < budget,
+            "generation+review alone ({gen_review}) must stay under budget ({budget}) so the trip is attributable to adjudication"
+        );
+        assert!(
+            gen_review + adjudication >= budget,
+            "generation+review+adjudication ({}) must reach the budget ({budget}) to trip the gate",
+            gen_review + adjudication
+        );
+
+        let priced_cost = report["adjudication"]["priced_cost"].as_f64().unwrap();
+        assert!(
+            (priced_cost - adjudication).abs() < 1e-9,
+            "adjudication priced_cost ({priced_cost}) must equal the review-price proxy ({adjudication}) in the default path"
+        );
+        assert!(
+            report["generation"]["priced_cost"].as_f64().is_some()
+                && report["review"]["priced_cost"].as_f64().is_some(),
+            "generation and review priced_cost must remain present"
+        );
+    }
+
+    #[tokio::test]
+    async fn budget_gate_leaves_explicit_adjudication_model_unpriced() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+        #[derive(Clone)]
+        struct DistinctModelResponder {
+            generations: Arc<AtomicUsize>,
+            reviews: Arc<AtomicUsize>,
+            adjudications: Arc<AtomicUsize>,
+        }
+
+        impl Respond for DistinctModelResponder {
+            fn respond(&self, request: &Request) -> ResponseTemplate {
+                let body = String::from_utf8_lossy(&request.body);
+                let content = if body.contains("Adjudicate only the listed claims") {
+                    self.adjudications.fetch_add(1, Ordering::SeqCst);
+                    serde_json::json!({
+                        "schema_version":"scogo.taskgen.prompt-adjudication.v1",
+                        "claims":[{"claim_id":"claim-1","verdict":"unsupported","rationale":"Not supported by supplied evidence.","citations":[]}],
+                        "outcome":"reject","summary":"Claim unsupported."
+                    })
+                    .to_string()
+                } else if body.contains("Review this prompt seed") {
+                    self.reviews.fetch_add(1, Ordering::SeqCst);
+                    serde_json::json!({
+                        "schema_version":"scogo.taskgen.prompt-review.v3",
+                        "outcome":"needs_verification",
+                        "checks":{
+                            "coordinate_realization":{"status":"pass","rationale":"Coordinates are material.","evidence_paths":["$.candidate.prompt"]},
+                            "internal_consistency":{"status":"pass","rationale":"Consistent.","evidence_paths":["$.candidate.prompt"]},
+                            "operational_quality":{"status":"pass","rationale":"Requires investigation.","evidence_paths":["$.candidate.prompt"]},
+                            "safety":{"status":"pass","rationale":"Read-only first.","evidence_paths":["$.candidate.prompt"]},
+                            "technical_authenticity":{"status":"unknown","rationale":"Verify the supplied claim.","evidence_paths":["$.candidate.prompt"]}
+                        },
+                        "hard_failures":[],
+                        "claims_requiring_verification":[{"claim_id":"claim-1","claim":"The supplied route table establishes the next hop.","candidate_evidence_paths":["$.candidate.prompt"],"reference_query":"route table next hop"}],
+                        "summary":"One claim requires verification.","retry_guidance":""
+                    })
+                    .to_string()
+                } else {
+                    let number = self.generations.fetch_add(1, Ordering::SeqCst) + 1;
+                    format!(
+                        "Candidate {number}: the supplied route table and flow telemetry disagree after a maintenance window. Investigate with read-only evidence, separate observations from hypotheses, and require approval before any bounded change."
+                    )
+                };
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices":[{"finish_reason":"stop","message":{"content":content}}],
+                    "usage":{"prompt_tokens":20,"completion_tokens":12}
+                }))
+            }
+        }
+
+        let server = MockServer::start().await;
+        let generations = Arc::new(AtomicUsize::new(0));
+        let reviews = Arc::new(AtomicUsize::new(0));
+        let adjudications = Arc::new(AtomicUsize::new(0));
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(DistinctModelResponder {
+                generations: generations.clone(),
+                reviews: reviews.clone(),
+                adjudications: adjudications.clone(),
+            })
+            .mount(&server)
+            .await;
+
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("budget-adj-distinct");
+        let cli = Cli::try_parse_from([
+            "taskgen",
+            "generate",
+            "--api-base",
+            &format!("{}/v1", server.uri()),
+            "--api-key",
+            "test-key",
+            "--model",
+            "test-model",
+            "--adjudication-model",
+            "adj-test-model",
+            "--taxonomy",
+            "docs/netops-taxonomy.yaml",
+            "--count",
+            "1",
+            "--workers",
+            "1",
+            "--review-workers",
+            "1",
+            "--seed",
+            "99",
+            "--dedup-mode",
+            "lexical",
+            "--max-candidates",
+            "4",
+            "--input-price",
+            "3.0",
+            "--output-price",
+            "15.0",
+            "--review-input-price",
+            "3.0",
+            "--review-output-price",
+            "15.0",
+            "--budget",
+            "0.0016",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+        ])
+        .unwrap();
+        let Command::Generate(args) = cli.command else {
+            panic!("expected generate command");
+        };
+
+        let error = run_generate(*args).await.unwrap_err();
+        assert!(
+            error.to_string().contains("candidate limit exhausted"),
+            "explicit --adjudication-model must keep adjudication unpriced (expect candidate limit, got: {error:#})"
+        );
+        assert!(
+            !error.to_string().contains("budget exhausted"),
+            "explicit --adjudication-model must not trip the budget gate on adjudication: {error:#}"
+        );
+
+        let paths = artifacts::PublishedPaths::for_run_dir(&run_dir);
+        let report: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(paths.run).unwrap()).unwrap();
+        assert_eq!(report["status"], "failed");
+        assert_eq!(report["candidate_attempts"], 4);
+        assert_eq!(report["accepted_new_records"], 0);
+        assert_eq!(adjudications.load(Ordering::SeqCst), 4);
+
+        let adj_in = report["adjudication"]["input_tokens"].as_u64().unwrap() as f64;
+        let adj_out = report["adjudication"]["output_tokens"].as_u64().unwrap() as f64;
+        assert!(
+            adj_in > 0.0 && adj_out > 0.0,
+            "adjudication tokens must be nonzero"
+        );
+
+        let adjudication = (adj_in * 3.0 + adj_out * 15.0) / 1_000_000.0;
+        assert!(
+            adjudication > 0.0,
+            "adjudication spend must exist so a guard regression (pricing distinct-model adjudication) would trip the gate"
+        );
+
+        let priced_cost = report["adjudication"]["priced_cost"].as_f64().unwrap();
+        assert!(
+            priced_cost == 0.0,
+            "explicit --adjudication-model must report priced_cost 0.0 (no price flag), got {priced_cost}"
+        );
     }
 
     #[tokio::test]
