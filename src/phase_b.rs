@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use crate::paths::canonical_target;
+
 pub(crate) fn source_task_id(task: &Value) -> Result<String> {
     if !task.is_object() {
         bail!("source task must be a JSON object");
@@ -569,34 +571,6 @@ fn validate_source_metadata(
         bail!("Phase-B source file must be a safe relative path");
     }
     Ok(())
-}
-
-fn canonical_target(path: &Path) -> Result<PathBuf> {
-    if path.exists() {
-        return std::fs::canonicalize(path)
-            .with_context(|| format!("failed to canonicalize {}", path.display()));
-    }
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(path)
-    };
-    let mut ancestor = absolute.as_path();
-    let mut suffix = Vec::new();
-    while !ancestor.exists() {
-        suffix.push(
-            ancestor
-                .file_name()
-                .context("path has no existing ancestor")?
-                .to_os_string(),
-        );
-        ancestor = ancestor.parent().context("path has no existing ancestor")?;
-    }
-    let mut canonical = std::fs::canonicalize(ancestor)?;
-    for component in suffix.into_iter().rev() {
-        canonical.push(component);
-    }
-    Ok(canonical)
 }
 
 fn validate_path_isolation(

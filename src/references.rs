@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
+use crate::paths::canonical_target;
+
 pub(crate) fn contains_credential(bytes: &[u8]) -> bool {
     let text = String::from_utf8_lossy(bytes).to_ascii_lowercase();
     [("hf_", 30), ("sk-", 20), ("bearer ", 20)]
@@ -26,39 +28,6 @@ pub(crate) fn contains_credential(bytes: &[u8]) -> bool {
                     >= minimum
             })
         })
-}
-
-fn reject_symlinked_ancestors(path: &Path, label: &str) -> Result<()> {
-    let mut current = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(path)
-    };
-    loop {
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                bail!(
-                    "{label} path or ancestor is a symlink: {}",
-                    current.display()
-                )
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(error).with_context(|| {
-                    format!("failed to inspect {label} path: {}", current.display())
-                });
-            }
-        }
-        let Some(parent) = current.parent() else {
-            break;
-        };
-        if parent == current {
-            break;
-        }
-        current = parent.to_path_buf();
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -88,7 +57,6 @@ impl ReferenceStore {
         // Standalone review references are a trusted, stable local input. These
         // checks reject ordinary symlink/link-count hazards; Phase-B callers
         // use ReferenceSnapshot for held descriptor-backed inputs.
-        reject_symlinked_ancestors(root, "review reference")?;
         let root_metadata = fs::symlink_metadata(root).with_context(|| {
             format!(
                 "failed to inspect review reference directory: {}",
@@ -101,8 +69,9 @@ impl ReferenceStore {
                 root.display()
             );
         }
+        let root = canonical_target(root)?;
         let mut paths = Vec::new();
-        collect_supported_files(root, &mut paths)?;
+        collect_supported_files(&root, &mut paths)?;
         paths.sort();
         let mut documents = Vec::with_capacity(paths.len());
         for path in paths {
@@ -130,7 +99,7 @@ impl ReferenceStore {
             let text = String::from_utf8(bytes)
                 .with_context(|| format!("review reference is not UTF-8: {}", path.display()))?;
             let reference_id = path
-                .strip_prefix(root)
+                .strip_prefix(&root)
                 .unwrap_or(&path)
                 .to_string_lossy()
                 .replace('\\', "/");
@@ -330,7 +299,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn reference_store_rejects_symlinked_ancestor() {
+    fn reference_store_allows_symlinked_intermediate_parent() {
         use std::os::unix::fs::symlink;
 
         let temp = tempfile::tempdir().unwrap();
@@ -338,9 +307,10 @@ mod tests {
         let linked_parent = temp.path().join("linked-parent");
         let root = linked_parent.join("references");
         std::fs::create_dir_all(real_parent.join("references")).unwrap();
+        std::fs::write(real_parent.join("references/fortios.md"), "VDOM routing").unwrap();
         symlink(&real_parent, &linked_parent).unwrap();
 
-        let error = ReferenceStore::load(&root).unwrap_err();
-        assert!(error.to_string().contains("ancestor"), "{error:#}");
+        let store = ReferenceStore::load(&root).unwrap();
+        assert_eq!(store.retrieve("VDOM", 1, 100).len(), 1);
     }
 }

@@ -818,6 +818,7 @@ Example accepted task-v2 record:
 - `--review-requests-per-minute` limits the shared review/adjudication request budget and counts retries and structured-output fallback attempts.
 - Semantic embeddings run locally; prompt contents are not sent to an embedding service.
 - `candidates.jsonl`, `reviews.jsonl`, `rejected.jsonl`, and partial accepted rows are visible during a live run. `tasks.jsonl` is the atomic success marker.
+- Standalone run and reference paths resolve legitimate intermediate aliases (such as macOS `/var`) to their physical directory, but reject a symlinked leaf and linked append/reference files. They are trusted local inputs; unlike Phase-B descriptor-held inputs, they do not defend against a hostile same-user replacement after validation.
 - GPT-5, o-series, and Luna models omit unsupported sampling fields. Qwen and DeepSeek-v4 use bounded direct-output controls. The installed binary's `--help` remains authoritative for flags.
 
 ## Troubleshooting
