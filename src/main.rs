@@ -6466,6 +6466,103 @@ mod tests {
     }
 
     #[test]
+    fn adjudication_cost_uses_only_adjudication_token_counters() {
+        let stats = AtomicStats::new();
+        stats.input_tokens.store(1_000_000, Ordering::Relaxed);
+        stats.output_tokens.store(1_000_000, Ordering::Relaxed);
+        stats
+            .review_input_tokens
+            .store(1_000_000, Ordering::Relaxed);
+        stats
+            .review_output_tokens
+            .store(1_000_000, Ordering::Relaxed);
+        stats
+            .adjudication_input_tokens
+            .store(2_000_000, Ordering::Relaxed);
+        stats
+            .adjudication_output_tokens
+            .store(4_000_000, Ordering::Relaxed);
+
+        assert_eq!(adjudication_cost(&stats, Some(1.0), Some(1.0)), 6.0);
+        assert_eq!(generation_cost(&stats, Some(1.0), Some(1.0)), 2.0);
+        assert_eq!(review_cost(&stats, Some(1.0), Some(1.0)), 2.0);
+    }
+
+    fn needs_verification_evaluation(
+        adjudication: review::AdjudicationResult,
+    ) -> CandidateEvaluation {
+        let review = review::ReviewDecision::parse_and_validate(
+            r#"{
+                "schema_version":"scogo.taskgen.prompt-review.v3",
+                "outcome":"needs_verification",
+                "checks":{
+                    "coordinate_realization":{"status":"pass","rationale":"Coordinates are material.","evidence_paths":["$.candidate.prompt"]},
+                    "internal_consistency":{"status":"pass","rationale":"Consistent.","evidence_paths":["$.candidate.prompt"]},
+                    "operational_quality":{"status":"pass","rationale":"Operational.","evidence_paths":["$.candidate.prompt"]},
+                    "safety":{"status":"pass","rationale":"Read-only first.","evidence_paths":["$.candidate.prompt"]},
+                    "technical_authenticity":{"status":"unknown","rationale":"Adjudicate the supplied claim.","evidence_paths":["$.candidate.prompt"]}
+                },
+                "hard_failures":[],
+                "claims_requiring_verification":[{"claim_id":"claim-1","claim":"The supplied route table establishes the next hop.","candidate_evidence_paths":["$.candidate.prompt"],"reference_query":"route table next hop"}],
+                "summary":"One claim requires adjudication.",
+                "retry_guidance":""
+            }"#,
+        )
+        .unwrap();
+        CandidateEvaluation {
+            review: review::ReviewResult {
+                decision: review,
+                normalization: review::ReviewNormalization {
+                    summary_truncated: false,
+                    retry_guidance_truncated: false,
+                    hard_failure_aliases_normalized: 0,
+                    claim_ids_repaired: 0,
+                    response_format: "prompt_only".into(),
+                },
+                model: "stub-reviewer".into(),
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+            adjudication: Some(adjudication),
+            references: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn decision_gate_accepts_and_rejects_needs_verification_by_adjudication_outcome() {
+        let accept = review::AdjudicationDecision::parse_and_validate(include_str!(
+            "../tests/fixtures/canonical/valid-adjudication-v1.json"
+        ))
+        .unwrap();
+        assert!(
+            needs_verification_evaluation(review::AdjudicationResult {
+                decision: accept,
+                model: "stub-adjudicator".into(),
+                input_tokens: 0,
+                output_tokens: 0,
+            })
+            .accepted()
+        );
+
+        let mut reject: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/canonical/valid-adjudication-v1.json"
+        ))
+        .unwrap();
+        reject["outcome"] = serde_json::json!("reject");
+        reject["claims"][0]["verdict"] = serde_json::json!("unsupported");
+        let reject = review::AdjudicationDecision::parse_and_validate(&reject.to_string()).unwrap();
+        assert!(
+            !needs_verification_evaluation(review::AdjudicationResult {
+                decision: reject,
+                model: "stub-adjudicator".into(),
+                input_tokens: 0,
+                output_tokens: 0,
+            })
+            .accepted()
+        );
+    }
+
+    #[test]
     fn pricing_values_must_be_finite_and_nonnegative() {
         assert!(validate_nonnegative_finite(Some(0.0), "--budget").is_ok());
         assert!(validate_nonnegative_finite(Some(f64::NAN), "--budget").is_err());
