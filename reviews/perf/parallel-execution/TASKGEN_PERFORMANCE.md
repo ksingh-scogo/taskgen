@@ -4,6 +4,10 @@ Baseline: `perf/parallel-execution` at `576e743`. Final implementation commit:
 `8401857` (`perf: reuse compiled schema validators`). The earlier flush change
 was explicitly reverted by `1eb5532` after the release-build comparison below.
 
+The refreshed parent `origin/gpt-6-astra` at `d3e9604` was merged without rebase
+as `8d7a76a`; its detail regression tests are included in the final gate below.
+The parent merge did not alter the schema cache or retained benchmark harness.
+
 ## Accepted optimization
 
 `schema::validate_instance` previously parsed and compiled the selected JSON
@@ -66,7 +70,7 @@ cargo test --locked generation_publishes_candidates_immediately_and_overlaps_rev
 
 Final branch results are recorded after the implementation commit:
 
-- `cargo test --locked`: **207 passed, 3 ignored, 0 failed**.
+- `cargo test --locked`: **213 passed, 3 ignored, 0 failed**.
 - `cargo fmt --check`: passed.
 - `cargo clippy --locked --all-targets -- -D warnings`: passed.
 - `git diff --check`: passed.
