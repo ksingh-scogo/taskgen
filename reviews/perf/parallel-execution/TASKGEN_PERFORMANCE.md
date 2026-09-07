@@ -5,8 +5,10 @@ Baseline: `perf/parallel-execution` at `576e743`. Final implementation commit:
 was explicitly reverted by `1eb5532` after the release-build comparison below.
 
 The refreshed parent `origin/gpt-6-astra` at `d3e9604` was merged without rebase
-as `8d7a76a`; its detail regression tests are included in the final gate below.
-The parent merge did not alter the schema cache or retained benchmark harness.
+as `8d7a76a`. Current `origin/master` at release commit `e2a038b` (including
+the `c108176` trusted-local-path canonicalization fix) was then merged without
+rebase as `612d6d2`. The merges preserve that path hardening, the schema cache,
+and the retained benchmark harness; their regression tests are included below.
 
 ## Accepted optimization
 
@@ -27,8 +29,8 @@ Workload: five alternating, warmed pairs of 20,000 valid Task v2 validations.
 
 | Path | Samples (ms) | Median | Result |
 |---|---:|---:|---|
-| Original parse/compile/validate | 1472, 1470, 1468, 1467, 1467 | 1468 | — |
-| Cached validator | 11, 11, 11, 11, 11 | 11 | 99.25% lower median |
+| Original parse/compile/validate | 1762, 1774, 1767, 1764, 1768 | 1767 | — |
+| Cached validator | 20, 20, 20, 20, 20 | 20 | 98.87% lower median |
 
 This is a CPU-only operation benchmark that measures the repeated work removed
 from every generation/review/ingestion validation; it does not claim provider
@@ -68,9 +70,13 @@ cargo test --locked generation_publishes_candidates_immediately_and_overlaps_rev
 
 ## Validation
 
-Final branch results are recorded after the implementation commit:
+The final `perf/parallel-execution` branch head records results from the
+unchanged code at merge commit `612d6d2`:
 
 - `cargo test --locked`: **213 passed, 3 ignored, 0 failed**.
+- `cargo test --release --locked schema::tests::schema_validation_benchmark -- --ignored --nocapture`:
+  **1 passed**; measurements recorded above.
 - `cargo fmt --check`: passed.
-- `cargo clippy --locked --all-targets -- -D warnings`: passed.
+- `cargo clippy --locked --all-targets --all-features -- -D warnings`: passed.
+- `cargo build --release --locked`: passed.
 - `git diff --check`: passed.
