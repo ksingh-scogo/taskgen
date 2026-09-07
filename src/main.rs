@@ -25,6 +25,7 @@ pub mod artifacts;
 pub mod atif;
 pub mod calibration;
 pub mod dedup;
+mod paths;
 mod phase_b;
 pub mod provider;
 pub mod references;
