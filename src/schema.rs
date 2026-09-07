@@ -113,4 +113,23 @@ mod tests {
         );
         assert!(validate_instance(SchemaKind::Task, &task).is_err());
     }
+
+    #[test]
+    fn adjudication_reject_with_all_supported_cited_claims_is_rejected() {
+        let mut value = fixture(include_str!(
+            "../tests/fixtures/canonical/valid-adjudication-v1.json"
+        ));
+        value["outcome"] = serde_json::json!("reject");
+        assert!(validate_instance(SchemaKind::PromptAdjudication, &value).is_err());
+    }
+
+    #[test]
+    fn adjudication_reject_with_mixed_verdicts_remains_valid() {
+        let mut value = fixture(include_str!(
+            "../tests/fixtures/canonical/valid-adjudication-v1.json"
+        ));
+        value["outcome"] = serde_json::json!("reject");
+        value["claims"][0]["verdict"] = serde_json::json!("unsupported");
+        assert!(validate_instance(SchemaKind::PromptAdjudication, &value).is_ok());
+    }
 }

@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
+use crate::paths::canonical_target;
+
 const ARTIFACT_FLUSH_INTERVAL: usize = 256;
 
 #[derive(Debug, Clone)]
@@ -124,22 +126,71 @@ impl RunArtifacts {
         append_from: Option<&Path>,
         initial_report: &T,
     ) -> Result<Self> {
+        // Generate/review run paths are trusted local inputs. Reject ordinary
+        // symlink and hard-link hazards before opening them; bounded Phase-B
+        // inputs use descriptor-backed HeldFile/HeldDirectory checks.
+        if fs::symlink_metadata(run_dir).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+            bail!("run directory must not be a symlink: {}", run_dir.display());
+        }
+        let run_dir = canonical_target(run_dir)?;
+        let append_from = append_from
+            .map(|source| {
+                let metadata = fs::symlink_metadata(source).with_context(|| {
+                    format!("failed to inspect append source: {}", source.display())
+                })?;
+                if metadata.file_type().is_symlink() {
+                    bail!("append source must not be a symlink: {}", source.display());
+                }
+                if !metadata.is_file() {
+                    bail!("append source must be a regular file: {}", source.display());
+                }
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    if metadata.nlink() != 1 {
+                        bail!(
+                            "append source must be a single-link regular file: {}",
+                            source.display()
+                        );
+                    }
+                }
+                canonical_target(source)
+            })
+            .transpose()?;
         if run_dir.exists() {
-            let mut entries = fs::read_dir(run_dir).with_context(|| {
+            let metadata = fs::symlink_metadata(&run_dir).with_context(|| {
+                format!("failed to inspect run directory: {}", run_dir.display())
+            })?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                bail!(
+                    "run directory must be a real directory: {}",
+                    run_dir.display()
+                );
+            }
+            let mut entries = fs::read_dir(&run_dir).with_context(|| {
                 format!("failed to inspect run directory: {}", run_dir.display())
             })?;
             if entries.next().transpose()?.is_some() {
                 bail!("run directory is not empty: {}", run_dir.display());
             }
         } else {
-            fs::create_dir_all(run_dir).with_context(|| {
+            fs::create_dir_all(&run_dir).with_context(|| {
                 format!("failed to create run directory: {}", run_dir.display())
             })?;
+            let metadata = fs::symlink_metadata(&run_dir).with_context(|| {
+                format!("failed to inspect run directory: {}", run_dir.display())
+            })?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                bail!(
+                    "run directory must be a real directory: {}",
+                    run_dir.display()
+                );
+            }
         }
 
-        let published = PublishedPaths::for_run_dir(run_dir);
+        let published = PublishedPaths::for_run_dir(&run_dir);
         write_json_atomic(&published.run, initial_report)?;
-        if let Some(source) = append_from {
+        if let Some(source) = append_from.as_deref() {
             fs::copy(source, &published.partial).with_context(|| {
                 format!(
                     "failed to stage existing append dataset: {}",
@@ -538,7 +589,7 @@ mod tests {
         let paths = artifacts
             .publish(&json!({"status":"success","accepted":1}))
             .unwrap();
-        assert_eq!(paths.run_dir, run_dir);
+        assert_eq!(paths.run_dir, fs::canonicalize(&run_dir).unwrap());
         assert_eq!(
             fs::read_to_string(&paths.output).unwrap().lines().count(),
             1
@@ -555,7 +606,7 @@ mod tests {
             paths.rejected,
             paths.run,
         ] {
-            assert_eq!(path.parent(), Some(run_dir.as_path()));
+            assert_eq!(path.parent(), Some(paths.run_dir.as_path()));
         }
     }
 
@@ -622,5 +673,82 @@ mod tests {
             fs::read_to_string(run_dir.join("keep.txt")).unwrap(),
             "user data"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_run_directory_is_never_followed() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target");
+        let run_dir = temp.path().join("run");
+        fs::create_dir(&target).unwrap();
+        symlink(&target, &run_dir).unwrap();
+
+        let error = RunArtifacts::create(&run_dir, None, &json!({"status":"running"}))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("symlink") || error.contains("real directory"),
+            "{error}"
+        );
+        assert!(fs::read_dir(&target).unwrap().next().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn append_source_symlink_is_rejected() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("existing.jsonl");
+        let source = temp.path().join("source.jsonl");
+        fs::write(&target, "old\n").unwrap();
+        symlink(&target, &source).unwrap();
+
+        let error = RunArtifacts::create(
+            &temp.path().join("run"),
+            Some(&source),
+            &json!({"status":"running"}),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("symlink"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn append_source_hardlink_is_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("existing.jsonl");
+        let source = temp.path().join("source.jsonl");
+        fs::write(&target, "old\n").unwrap();
+        fs::hard_link(&target, &source).unwrap();
+
+        let error = RunArtifacts::create(
+            &temp.path().join("run"),
+            Some(&source),
+            &json!({"status":"running"}),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("single-link"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_directory_allows_symlinked_intermediate_parent() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let real_parent = temp.path().join("real-parent");
+        let linked_parent = temp.path().join("linked-parent");
+        let run_dir = linked_parent.join("run");
+        std::fs::create_dir(&real_parent).unwrap();
+        symlink(&real_parent, &linked_parent).unwrap();
+
+        RunArtifacts::create(&run_dir, None, &json!({"status":"running"})).unwrap();
+        assert!(real_parent.join("run/run.json").is_file());
     }
 }
