@@ -1,5 +1,6 @@
 use anyhow::{Result, anyhow};
 use serde_json::Value;
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy)]
 pub enum SchemaKind {
@@ -30,9 +31,32 @@ pub fn schema_value(kind: SchemaKind) -> Result<Value> {
     serde_json::from_str(schema_source(kind)).map_err(Into::into)
 }
 
+fn compiled_validator(kind: SchemaKind) -> Result<&'static jsonschema::Validator> {
+    static TASK: OnceLock<Result<jsonschema::Validator, String>> = OnceLock::new();
+    static REVIEW: OnceLock<Result<jsonschema::Validator, String>> = OnceLock::new();
+    static ADJUDICATION: OnceLock<Result<jsonschema::Validator, String>> = OnceLock::new();
+    static AUDIT: OnceLock<Result<jsonschema::Validator, String>> = OnceLock::new();
+    static SFT: OnceLock<Result<jsonschema::Validator, String>> = OnceLock::new();
+
+    let cell = match kind {
+        SchemaKind::Task => &TASK,
+        SchemaKind::PromptReviewV3 => &REVIEW,
+        SchemaKind::PromptAdjudication => &ADJUDICATION,
+        SchemaKind::AuditTrajectory => &AUDIT,
+        SchemaKind::SftTrajectory => &SFT,
+    };
+    let result = cell.get_or_init(|| {
+        let schema = schema_value(kind).map_err(|error| error.to_string())?;
+        jsonschema::draft202012::new(&schema).map_err(|error| error.to_string())
+    });
+    result
+        .as_ref()
+        .map_err(|error| anyhow!("failed to compile {:?} schema: {error}", kind))
+}
+
 pub fn validate_instance(kind: SchemaKind, instance: &Value) -> Result<()> {
-    let schema = schema_value(kind)?;
-    jsonschema::draft202012::validate(&schema, instance)
+    compiled_validator(kind)?
+        .validate(instance)
         .map_err(|error| anyhow!("{}: {}", error.instance_path(), error))
 }
 
@@ -131,5 +155,21 @@ mod tests {
         value["outcome"] = serde_json::json!("reject");
         value["claims"][0]["verdict"] = serde_json::json!("unsupported");
         assert!(validate_instance(SchemaKind::PromptAdjudication, &value).is_ok());
+    }
+
+    #[test]
+    #[ignore = "performance harness; run explicitly in release mode"]
+    fn schema_validation_benchmark() {
+        use std::time::Instant;
+
+        let value = fixture(include_str!("../tests/fixtures/canonical/valid-task.json"));
+        let started = Instant::now();
+        for _ in 0..20_000 {
+            validate_instance(SchemaKind::Task, &value).unwrap();
+        }
+        eprintln!(
+            "schema_validation_benchmark elapsed_ms={}",
+            started.elapsed().as_millis()
+        );
     }
 }
