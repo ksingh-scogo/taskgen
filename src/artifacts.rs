@@ -307,18 +307,10 @@ impl RunArtifacts {
     /// provides the durability barrier before publication. Live progress needs
     /// visibility without turning every model response into four fsyncs.
     pub fn flush_visible(&mut self) -> Result<()> {
-        if !self.accepted.buffer().is_empty() {
-            self.accepted.flush()?;
-        }
-        if !self.candidates.buffer().is_empty() {
-            self.candidates.flush()?;
-        }
-        if !self.reviews.buffer().is_empty() {
-            self.reviews.flush()?;
-        }
-        if !self.rejected.buffer().is_empty() {
-            self.rejected.flush()?;
-        }
+        self.accepted.flush()?;
+        self.candidates.flush()?;
+        self.reviews.flush()?;
+        self.rejected.flush()?;
         self.accepted_since_flush = 0;
         self.candidates_since_flush = 0;
         self.reviews_since_flush = 0;
