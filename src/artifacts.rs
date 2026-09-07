@@ -788,4 +788,31 @@ mod tests {
         assert!(error.contains("ancestor"), "{error}");
         assert!(std::fs::read_dir(&real_parent).unwrap().next().is_none());
     }
+
+    #[test]
+    #[ignore = "performance harness; run explicitly in release mode"]
+    fn artifact_visibility_benchmark() {
+        use std::time::Instant;
+
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("benchmark");
+        let mut artifacts =
+            RunArtifacts::create(&run_dir, None, &json!({"status":"running"})).unwrap();
+        let started = Instant::now();
+        for index in 0..10_000 {
+            artifacts
+                .write_candidate(&json!({"index": index, "prompt": "benchmark"}))
+                .unwrap();
+            artifacts.write_review(&json!({"index": index})).unwrap();
+            artifacts.write_rejection(&json!({"index": index})).unwrap();
+            artifacts
+                .write_accepted_line(&format!("{{\"index\":{index}}}"))
+                .unwrap();
+            artifacts.flush_visible().unwrap();
+        }
+        eprintln!(
+            "artifact_visibility_benchmark elapsed_ms={}",
+            started.elapsed().as_millis()
+        );
+    }
 }
