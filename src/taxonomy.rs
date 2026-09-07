@@ -2055,9 +2055,12 @@ categories:
         assert!(error.to_string().contains("platforms are not allowed"));
     }
 
-    #[test]
-    fn coordinate_validator_rejects_platform_neutral_cli_ssh_session() {
-        let catalog = TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml")).unwrap();
+    fn netops_vlans_coordinates(
+        catalog: &TaxonomyCatalog,
+        platform_scope: &str,
+        platforms: Vec<String>,
+        presentation: &str,
+    ) -> TaskCoordinates {
         let eligibility = catalog
             .resolved_subdomain_eligibility("enterprise_netops", "layer2_switching", "vlans")
             .unwrap();
@@ -2071,19 +2074,26 @@ categories:
                 .presentations
                 .contains(&"cli_ssh_session".into())
         );
-        let coordinates = TaskCoordinates {
+        TaskCoordinates {
             taxonomy_id: catalog.id().to_string(),
             category_id: "enterprise_netops".into(),
             task_family: eligibility.task_families[0].clone(),
             environment: eligibility.environments[0].clone(),
-            platform_scope: "platform_neutral".into(),
-            platforms: Vec::new(),
+            platform_scope: platform_scope.into(),
+            platforms,
             incident_mechanism: eligibility.incident_mechanisms[0].clone(),
             evidence_condition: eligibility.evidence_conditions[0].clone(),
             evidence_bundle: eligibility.evidence_bundles[0].clone(),
             action_risk: eligibility.action_risks[0].clone(),
-            presentation: "cli_ssh_session".into(),
-        };
+            presentation: presentation.into(),
+        }
+    }
+
+    #[test]
+    fn coordinate_validator_rejects_platform_neutral_cli_ssh_session() {
+        let catalog = TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml")).unwrap();
+        let coordinates =
+            netops_vlans_coordinates(&catalog, "platform_neutral", Vec::new(), "cli_ssh_session");
         assert!(
             catalog
                 .validate_task_coordinates(
@@ -2094,5 +2104,50 @@ categories:
                 )
                 .is_err()
         );
+    }
+
+    #[test]
+    fn coordinate_validator_accepts_platform_neutral_non_cli_presentation() {
+        let catalog = TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml")).unwrap();
+        let coordinates =
+            netops_vlans_coordinates(&catalog, "platform_neutral", Vec::new(), "incident_ticket");
+        catalog
+            .validate_task_coordinates(
+                "enterprise_netops",
+                "layer2_switching",
+                "vlans",
+                &coordinates,
+            )
+            .expect("platform_neutral incident_ticket coordinates must remain valid");
+    }
+
+    #[test]
+    fn coordinate_validator_accepts_cli_ssh_session_for_platform_scoped_task() {
+        let catalog = TaxonomyCatalog::from_path(Path::new("docs/netops-taxonomy.yaml")).unwrap();
+        let eligibility = catalog
+            .resolved_subdomain_eligibility("enterprise_netops", "layer2_switching", "vlans")
+            .unwrap();
+        let (scope, platform_count) = if eligibility
+            .platform_scopes
+            .contains(&"single_platform".to_string())
+        {
+            ("single_platform", 1)
+        } else {
+            ("multi_platform", 2)
+        };
+        let coordinates = netops_vlans_coordinates(
+            &catalog,
+            scope,
+            eligibility.platforms[..platform_count].to_vec(),
+            "cli_ssh_session",
+        );
+        catalog
+            .validate_task_coordinates(
+                "enterprise_netops",
+                "layer2_switching",
+                "vlans",
+                &coordinates,
+            )
+            .expect("cli_ssh_session must remain valid for a platform-scoped task");
     }
 }
