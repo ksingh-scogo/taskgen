@@ -68,6 +68,12 @@ mod tests {
         serde_json::from_str(source).unwrap()
     }
 
+    fn validate_uncached(kind: SchemaKind, instance: &Value) -> Result<()> {
+        let schema = schema_value(kind)?;
+        jsonschema::draft202012::validate(&schema, instance)
+            .map_err(|error| anyhow!("{}: {}", error.instance_path(), error))
+    }
+
     #[test]
     fn schemas_are_valid_draft_2020_12_and_accept_fixtures() {
         let cases = [
@@ -97,6 +103,52 @@ mod tests {
             let schema = schema_value(kind).unwrap();
             jsonschema::draft202012::meta::validate(&schema).unwrap();
             validate_instance(kind, &fixture(source)).unwrap();
+        }
+    }
+
+    #[test]
+    fn cached_validation_matches_original_for_all_schema_kinds() {
+        let cases = [
+            (
+                SchemaKind::Task,
+                include_str!("../tests/fixtures/canonical/valid-task.json"),
+            ),
+            (
+                SchemaKind::PromptReviewV3,
+                include_str!("../tests/fixtures/canonical/valid-review-v3.json"),
+            ),
+            (
+                SchemaKind::PromptAdjudication,
+                include_str!("../tests/fixtures/canonical/valid-adjudication-v1.json"),
+            ),
+            (
+                SchemaKind::AuditTrajectory,
+                include_str!("../tests/fixtures/canonical/valid-audit.json"),
+            ),
+            (
+                SchemaKind::SftTrajectory,
+                include_str!("../tests/fixtures/canonical/valid-sft.json"),
+            ),
+        ];
+
+        for (kind, source) in cases {
+            let valid = fixture(source);
+            let uncached = validate_uncached(kind, &valid)
+                .err()
+                .map(|error| error.to_string());
+            let cached = validate_instance(kind, &valid)
+                .err()
+                .map(|error| error.to_string());
+            assert_eq!(uncached, cached, "valid result changed for {kind:?}");
+
+            let invalid = Value::Null;
+            let uncached = validate_uncached(kind, &invalid)
+                .err()
+                .map(|error| error.to_string());
+            let cached = validate_instance(kind, &invalid)
+                .err()
+                .map(|error| error.to_string());
+            assert_eq!(uncached, cached, "invalid result changed for {kind:?}");
         }
     }
 
@@ -163,13 +215,43 @@ mod tests {
         use std::time::Instant;
 
         let value = fixture(include_str!("../tests/fixtures/canonical/valid-task.json"));
-        let started = Instant::now();
-        for _ in 0..20_000 {
-            validate_instance(SchemaKind::Task, &value).unwrap();
-        }
-        eprintln!(
-            "schema_validation_benchmark elapsed_ms={}",
+        const ITERATIONS: usize = 20_000;
+
+        let measure = |cached: bool| {
+            let started = Instant::now();
+            for _ in 0..ITERATIONS {
+                let result = if cached {
+                    validate_instance(SchemaKind::Task, std::hint::black_box(&value))
+                } else {
+                    validate_uncached(SchemaKind::Task, std::hint::black_box(&value))
+                };
+                assert!(result.is_ok());
+                std::hint::black_box(result.is_ok());
+            }
             started.elapsed().as_millis()
-        );
+        };
+
+        // Warm both paths before alternating their order to reduce one-time
+        // allocator and instruction-cache effects in the paired samples.
+        measure(false);
+        measure(true);
+        for sample in 0..5 {
+            let uncached_first = sample % 2 == 0;
+            let first = measure(!uncached_first);
+            let second = measure(uncached_first);
+            let (uncached_ms, cached_ms) = if uncached_first {
+                (first, second)
+            } else {
+                (second, first)
+            };
+            eprintln!(
+                "schema_validation_benchmark sample={sample} order={} uncached_ms={uncached_ms} cached_ms={cached_ms}",
+                if uncached_first {
+                    "uncached-first"
+                } else {
+                    "cached-first"
+                }
+            );
+        }
     }
 }
