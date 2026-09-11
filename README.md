@@ -15,9 +15,13 @@ existing accepted review records and verified original publication evidence.
 It preserves original candidate/review identities and interrupted-run provenance;
 it does not call a model or manufacture review decisions. The command uses
 Python 3.11+ with `jsonschema`. See the Data Factory portal's
-[NetOps batch runbook](https://github.com/scogo-ai/scogo-data-factory/blob/gpt-6-astra/docs/fine-tuning-platform/netops-ten-batch-plan.md)
+[NetOps batch runbook](https://github.com/scogo-ai/scogo-data-factory/blob/feat/netops-unattended-deepseek/docs/fine-tuning-platform/netops-ten-batch-plan.md)
 for the local invocation and source contract. This helper requires the original
 run sidecars, not only a prompt-only HF dataset.
+
+`scripts/split_sealed_batches.py` derives disjoint source shards of at most 100
+rows from those seals, preserving original reviews and parent-manifest hashes.
+Optional small pilot shards are part of the same complete source partition.
 
 ## Start here: create your first dataset
 
