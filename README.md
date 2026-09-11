@@ -8,6 +8,17 @@ It owns the prompt text, taxonomy coordinates, deterministic validation, local d
 
 For the complete Taskgen → Data Factory → Trainer workflow, see the [Scogo fine-tuning platform portal](https://github.com/scogo-ai/scogo-data-factory/tree/gpt-6-astra/docs/fine-tuning-platform).
 
+## Repackage already-reviewed prompt batches
+
+`scripts/seal_reviewed_batches.py` can create new sealed batches offline from
+existing accepted review records and verified original publication evidence.
+It preserves original candidate/review identities and interrupted-run provenance;
+it does not call a model or manufacture review decisions. The command uses
+Python 3.11+ with `jsonschema`. See the Data Factory portal's
+[NetOps batch runbook](https://github.com/scogo-ai/scogo-data-factory/blob/gpt-6-astra/docs/fine-tuning-platform/netops-ten-batch-plan.md)
+for the local invocation and source contract. This helper requires the original
+run sidecars, not only a prompt-only HF dataset.
+
 ## Start here: create your first dataset
 
 Follow these steps in order.
